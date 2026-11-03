@@ -40,8 +40,11 @@
 
 ### 이벤트 처리 (outbox)
 **FR-030 전달** — While outbox 에 미처리 이벤트가 있으면, the system shall 폴링 또는 NOTIFY 로 이를 가져와 소비자에게 전달한다.
-**FR-031 멱등 소비** — When 같은 이벤트가 재전달되면, the system shall 한 번만 효과를 낸다(처리 기록으로 중복 제거).
+**FR-031 수신함(inbox)과 멱등 소비** — When 이벤트가 전달되면, the system shall 수신 모듈의 inbox 에 먼저 저장하고(같은 메시지 id 의 중복은 무시), 저장된 메시지를 선점해 처리하며, 같은 이벤트가 재전달되어도 효과는 한 번만 낸다.
 **FR-032 재시도** — If 소비가 실패하면, the system shall 상한까지 재시도하고 초과분은 격리(dead-letter)하여 시각화·지표에 노출한다.
+**FR-033 상태 선점** — When 여러 처리 주체가 같은 outbox·inbox 항목을 동시에 처리하려 하면, the system shall 조건부 갱신으로 한 주체만 `processing` 상태로 선점하게 하고, 임대 시간이 지난 선점은 회수하며, 회수된 뒤 늦게 도착한 이전 주체의 완료 갱신은 거절한다.
+**FR-034 낙관적 버전** — When 같은 글을 동시에 수정·숨김하면, the system shall `version` 이 맞는 한 건만 반영하고 나머지는 409 와 최신 상태를 반환한다.
+**FR-035 읽기/쓰기 분리** — The system shall 조회를 읽기 모델에서만 수행하고, 읽기 모델은 이벤트 처리로만 갱신하며, 오래된 순번의 이벤트는 무시한다.
 
 ### 이벤트 흐름 시각화 (라이브 데모)
 **FR-040 내 동작 상세** — When 방문자가 쓰기 동작을 하면, the system shall 그 이벤트가 작성→outbox→전달→소비를 지나는 단계를 해당 방문자 화면에 실시간으로 상세히 표시한다.
@@ -99,8 +102,8 @@ Then 둘 다 저장되지 않는다.
 
 ### AC-003: 멱등 소비
 Given 같은 이벤트를 두 번 전달하도록 만든다
-When 소비자가 처리한다
-Then 집계는 한 번만 증가한다.
+When 수신과 처리가 일어난다
+Then inbox 에는 한 행만 있고 읽기 모델의 집계는 한 번만 증가한다.
 
 ### AC-004: 익명 글은 수정할 수 없다
 Given 익명 세션이 쓴 글
@@ -157,6 +160,21 @@ Given 같은 Docker Compose 한 벌
 When 집 PC 와 Oracle 호스트에서 각각 올린다
 Then 두 곳 모두 AC-001, AC-008, AC-010 을 통과한다.
 
+### AC-015: 동시 선점
+Given 같은 inbox 항목을 N 개의 처리 주체가 동시에 선점하려 한다
+When 동시에 시도한다
+Then 정확히 한 주체만 처리하고 효과는 한 번이다. 임대 만료 후 늦게 완료를 시도한 이전 주체의 갱신은 거절된다.
+
+### AC-016: 동시 수정
+Given 같은 글에 대한 두 수정 요청이 같은 `version` 으로 동시에 도착한다
+When 처리된다
+Then 하나는 성공하고 하나는 409 와 최신 상태를 받는다.
+
+### AC-017: 읽기 모델 재구성과 순서
+Given 읽기 모델을 비우고, 이벤트를 순서를 뒤섞어 중복 전달한다
+When 처리가 끝난다
+Then 읽기 모델은 정본에서 계산한 값과 일치한다.
+
 ## Error Handling
 
 | Error Condition | HTTP Code | User Message (ko / en) |
@@ -181,7 +199,7 @@ Then 두 곳 모두 AC-001, AC-008, AC-010 을 통과한다.
 - [ ] 개인 도메인 DNS 를 Cloudflare 로 두고 Tunnel 연결
 
 ### 1. Backend 코어
-- [ ] DB 스키마·마이그레이션(글·반응·세션·outbox·처리 기록·신고)
+- [ ] DB 스키마·마이그레이션: 쓰기 모델(글·반응·신고·세션), 읽기 모델(`*_read`), outbox·inbox, 선점 공통 컬럼, `version`
 - [ ] 익명 세션 · GitHub OAuth · 관리자 허용목록
 - [ ] 방명록 API(작성·목록·수정·삭제·신고·숨김), 속도·길이 제한
 - [ ] 반응 API + 집계
@@ -274,6 +292,10 @@ Then 두 곳 모두 AC-001, AC-008, AC-010 을 통과한다.
 | R9-Q1 | 이벤트 전달 (Kafka vs outbox) | 초기 Postgres, Phase 2 에서 Kafka | **“Kafka 의 메모리 부족을 Redis Streams 로 푸는 방안을 검토”** → ADR-006 Proposed | Y |
 | R9-Q2 | 실행 환경 (Compose vs K8s) | 라이브 Compose + 로컬 k3d | 동일 | N |
 | R9-Q3 | 방명록 데모 위치 | Phase 0 과 1 사이 첫 마일스톤 | 동일 | N |
+| (지시) | 기본 아키텍처 | — | **CQRS, domain:service:usecase, outbox+inbox 필수, 동시성은 update 전 pending(선점) 처리** — 사용자가 직접 지시 | Y — ADR-018~021 신설, ADR-005·017 개정, DB·아키텍처 문서 개정 |
+| R10-Q1 | CQRS 수준 | 논리 분리 + 프로젝션 테이블 | 동일 | N |
+| R10-Q2 | 계층 의존 방향 | usecase → service → domain | 동일 | N |
+| R10-Q3 | 동시성 방식 | 상태 선점(CAS) + 엔티티별 낙관적 버전 | 동일 | N |
 
 ## Open Questions
 - [ ] (명세 밖) 개인 도메인 이름과 현재 DNS 위치 — A-006·A-007 확인용, 구현 시작 시 필요

@@ -3,10 +3,17 @@
 이 프로젝트의 결정 기록. **결정당 파일 1개**, 번호는 재사용하지 않는다. 뒤집히면 지우지 않고 `Superseded by ADR-xxx` 로 표시한다.
 입력은 두 가지였다: 초기 로드맵(원 계획안)과 인터뷰로 만든 첫 마일스톤 명세(`specs/portfolio-site.spec.md`). 원 계획안은 요지를 README 로드맵과 이 ADR 들에 흡수한 뒤 폐기했다.
 
+구조 문서: [아키텍처](../domains/architecture.md) · [데이터베이스 구조](../domains/database-schema.md)
+
 ## 인덱스 (최신이 위로)
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-03 | [ADR-021](ADR-021-concurrency-control.md) | 동시성: 처리 전 `processing` 선점(CAS) + 임대 + 토큰 + 낙관적 버전 | Accepted |
+| 2026-11-03 | [ADR-020](ADR-020-inbox.md) | Inbox: 수신 메시지를 먼저 저장하고 선점해서 한 번만 처리 | Accepted |
+| 2026-11-03 | [ADR-019](ADR-019-layered-architecture.md) | 모듈 내부 구조: domain · service · usecase (usecase → service → domain) | Accepted |
+| 2026-11-03 | [ADR-018](ADR-018-cqrs.md) | CQRS: 명령/조회 모델 분리, 읽기 모델은 프로젝션 테이블 | Accepted |
+| 2026-11-03 | [ADR-017](ADR-017-database-conventions.md) | DB 규약: 모듈별 쓰기/읽기 스키마, 스키마 간 FK 없음, inbox·선점 컬럼·version | Accepted |
 | 2026-11-03 | [ADR-016](ADR-016-payments-and-extensions.md) | 결제·정산(모의)과 Phase 6 확장은 순서대로, 독립 DoD 로 | Proposed |
 | 2026-11-03 | [ADR-015](ADR-015-positioning-and-scope-rules.md) | 타깃 서사, 모의 면책, 외부 참고 금지·비공개 범위 | Accepted |
 | 2026-11-03 | [ADR-014](ADR-014-deployment-and-zero-downtime.md) | CD, probe, 롤링 배포 중 소켓 재접속·세션 복구, 에셋 캐시 | Accepted |
@@ -18,7 +25,7 @@
 | 2026-11-03 | [ADR-008](ADR-008-visitor-identity-and-abuse.md) | 익명 세션 + GitHub 로그인, 사후 신고·숨김, 7일 보관 | Accepted |
 | 2026-11-03 | [ADR-007](ADR-007-observability.md) | 관측은 Prometheus + Grafana 읽기 전용 임베드 | Accepted |
 | 2026-11-03 | [ADR-006](ADR-006-event-delivery-layer.md) | 이벤트 전달 계층: Postgres 폴링에서 Redis Streams 또는 Kafka 로 | **Proposed** |
-| 2026-11-03 | [ADR-005](ADR-005-outbox-idempotent-consumer.md) | 쓰기와 이벤트는 한 트랜잭션(outbox), 소비는 멱등 | Accepted |
+| 2026-11-03 | [ADR-005](ADR-005-outbox-idempotent-consumer.md) | Outbox: 쓰기와 이벤트는 한 트랜잭션, 수신 쪽은 inbox(개정) | Accepted |
 | 2026-11-03 | [ADR-004](ADR-004-tech-stack.md) | Bun+Elysia / Next.js+R3F / WebSocket 단일 / 공유 타입 | Accepted |
 | 2026-11-03 | [ADR-003](ADR-003-free-hosting.md) | 완전 무료 호스팅, 집 PC 와 Oracle 양쪽 지원, 정적 폴백 | Accepted |
 | 2026-11-03 | [ADR-002](ADR-002-runtime-compose-live-k3d-verified.md) | 라이브는 Compose, K8s 는 로컬 k3d 검증본, Gateway API | Accepted |

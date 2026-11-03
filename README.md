@@ -22,7 +22,9 @@
 
 | 역량 | 보여주는 방식 | 근거 |
 |---|---|---|
-| 이벤트 기반 정합성 | outbox, 멱등 소비, 재시도·dead-letter 를 실시간으로 시각화 | [ADR-005](docs/adr/ADR-005-outbox-idempotent-consumer.md) |
+| 이벤트 기반 정합성 | outbox + inbox, 멱등 소비, 재시도·dead-letter 를 실시간으로 시각화 | [ADR-005](docs/adr/ADR-005-outbox-idempotent-consumer.md), [ADR-020](docs/adr/ADR-020-inbox.md) |
+| 아키텍처 | CQRS, domain · service · usecase 계층, 모듈러 모놀리스 | [ADR-018](docs/adr/ADR-018-cqrs.md), [ADR-019](docs/adr/ADR-019-layered-architecture.md) |
+| 동시성 제어 | 처리 전 상태 선점(CAS) + 임대 + 낙관적 버전 | [ADR-021](docs/adr/ADR-021-concurrency-control.md) |
 | 실시간 통신 | WebSocket, 재접속·세션 복구, 서버 권위 상태 | [ADR-004](docs/adr/ADR-004-tech-stack.md), [ADR-014](docs/adr/ADR-014-deployment-and-zero-downtime.md) |
 | 관측성 | Prometheus + Grafana 를 공개 임베드 | [ADR-007](docs/adr/ADR-007-observability.md) |
 | 인증·악용 방어 | 익명 세션 + GitHub 로그인, 속도 제한, 사후 신고·숨김 | [ADR-008](docs/adr/ADR-008-visitor-identity-and-abuse.md) |
@@ -53,5 +55,5 @@ Bun + ElysiaJS (TypeScript) · Postgres · Next.js (App Router) + three.js (Reac
 |---|---|
 | `docs/adr/` | 결정 기록 (인덱스: `docs/adr/README.md`) |
 | `specs/portfolio-site.spec.md` | M1 요구사항(EARS)·인수 기준·가정·결정 로그 |
-| `docs/domains/` | 도메인 문서 정본 |
+| `docs/domains/` | 도메인 문서 정본: [아키텍처](docs/domains/architecture.md), [데이터베이스 구조](docs/domains/database-schema.md) |
 | `.claude/`(일부), `CLAUDE.md` | 개발용 에이전트 시스템의 진입점·설정·검증 데이터만 추적한다. 에이전트·스킬 등 엔진 본체와 `.codex/`, `.agents/` 는 추적하지 않으며(`.gitignore`) 클론 후 다른 프로젝트에서 흡수한다 |

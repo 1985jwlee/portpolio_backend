@@ -16,6 +16,7 @@
 ### Compose 구성(라이브)
 | 서비스 | M1 | 비고 |
 |---|---|---|
+| `proxy` | O | **경로 라우팅(`/`, `/api`, `/ws`, `/grafana`), TLS 종료(Oracle 경로), 원 접속 주소 정규화.** 제품 선정은 구현 시(미결). 집 PC 경로에서는 `cloudflared` 가 이 컨테이너를 가리킨다. K8s 검증본에서는 Gateway API 가 이 역할을 대신한다 |
 | `web` | O | Next.js |
 | `api`, `ws-gateway`, `worker` | O | ADR-001, 같은 이미지 |
 | `postgres` | O | 볼륨 필수 |
