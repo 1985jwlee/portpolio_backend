@@ -1,0 +1,14 @@
+{
+  "note": "이 저장소의 검증 진입점. 러너(.claude/scripts/verify-run.ts)에는 저장소 지식이 0이고 전부 여기 있다. 규격은 agent-rules/agent-system/04-errand.md 4-5-1. 백엔드 빌드·테스트가 정해지면 errand-scout 으로 채운다.",
+  "generatedBy": "hand (2026-11-03, 엔진 이식 시 골격만)",
+  "generatedAt": "2026-11-03",
+  "checks": [
+    {
+      "id": "git-status",
+      "label": "변경 파일",
+      "command": "git status --porcelain -uall | wc -l | xargs -I{} echo '변경 {}건' && git diff --stat HEAD | tail -1",
+      "tally": "^(변경 \\d+건)",
+      "timeoutSec": 30
+    }
+  ]
+}

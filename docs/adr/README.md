@@ -1,0 +1,63 @@
+# ADR (Architecture Decision Records)
+
+이 프로젝트의 결정 기록. **결정당 파일 1개**, 번호는 재사용하지 않는다. 뒤집히면 지우지 않고 `Superseded by ADR-xxx` 로 표시한다.
+입력은 두 가지였다: 초기 로드맵(원 계획안)과 인터뷰로 만든 첫 마일스톤 명세(`specs/portfolio-site.spec.md`). 원 계획안은 요지를 README 로드맵과 이 ADR 들에 흡수한 뒤 폐기했다.
+
+## 인덱스 (최신이 위로)
+
+| 날짜 | ID | 요지 | 상태 |
+|---|---|---|---|
+| 2026-11-03 | [ADR-016](ADR-016-payments-and-extensions.md) | 결제·정산(모의)과 Phase 6 확장은 순서대로, 독립 DoD 로 | Proposed |
+| 2026-11-03 | [ADR-015](ADR-015-positioning-and-scope-rules.md) | 타깃 서사, 모의 면책, 외부 참고 금지·비공개 범위 | Accepted |
+| 2026-11-03 | [ADR-014](ADR-014-deployment-and-zero-downtime.md) | CD, probe, 롤링 배포 중 소켓 재접속·세션 복구, 에셋 캐시 | Accepted |
+| 2026-11-03 | [ADR-013](ADR-013-milestone-scope-and-numbers.md) | M1 을 전부 한 번에 내되, 성능 수치는 측정 후에만 쓴다 | Accepted |
+| 2026-11-03 | [ADR-012](ADR-012-go-rule-library.md) | 바둑 룰은 라이브러리로 쓰고 선정은 Phase 1 에서 한다 | Proposed |
+| 2026-11-03 | [ADR-011](ADR-011-settlement-currency-usdc.md) | 정산 통화는 USDC, 시세는 스냅샷 + 견적 유효시간 | Accepted |
+| 2026-11-03 | [ADR-010](ADR-010-stock-consistency.md) | 재고는 Lua 원자 선점 + 예약 TTL + outbox + 멱등 소비 | Accepted |
+| 2026-11-03 | [ADR-009](ADR-009-game-verdict-and-anticheat.md) | 승패는 룰 엔진 즉시 판정, KataGo 는 비동기 사후 분석 | Accepted |
+| 2026-11-03 | [ADR-008](ADR-008-visitor-identity-and-abuse.md) | 익명 세션 + GitHub 로그인, 사후 신고·숨김, 7일 보관 | Accepted |
+| 2026-11-03 | [ADR-007](ADR-007-observability.md) | 관측은 Prometheus + Grafana 읽기 전용 임베드 | Accepted |
+| 2026-11-03 | [ADR-006](ADR-006-event-delivery-layer.md) | 이벤트 전달 계층: Postgres 폴링에서 Redis Streams 또는 Kafka 로 | **Proposed** |
+| 2026-11-03 | [ADR-005](ADR-005-outbox-idempotent-consumer.md) | 쓰기와 이벤트는 한 트랜잭션(outbox), 소비는 멱등 | Accepted |
+| 2026-11-03 | [ADR-004](ADR-004-tech-stack.md) | Bun+Elysia / Next.js+R3F / WebSocket 단일 / 공유 타입 | Accepted |
+| 2026-11-03 | [ADR-003](ADR-003-free-hosting.md) | 완전 무료 호스팅, 집 PC 와 Oracle 양쪽 지원, 정적 폴백 | Accepted |
+| 2026-11-03 | [ADR-002](ADR-002-runtime-compose-live-k3d-verified.md) | 라이브는 Compose, K8s 는 로컬 k3d 검증본, Gateway API | Accepted |
+| 2026-11-03 | [ADR-001](ADR-001-modular-monolith.md) | 모듈러 모놀리스 + 다중 엔트리포인트 | Accepted |
+
+## 원 계획안의 모순점 13건 → 어디서 닫았나
+
+| # | 원 계획안의 문제 | 확정 수정안 | ADR |
+|---|---|---|---|
+| 1 | 결제는 SOL, 에스크로는 USDC 로 통화 불일치 | USDC 로 통일, 환산 KRW-USDC | 011 |
+| 2 | "실시간 환율"과 "1시간 스냅샷" 모순 | 스냅샷 + 견적 유효시간, 결제 시점 환율 기록, 주기 5~10분 | 011 |
+| 3 | "오라클"이라는 명칭 오용 | Price Feed(시세 피드) | 011 |
+| 4 | KataGo 가 승패를 승인 | 승패는 룰 엔진 즉시, KataGo 는 비동기 사후 분석, 보상 상태 관리 | 009 |
+| 5 | 모놀리스인데 파드가 나뉘는 이유 불명 | 단일 코드베이스 + 다중 엔트리포인트 | 001 |
+| 6 | 유저 0명에 K8s·Kafka 는 과함 | 선택 근거·트레이드오프·"실서비스라면"을 ADR 에 기록 | 001·002·006 |
+| 7 | ingress-nginx 는 2026-03 retire | Gateway API(HTTPRoute) | 002 |
+| 8 | "TCP/IP 및 WebSocket" 혼재 | WebSocket 단일 프로토콜 | 004 |
+| 9 | 근거 없는 "10,000+ TPS" | "목표 TPS" 표기, k6 측정 후 기재 | 013 |
+| 10 | Zero-Downtime 주장에 관측·CD·probe·PDB·재접속 설계 없음 | 해당 항목을 Phase 4 에 포함 | 007·014 |
+| 11 | DECRBY → Kafka → PG 의 정합성 공백 | Lua 선점 + 예약 TTL + outbox + 멱등 소비 | 005·010 |
+| 12 | 타깃 포지션 3개로 서사 분산 | 백엔드 중심 풀스택 엔지니어 | 015 |
+| 13 | Unity WebGL 임베딩은 과함 | three.js(R3F), 공유 타입 패키지 | 004 |
+
+## 템플릿
+
+```markdown
+# ADR-NNN: 제목
+- 상태: Proposed | Accepted | Superseded by ADR-xxx
+- 날짜: YYYY-MM-DD
+- 근거: 명세 FR/AC · 인터뷰 라운드 · 로드맵 Phase · 조사 결과
+
+## 맥락
+## 결정
+## 설계 상세
+## 대안과 기각 이유
+## 결과 (얻는 것 / 치르는 것)
+## 위험과 완화
+## 검증 방법
+## 실서비스라면
+## 재검토 조건
+## 관련 ADR
+```

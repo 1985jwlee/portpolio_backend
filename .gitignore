@@ -1,0 +1,21 @@
+# Claude Code 개인 설정
+skills-lock.json
+.claude/*
+!.claude/AGENT.md
+!.claude/settings.json
+!.claude/verification.json
+!.claude/check-rules.json
+!.claude/regression-replay.json
+!.claude/file-index-ignore
+.agents/
+.codex/
+agent-system-measurements.md
+# 파이프라인 런 산출물
+.pipeline-dev/
+# Codex / OmniRoute 비밀값
+.codex/omniroute.env
+node_modules/
+dist/
+*.log
+
+
