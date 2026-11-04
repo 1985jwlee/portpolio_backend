@@ -97,6 +97,8 @@
 | 외부 | 암호화한 덤프를 **카드 없이 쓸 수 있는 무료 외부 저장소**에 업로드(대상은 **관문 G12**에서 확정) |
 | 복구 시험 | 빈 DB 에 복원해 행 수·무결성 검사를 통과시키고 절차를 `docs/` 에 기록(M1 후반 1회, 이후 분기별) |
 - 키(암호화)는 저장소·이미지에 넣지 않는다.
+- 백업 결과는 `status/backup/last_run.json` 에 쓰고 worker 의 `StatusFileCollector` 가 `pf_ops_last_success_timestamp{job="backup"}` 로 노출한다. 26시간 넘게 성공이 없으면 Discord 로 경보한다([ADR-027](ADR-027-server-logs.md) 후속 결정, F17 §16~17). 실행은 systemd 타이머(`pf-backup`, 03:30).
+- 백업 암호화는 `age`(수신자 공개키만 서버에 둔다, [ADR-026](ADR-026-data-protection.md)).
 
 ## 새 관문
 | ID | 대상 | 통과 기준 | 실패 시 |

@@ -78,6 +78,16 @@ type EntryView = {
 };
 type Emoji = '👍' | '❤️' | '🎉' | '😂' | '🤔' | '👀';   // ADR-023 의 고정 6종 (목록은 protocol 상수)
 type Page<T> = { items: T[]; nextCursor: string | null };
+type AuditRecordView = {
+  id: string; at: string;
+  category: 'auth' | 'admin' | 'system';
+  action: string;                    // 고정 열거 (ADR-027)
+  actorRole: 'anonymous' | 'user' | 'admin' | 'system';
+  actorKey: string | null;           // 관리자 화면 전용, 공개 응답 아님
+  targetType: string | null; targetId: string | null;
+  outcome: 'success' | 'denied' | 'failed'; reasonCode: string | null;
+  traceId: string;
+};
 type ReasonCode = 'spam' | 'abuse' | 'personal_info' | 'off_topic' | 'other';   // 확정. protocol 상수. UI 라벨은 i18n 키 report.reason.<code> (F15)
 type ReportView = {
   id: string;
@@ -136,6 +146,8 @@ type Me = {
 |---|---|---|---|
 | `GET /api/entries` | 익명 허용 | `limit`(1~50, 기본 20), `cursor` | `200` `Page<EntryView>` |
 | `GET /api/me` | 익명 허용 | — | `200` `Me` — `{ kind:'anonymous'\|'user', userId?, displayName, isAdmin, writeLocked, locale? }` |
+| `GET /api/admin/reports/{id}/note` | 관리자 | — | `200` `{ note }` (복호화, `Cache-Control: no-store`) — 접근 로그에는 reportId 만 |
+| `GET /api/admin/audit` | 관리자 | `category`(`auth`\|`admin`\|`system`), `action`, `since`(ISO 8601), `limit`(1~100, 기본 50), `cursor` | `200` `Page<AuditRecordView>` — 키셋(`id DESC`), `detail` 은 응답에 포함하지 않는다 (ADR-027, EV-15) |
 | `GET /api/admin/reports` | 관리자 | `status`, `limit`, `cursor` | `200` `Page<ReportView>` |
 | `GET /api/flow/summary` | 익명 허용 | `window`(`5m`\|`1h`) | `200` `{ buckets: [{ at, step, count }] }` — **개수만**, 식별자·내용 없음 |
 | `GET /api/flow/trace/{traceId}` | 행위자 본인 | — | `200` `{ steps: [{ step, at, detail? }] }` — 본인 `ownerKey` 일 때만, 아니면 404 |

@@ -77,10 +77,11 @@ flowchart TB
 | 5 | 도메인 규칙 적용 | 도메인 객체 | 400/409 |
 | 6 | 저장 — 신규 `insert` / 조건부 `saveIfVersion` / 유일 키 | 구체 명령 | 409 |
 | 7 | outbox 이벤트 추가 `OutboxWriter.append(events, ctx)` — **내부에서 `trace_step`(written → outboxed)과 `pg_notify` 까지 처리**(F13 EV-01) | 템플릿 | (트랜잭션 롤백) |
+| 7a | **감사 기록(해당 usecase 만)** `AuditWriter.record(tx, entry)` — GB-07·08·09·10(그리고 GB-27). 일반 사용자 행위(글·반응·신고)는 기록하지 않는다(ADR-027) | 구체 명령 | (트랜잭션 롤백 — 감사 행도 사라진다) |
 | 8 | 응답 뷰 생성 (읽기-내-쓰기, §5) | 구체 명령 | (롤백) |
 | 9 | 요청 키에 **성공 응답 기록** `RequestKeyStore.complete` | 템플릿 | (롤백) |
 
-**트랜잭션 경계**: 1~9 은 **하나의 트랜잭션**(`UnitOfWork.run`)이다. 어느 단계든 실패하면 전부 롤백된다 — 글·outbox·단계 기록·요청 키가 함께 사라진다(AC-002).
+**트랜잭션 경계**: 1~9(7a 포함)은 **하나의 트랜잭션**(`UnitOfWork.run`)이다. 어느 단계든 실패하면 전부 롤백된다 — 글·outbox·단계 기록·요청 키가 함께 사라진다(AC-002).
 `pg_notify('outbox_new')` 도 같은 트랜잭션 안에서 호출한다. Postgres 는 NOTIFY 를 **커밋 시점에** 전달하므로 롤백되면 신호도 나가지 않는다(EV-13).
 
 ### 2.1 규칙
@@ -1291,6 +1292,8 @@ flowchart TD
 
 ## 12. GB-06 신고 — `ReportEntry`
 
+> **메모 암호화 (ADR-026)**: `note` 는 usecase 가 `FieldCipher.encrypt(note, "guestbook.report.note:<reportId>")` 로 암호화해 `report.note_enc` 에 저장한다(길이 ≤200 검사는 암호화 전). 이벤트(`report.filed`)·읽기 모델·로그에는 `note` 가 나가지 않는다. 관리자는 `GET /api/admin/reports/{id}/note`(GB-27 `GetReportNote`)로만 복호화된 값을 본다 — 관리자 권한 + `no-store`, 접근 로그에는 reportId 만.
+
 **목적** 방문자가 부적절한 글을 신고한다. 같은 행위자가 같은 글을 다시 신고해도 중복 행을 만들지 않는다(FR-023).
 **트리거** `POST /api/entries/{id}/reports` · 익명 허용 · 등급 `write.report` · 입력 `{ reasonCode, note? }` · 응답 `202`.
 
@@ -1407,6 +1410,8 @@ flowchart TD
 ---
 
 ## 13. GB-07 숨김 / GB-08 숨김 해제 — `HideEntry` · `UnhideEntry`
+
+> **감사 기록 (ADR-027, 7a)**: 상태 변경·`moderation_action`·outbox 와 **같은 tx** 에서 `AuditWriter.record(category=admin, action=entry_hidden | entry_unhidden, actor_role=admin, actor_key=user:<adminId>, target=entry:<id>, outcome=success, detail={version})`. 버전 충돌(409)로 롤백되면 감사 행도 없다. `reason`(관리자 입력 사유)은 `moderation_action` 에만 두고 감사 `detail` 에는 넣지 않는다.
 
 **목적** 관리자가 글을 공개 목록에서 가리거나 되돌린다. 숨김은 삭제가 아니라 상태 변경이며 조치 이력이 남는다(FR-023, AC-006).
 **트리거** `POST /api/admin/entries/{id}/hide` · `/unhide` · **관리자** · 등급 `write.admin` · 입력 `{ expectedVersion, reason? }`.
@@ -1556,6 +1561,8 @@ flowchart TD
 
 ## 14. GB-09 신고 처리 — `ResolveReport`
 
+> **감사 기록 (ADR-027, 7a)**: `report` 상태 전이·outbox 와 같은 tx 에서 `AuditWriter.record(admin / report_resolved / report:<id>, detail={resolution})`. 이미 처리됨(409)이면 롤백되어 기록 없음.
+
 **목적** 관리자가 신고를 `dismissed`(기각) 또는 `entry_hidden`(글을 숨겨서 처리)으로 닫는다. 동시 처리 시 한 명만 성공한다(FR-023).
 **트리거** `POST /api/admin/reports/{id}/resolve` · **관리자** · 등급 `write.admin` · 입력 `{ resolution }`.
 
@@ -1687,6 +1694,8 @@ flowchart TD
 ---
 
 ## 15. GB-10 쓰기 잠금 스위치 — `SetWriteLock`
+
+> **감사 기록 (ADR-027, 7a)**: `write_lock` 갱신과 같은 tx 에서 `AuditWriter.record(admin / write_lock_changed / write_lock:1, detail={locked, version})`. `reason` 텍스트는 `detail` 에 넣지 않는다(공개 표시용 문구는 `write_lock.reason`). 이 표가 별도 이력 테이블을 두지 않은 이유의 대체 수단이다.
 
 **목적** 스팸 폭주 시 관리자가 새 글·수정·반응·신고를 일시 차단한다(ADR-008, FR-024 보조). 정리 작업(삭제·취소·숨김·신고 처리)은 막지 않는다.
 **트리거** `POST /api/admin/write-lock` · **관리자** · 등급 `write.admin` · 입력 `{ locked, reason? }` · 응답 `{ writeLocked, changedAt }`(03 §4.2). **낙관적 버전 조건은 두지 않는다** — 스위치는 "원하는 상태로 설정"이라 마지막 요청이 이기며 같은 값 재설정은 멱등이다(관리자 1명).
@@ -1892,6 +1901,49 @@ flowchart TD
 | 정책 순수 시험 | L2 | `…/write-lock-policy.test.ts` | 입력 `WriteLock` 만으로 결과 결정 |
 
 ---
+
+## 16.0 GB-27 신고 메모 복호화 조회 — `GetReportNote` (감사 기록)
+
+**목적** 관리자가 신고 상세에서 암호화된 메모를 필요할 때만 복호화해 본다(ADR-026). **조회지만 접근 사실을 감사에 남긴다**(ADR-027).
+
+**트리거** `GET /api/admin/reports/{id}/note` · 관리자 전용 · 응답 `Cache-Control: no-store`.
+
+| 접근 | 내용 |
+|---|---|
+| 읽기 | `guestbook.report.note_enc`(쓰기 모델, 명령 쪽 읽기 예외) |
+| 쓰기 | `events.audit_log` 1행(`admin / report_note_read / report:<id>`, 같은 짧은 tx) — 조회 usecase 가 예외적으로 트랜잭션을 연다(ADR-025: 모든 쓰기는 tx) |
+
+```mermaid
+sequenceDiagram
+    participant M as 관리자
+    participant A as GetReportNote
+    participant DB as 쓰기 모델
+    participant C as FieldCipher
+    participant W as AuditWriter
+    M->>A: GET /api/admin/reports/:id/note
+    A->>A: RequireAdmin
+    A->>DB: tx 시작 → report.note_enc 조회
+    alt 신고 없음
+        DB-->>A: 없음
+        A-->>M: 404 not_found (감사 기록 없음)
+    else 있음
+        A->>C: decrypt(note_enc, AAD guestbook.report.note:id)
+        A->>W: record(tx, admin / report_note_read / report:id)
+        A-->>M: 200 {note}
+    end
+    Note over A,W: 복호화 실패(PermanentError)면 롤백 — 열람이 일어나지 않았으므로 기록도 없음
+```
+
+```mermaid
+flowchart TD
+    A["요청"] --> B{"관리자?"}
+    B -- "아니오" --> X["403"]
+    B -- "예" --> C{"report 존재?"}
+    C -- "아니오" --> Y["404"]
+    C -- "예" --> D{"복호화 성공?"}
+    D -- "아니오" --> E["PermanentError (지표 pf_field_decrypt_failures_total), 감사 없음"]
+    D -- "예" --> F["감사 record → 200 {note}"]
+```
 
 ## 16.1 GB-12 세션 데이터 익명화 — `AnonymizeSessionData`
 

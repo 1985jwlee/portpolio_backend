@@ -1,4 +1,4 @@
-# F17. 운영·관측 상세 설계 (OB-01 ~ OB-14)
+# F17. 운영·관측 상세 설계 (OB-01 ~ OB-17)
 
 [F00 카탈로그](00-feature-catalog.md) 의 OB 영역(§8)을 **구현 수준**으로 풀어 쓴 문서다. 지표·헬스·로그(코드가 있는 부분)와 프록시·폴백·백업·배포·CI·k3d(설정·스크립트가 있는 부분)를 다룬다.
 근거: ADR-002(런타임) · ADR-007(관측) · ADR-014(배포·무중단) · ADR-022(스택, 관문) · ADR-023(운영 정책) · ADR-024(Redis 이음새). 상위 설계는 [00](../00-system-overview.md) · [02](../02-dev-environment.md) · [09](../09-ci-cd.md) · [10](../10-security.md) · [11](../11-implementation-plan.md).
@@ -21,6 +21,9 @@
 | 파이프라인 | OB-12 CI | `.github/workflows` (09 와 연결) |
 | 절차 | OB-13 쓰기 잠금 런북 | 문서 + 관리 CLI |
 | 매니페스트 | OB-14 k3d | `infra/k8s/**` |
+| 스크립트 | OB-15 로그 아카이브·조회 | `infra/scripts/archive-logs.sh`, `logq.sh`, `infra/systemd/*` |
+| 코드 | OB-16 운영 상태 파일 수집 | `modules/observability` 의 `StatusFileCollector`(worker) |
+| 설정 | OB-17 경보 라우팅(Discord) | `infra/grafana/provisioning/alerting/**`, `infra/prometheus/rules/pf.yml`(식 정본) |
 
 ### 0.2 앱별 운영 포트와 경로 (02 §2.1 따름)
 
@@ -162,7 +165,7 @@ classDiagram
     class InboxGaugeCollector
     class ProjectionLagCollector
     class WsGaugeCollector
-    class FileStatusCollector
+    class StatusFileCollector
     class DbPoolCollector
     class HttpMetricsMiddleware {
         +onRequest(ctx) void
@@ -235,7 +238,7 @@ classDiagram
     MetricsCollector <|-- InboxGaugeCollector
     MetricsCollector <|-- ProjectionLagCollector
     MetricsCollector <|-- WsGaugeCollector
-    MetricsCollector <|-- FileStatusCollector
+    MetricsCollector <|-- StatusFileCollector
     MetricsCollector <|-- DbPoolCollector
     HttpMetricsMiddleware --> MetricsRegistry
     DomainMetrics --> MetricsRegistry
@@ -342,6 +345,8 @@ flowchart TD
 
 - 값 검사의 UUID 패턴 거부는 **식별자가 실수로 레이블에 들어가는 것**을 잡는 보조선이다(정의 단계의 허용목록이 1차).
 
+**카운터 선초기화 의무 (로컬 실측, 2026-11-04).** 레이블 값이 **고정 열거**인 카운터(예: `pf_auth_login_failed_total{reason}`)는 앱 기동 시 **모든 레이블 조합을 0 으로 미리 노출**한다(`MetricsRegistry.preinit(name, labelValues[])`). 시리즈가 첫 이벤트 때 처음 생기면 `increase()`/`rate()` 가 **그 첫 건을 세지 않기** 때문이다. 실측: 선초기화 없이 실제 10건을 넣어도 `increase(...[10m])` 가 9.45 라 `LoginFailedSpike(>=10)` 이 불발이었고, `GitHubUnavailable` 도 실제 3건이면 불발이었다(선초기화하면 정상 발화). 열거 값 목록은 `packages/protocol` 상수가 정본이라 코드와 지표가 어긋나지 않는다. 열거가 아닌 레이블(자유 값)에는 적용하지 않는다(레이블 폭증 방지).
+
 ### 3.3 오류·경보
 
 | 상황 | 동작 | 경보 |
@@ -431,10 +436,10 @@ flowchart TD
 | `pf_job_last_success_timestamp_seconds` | G | `job`(`dispatcher`,`reaper`,`aggregator`,`retention`,`change_log_trim`) | 초(epoch) | 각 잡 | `time()-x > 3×주기` |
 | `pf_job_duration_seconds` | H | `job` | 초 | 각 잡 | 정보 |
 | `pf_retention_deleted_total` | C | `table` | 건 | RetentionRunner | 정보 |
-| `pf_backup_last_success_timestamp_seconds` | G | — | 초(epoch) | FileStatusCollector (`backup/last_success.json`) | `time()-x > 36h` |
-| `pf_backup_last_size_bytes` | G | — | 바이트 | 위와 동일 | 급감(정보) |
-| `pf_deploy_last_success_timestamp_seconds` | G | — | 초(epoch) | FileStatusCollector (`deploy/current.json`) | 정보 |
-| `pf_deploy_failed` | G | — | 0/1 | FileStatusCollector (`deploy/failed.json` 존재) | `==1` |
+| `pf_ops_last_success_timestamp` | G | `job`(`backup`,`archive_logs`,`pull_deploy`) | 초(epoch) | StatusFileCollector (`status/<job>/last_run.json` 의 `last_success_at`) | `time()-x > 26h`(backup·archive_logs) |
+| `pf_ops_last_run_ok` | G | `job` | 0/1 | 위와 동일 (`ok`) | `==0` |
+| `pf_ops_status_age_seconds` | G | `job` | 초 | 위와 동일 (`now - finished_at`) | `pull_deploy` 15분 초과(타이머 정지) |
+| `pf_backup_last_size_bytes` | G | — | 바이트 | 위와 동일 (`detail.bytes`) | 급감(정보) |
 
 **추가 지표 — 상세 설계(F13·F14·F16)가 요구하는 이름의 정본** (위 표에 없던 것. 구현은 이 이름만 쓴다)
 
@@ -470,6 +475,9 @@ flowchart TD
 | `pf_ws_coalesced_total` | C | `channel` | RT-06 |
 | `pf_anonymized_rows_total` | C | `table` | ID-10 / GB-12 (세션 만료 익명화) |
 | `pf_dead_requeued_total` | C | `consumer` | EV-07 (dead 재투입 CLI) |
+| `pf_audit_records_total` | C | `category`,`action`,`outcome` | EV-14 (감사 기록) |
+| `pf_log_redactions_total` | C | `rule` | OB-04 (마스킹 발동 — 금지 데이터가 로그에 넘어간 신호) |
+| `pf_auth_login_failed_total` | C | `reason`(`state_invalid`,`state_expired`,`github_rejected`,`github_unavailable`) | ID-06 (로그인 실패 — 고정 열거라 레이블 안전) |
 | `pf_retention_skipped_total` | C | `rule`,`reason` | EV-10 (동시 실행·락 때문에 건너뜀) |
 | `pf_retry_delay_seconds` | H | `consumer` | EV-06 (백오프 지연 분포) |
 | `pf_write_lock_state` | G | `app` | GB-10 (쓰기 잠금 0/1) |
@@ -512,9 +520,9 @@ sequenceDiagram
             DB-->>C: 행
             C->>R: 게이지 설정
         end
-        C->>F: last_success.json, current.json, failed.json 읽기
+        C->>F: status 잡별 last_run.json 읽기 (backup · archive_logs · pull_deploy)
         F-->>C: 값 또는 없음
-        C->>R: backup/deploy 게이지 설정 (없으면 시리즈 제외)
+        C->>R: pf_ops_* 게이지 설정 (파일 없음이면 시리즈 제외, 깨진 파일이면 pf_collector_errors_total)
     end
     P->>R: scrape
 ```
@@ -536,7 +544,7 @@ flowchart TD
 
 ### 4.4 오류·경보
 
-위 카탈로그의 "알람 후보" 열이 정본이다. **Alertmanager 는 M1 에 두지 않는다**(컨테이너 절약) — 규칙은 Prometheus 의 `/alerts` 와 Grafana 알림 상태로만 확인하고, 통지 채널은 **미결**(§12).
+위 카탈로그의 "알람 후보" 열이 식의 출발점이고, 확정 규칙은 §17 표다. **Alertmanager 는 두지 않는다**(컨테이너 절약) — 평가·통지는 Grafana 알림이 하고 통지 채널은 **Discord 웹훅**이다(§16.3, 결정 2026-11-04).
 
 ### 4.5 시험
 
@@ -685,7 +693,8 @@ flowchart TD
 | 값 패턴 | `Bearer …`, 32바이트 이상 base64url 토큰 형태, `://user:pass@` 연결 문자열, IPv4/IPv6 주소 → `[redacted]` |
 | 금지(애초에 호출 금지) | 글 본문, 표시 이름, 세션 토큰 원문, IP. `Redactor` 는 **실수 방지용 2차선**이다 |
 | nginx 액세스 로그 | `log_format` 에 `$remote_addr`·`$http_x_forwarded_for` 를 **넣지 않는다**(OB-07) |
-| 보관 | 컨테이너 로그는 `json-file` 드라이버 `max-size=10m`, `max-file=3`(제안). 별도 집계 시스템(Loki 등)은 M1 에 두지 않는다 |
+| 보관 | 컨테이너 로그는 `json-file` 드라이버 `max-size=20m`, `max-file=10`(컨테이너당 약 200MB) + **일 아카이브 7일**(OB-15, ADR-027). 별도 집계 시스템(Loki 등)은 M1 에 두지 않는다(사용자 선택) |
+| 연결 | 접근 로그 `rid` = 앱 로그 `req_id`, 앱 로그 `trace_id` = 감사 로그 `trace_id` (ADR-027) |
 
 ### 6.3 구성·클래스
 
@@ -779,7 +788,7 @@ scrape_configs:
 - 실행 인자(제안): `--storage.tsdb.retention.time=7d` , `--storage.tsdb.retention.size=1GB`(자원 한도 안에서 조정), `--web.enable-lifecycle` 는 쓰지 않는다.
 - k3d 에서는 `static_configs` 대신 서비스 DNS(`api.pf.svc:3001`)를 쓴다(overlay 로 교체).
 - 스크레이프 주기 15초는 해상도와 자원의 절충안이다(ADR-007 미결: "수집 주기는 구현 시"). 메모리가 압박되면 30초로 늘린다.
-- 경보 규칙 파일 `rules/pf.yml`(제안): §4.1 "알람 후보" 열을 규칙으로 옮긴다. `promtool check rules` 를 CI 에서 돈다(OB-12).
+- 경보 규칙 식 정본 `infra/prometheus/rules/pf.yml`(제안): §17 표를 규칙으로 옮긴다. `promtool check rules`·`promtool test rules` 를 CI 에서 돈다(OB-12). **런타임 평가는 Prometheus 가 아니라 Grafana 알림**이 하므로 이 파일은 `rule_files` 에 로드하지 않는다(§16.3).
 
 ### 7.1 시퀀스
 
@@ -811,10 +820,10 @@ flowchart TD
     B -- "아니오" --> I["inactive"]
     B -- "예" --> C{"for 기간 경과?"}
     C -- "아니오" --> PD["pending"]
-    C -- "예" --> F["firing (Prometheus /alerts · Grafana 에 표시)"]
-    F --> N{"통지 채널 설정?"}
-    N -- "없음 (M1)" --> V["화면에서만 확인"]
-    N -- "있음 (후속)" --> AM["Alertmanager 로 전달"]
+    C -- "예" --> F["firing (Grafana 알림 평가)"]
+    F --> N{"심각도?"}
+    N -- "info" --> V["대시보드에서만 확인"]
+    N -- "warn · critical" --> AM["Grafana 알림 정책 → Discord 웹훅 (§16.3)"]
 ```
 
 ### 7.3 오류·경보
@@ -896,7 +905,7 @@ infra/grafana/
 | 큐 초과 종료 | `rate(pf_ws_queue_overflow_total[5m])` |
 | 전달 지연 p95 | `histogram_quantile(0.95, sum by (le) (rate(pf_ws_delivery_lag_seconds_bucket[5m])))` |
 
-**ops (비공개)**: 잡 하트비트 나이 `time() - pf_job_last_success_timestamp_seconds`, 백업 나이 `time() - pf_backup_last_success_timestamp_seconds`, 배포 실패 `pf_deploy_failed`, DB 풀 `pf_db_pool_connections`.
+**ops (비공개)**: 잡 하트비트 나이 `time() - pf_job_last_success_timestamp_seconds`, 운영 작업 나이 `time() - pf_ops_last_success_timestamp{job}`, 마지막 실행 결과 `pf_ops_last_run_ok{job}`, DB 풀 `pf_db_pool_connections`.
 
 - 공개 대시보드의 변수·레이블 표시는 **인스턴스 주소를 숨긴다**(`instance` 레이블 노출 금지 — 패널에서 `sum by` 로 집계하고 변수로 노출하지 않는다).
 - 공개 대시보드는 **집계 지표만**이라 방문자 식별 정보가 구조적으로 없다(레이블 규칙).
@@ -992,8 +1001,12 @@ infra/nginx/
 # 00-maps.conf
 map $http_upgrade $connection_upgrade { default upgrade; '' close; }
 map $http_accept_language $fb_locale { default en; "~*^ko" ko; }
-log_format pf '$time_iso8601 "$request_method $uri" $status $body_bytes_sent $request_time rt=$upstream_response_time';
-# ↑ $remote_addr, $http_x_forwarded_for 를 일부러 넣지 않는다 (ADR-008)
+log_format pf_json escape=json
+  '{"ts":"$time_iso8601","method":"$request_method","uri":"$uri","status":$status,'
+  '"bytes":$body_bytes_sent,"rt":$request_time,"urt":"$upstream_response_time",'
+  '"rid":"$request_id","proto":"$server_protocol"}';
+# ↑ ADR-027: $uri 는 쿼리스트링을 포함하지 않는다(OAuth code/state 가 새지 않게). $request_uri·$args·$remote_addr·
+#   $http_x_forwarded_for·$http_user_agent·$http_referer·쿠키는 넣지 않는다 (ADR-008·023)
 
 # 10-limits.conf   (수치는 AC-007 미결 — 제안값)
 limit_req_zone  $binary_remote_addr zone=pf_write:10m rate=5r/s;
@@ -1008,7 +1021,8 @@ real_ip_recursive off;
 # 50-server.conf (요지)
 server {
   listen 8080;
-  access_log /dev/stdout pf;
+  access_log /dev/stdout pf_json;
+  proxy_set_header X-Request-Id $request_id;   # 앱 로그 req_id 와 연결 (ADR-027)
   client_max_body_size 16k;                  # 글 500자 기준 여유
   server_tokens off;
 
@@ -1324,7 +1338,7 @@ flowchart TD
 | 구분 | 내용 |
 |---|---|
 | 사전 조건 | `backups` 볼륨이 **DB 볼륨과 다른 경로**에 있음. 암호화 공개키(수신자)가 호스트에 있음(개인키는 저장소·호스트 밖) |
-| 사후 조건 | 일별 7개 + 주별 4개 보관, `last_success.json` 갱신, 외부 저장소에도 업로드(G12) |
+| 사후 조건 | 일별 7개 + 주별 4개 보관, `status/backup/last_run.json` 갱신, 외부 저장소에도 업로드(G12) |
 
 ### 12.1 범위
 
@@ -1343,11 +1357,12 @@ infra/scripts/backup.sh
  3. 건수 기록: 한 트랜잭션(REPEATABLE READ)에서 row_counts 수집 + pg_export_snapshot (제안)
  4. pg_dump -Fc --schema=identity --schema=guestbook --snapshot=<id> > pf-YYYYMMDD.dump
  5. sha256 계산, manifest.json 작성 {file, bytes, sha256, row_counts, schema_version, at}
- 6. 암호화: age -r <공개키> → pf-YYYYMMDD.dump.age   (age 설치·가용성 미확인; 대안 gpg/openssl)
+ 6. 암호화: age -r $BACKUP_AGE_RECIPIENT → pf-YYYYMMDD.dump.age   (ADR-026: 수신자 공개키만 서버에 둔다, 개인키는 서버 밖 사용자 보관. age 설치·가용성은 미확인 — 대안 gpg/openssl)
+    * report.note 는 이미 필드 암호화(note_enc)된 상태로 덤프된다. 복구 시에는 FIELD_KEYS 키링이 있어야 복호화된다
  7. 평문 덤프 안전 삭제
  8. 회전: 일별 7개 유지, 일요일 덤프는 주별(YYYY-Www) 로 복사해 4개 유지
  9. 외부 업로드 (G12 대상 확정 후)  실패해도 로컬 성공은 인정, 외부 실패는 별도 기록
-10. status/backup/last_success.json 갱신 (원자적 rename)
+10. status/backup/last_run.json 갱신 (원자적 rename; 실패해도 기록하고 `last_success_at` 은 직전 값을 유지)
 ```
 
 ### 12.3 시퀀스
@@ -1376,7 +1391,7 @@ sequenceDiagram
         else 실패
             B->>S: external_failed=true 기록 (로컬은 유지)
         end
-        B->>S: last_success.json 갱신
+        B->>S: last_run.json 갱신 (ok, last_success_at)
     end
 ```
 
@@ -1395,7 +1410,7 @@ flowchart TD
     H -- "예" --> I["주별로 복사, 5번째 이상 삭제"]
     H -- "아니오" --> J["외부 업로드 시도"]
     I --> J
-    J --> K["last_success.json 갱신"]
+    J --> K["last_run.json 갱신"]
 ```
 
 ### 12.5 복구 시험 절차와 무결성 검사 (`restore-drill.sh`, M1 후반)
@@ -1439,7 +1454,7 @@ sequenceDiagram
 
 | 상황 | 경보 |
 |---|---|
-| 36시간 넘게 성공 없음 | `time()-pf_backup_last_success_timestamp_seconds > 36*3600` |
+| 26시간 넘게 성공 없음 | `time()-pf_ops_last_success_timestamp{job="backup"} > 26*3600` |
 | 덤프 크기 급감 | `pf_backup_last_size_bytes` 가 직전의 50% 미만(정보) |
 | 외부 업로드 실패 지속 | `external_failed` 상태 지속(정보, G12 확정 후 규칙화) |
 
@@ -1458,7 +1473,7 @@ sequenceDiagram
 
 **목적.** 호스트가 레지스트리를 주기적으로 확인해 새 안정판이 있으면 **검증 가능한 순서로 교체**하고, 실패하면 되돌린다(ADR-014, 09 §6).
 
-**트리거.** systemd timer/cron 5분 간격(제안).
+**트리거.** systemd 타이머 `pf-pull-deploy.timer` 5분 간격(§16.1.1, 결정 2026-11-04). 매 실행마다 `status/pull_deploy/last_run.json` 을 쓴다(변경 없음도 `ok=true`, `detail.action=none`).
 
 | 구분 | 내용 |
 |---|---|
@@ -1470,7 +1485,7 @@ sequenceDiagram
 ```
 infra/scripts/pull-deploy.sh
  1. flock (이미 배포 중이면 종료)
- 2. current.json 읽기. blocked.json(실패한 다이제스트 목록) 읽기
+ 2. current.json 읽기. blocked.json(실패한 다이제스트 목록) 읽기 (배포 상태 전용 파일, 지표는 `last_run.json` 만 본다)
  3. GHCR 에서 pf-server·pf-web(·pf-proxy) 의 stable 다이제스트 조회
  4. current 와 같거나 blocked 에 있으면 종료
  5. previous.json ← current.json (롤백 기록)
@@ -1479,8 +1494,8 @@ infra/scripts/pull-deploy.sh
  8. 마이그레이션: 일회성 컨테이너 db:migrate  → 실패 시 교체하지 않고 종료(blocked 기록)
  9. 교체 순서: worker → api → ws-gateway → web → (proxy 설정 변경 시) proxy
     각 단계: compose up -d --no-deps <svc> (다이제스트 고정) → 헬스 연속 N회 통과 대기 (타임아웃 60초) — worker 는 /healthz, api·ws-gateway·web 은 /readyz
-10. 모두 통과: current ← 새 다이제스트, failed.json 삭제
-11. 하나라도 실패: 직전 다이제스트로 되돌림(역순), blocked 에 새 다이제스트 추가, failed.json 기록
+10. 모두 통과: current ← 새 다이제스트, last_run.json {ok:true}
+11. 하나라도 실패: 직전 다이제스트로 되돌림(역순), blocked 에 새 다이제스트 추가, last_run.json {ok:false, detail.reason}
 ```
 
 - 마이그레이션은 **앞으로 호환** 규칙(09 §4)이라 롤백 시 되돌리지 않는다. 롤백된 이전 코드가 새 스키마에서 돌아야 한다.
@@ -1508,7 +1523,7 @@ sequenceDiagram
         PD->>C: db:migrate 일회성 컨테이너
         alt 마이그레이션 실패
             C-->>PD: 실패
-            PD->>S: blocked 추가 + failed.json
+            PD->>S: blocked 추가 + last_run.json ok=false
         else 성공
             loop worker, api, ws-gateway, web
                 PD->>C: up -d --no-deps 서비스
@@ -1518,7 +1533,7 @@ sequenceDiagram
                 else 실패
                     C-->>PD: not ready
                     PD->>C: 이전 다이제스트로 되돌림
-                    PD->>S: blocked 추가 + failed.json
+                    PD->>S: blocked 추가 + last_run.json ok=false
                 end
             end
             PD->>S: current ← 새 다이제스트
@@ -1557,16 +1572,16 @@ flowchart TD
     D -- "아니오" --> E{"60초 경과?"}
     E -- "아니오" --> C
     E -- "예" --> F["롤백 시작: 이미 교체한 서비스부터 역순으로 이전 다이제스트"]
-    F --> G["blocked 기록, failed.json 기록"]
+    F --> G["blocked 기록, last_run.json ok=false"]
 ```
 
 ### 13.5 오류·경보
 
 | 상황 | 동작 | 경보 |
 |---|---|---|
-| 마이그레이션 실패 | 교체 안 함 | `pf_deploy_failed==1` |
+| 마이그레이션 실패 | 교체 안 함 | `pf_ops_last_run_ok{job="pull_deploy"}==0` |
 | readyz 타임아웃 | 롤백 | 위와 동일 |
-| 롤백도 실패 | 수동 개입 필요(런북) | `TargetDown` + `pf_deploy_failed` |
+| 롤백도 실패 | 수동 개입 필요(런북) | `TargetDown` + `pf_ops_last_run_ok{job="pull_deploy"}==0` |
 | GHCR 접근 불가 | 이번 주기 건너뜀 | 연속 실패 시 정보 |
 
 ### 13.6 시험
@@ -1806,24 +1821,344 @@ flowchart TD
 
 ---
 
-## 17. 경보 후보 요약
+## 16.1 OB-15 로그 아카이브·조회 (ADR-027)
 
-| 경보 | 식 (미검증) | for | 의미 |
-|---|---|---|---|
-| OutboxStuck | `max(pf_outbox_oldest_age_seconds{status="new"}) > 60` | 2m | 디스패처/리더 문제 |
-| NoDispatcherLeader | `sum(pf_dispatcher_leader) == 0` | 1m | 리더 없음 |
-| DeadLetterGrowing | `increase(pf_outbox_dead_total[15m]) > 0` | 0 | 영구 실패 |
-| InboxBacklog | `max(pf_inbox_oldest_age_seconds{status="received"}) > 60` | 2m | 소비 지연 |
-| ProjectionDrift | `max(pf_projection_drift) > 0` | 30m | 읽기 모델 불일치 |
-| ApiLatencyHigh | `histogram_quantile(0.95, …) > 0.3` | 10m | AC-013 위반 |
-| Api5xxHigh | 5xx 비율 > 0.02 | 5m | 장애 |
-| WsOverflow | `rate(pf_ws_queue_overflow_total[5m]) > 0` | 5m | 느린 소비자 격리 발생 |
-| TargetDown | `up == 0` | 5m | 앱 다운 |
-| BackupStale | `time()-pf_backup_last_success_timestamp_seconds > 36*3600` | 0 | 백업 누락 |
-| DeployFailed | `pf_deploy_failed == 1` | 0 | 배포 롤백됨 |
-| JobStalled | `time()-pf_job_last_success_timestamp_seconds > 3*주기` | 0 | 잡 정지 |
+**목적.** 서버 기록(앱 로그·접근 로그)을 **7일 시간 기준**으로 보관하고, `trace_id`·`req_id` 로 추적하게 한다. 별도 집계 시스템(Loki 등)은 M1 에 두지 않는다(사용자 선택, ADR-027).
 
-통지 채널(Alertmanager, 이메일 등)은 M1 범위 밖이다.
+**트리거.** `pf-archive-logs.timer`(systemd, 결정 2026-11-04) 일 1회 03:10, 운영자의 `logq` 호출.
+
+| 구분 | 내용 |
+|---|---|
+| 사전 조건 | 컨테이너 로깅 드라이버 `json-file`, `max-size=20m`·`max-file=10`(컨테이너당 최대 약 200MB). `PF_LOG_DIR`(기본 `/var/log/pf`)가 `pf:pf` 소유, 권한 0750 |
+| 사후 조건 | `$PF_LOG_DIR/archive/YYYY-MM-DD/<service>.jsonl.gz`(파일 0640), 7일 지난 디렉터리 삭제, `status/archive_logs/last_run.json` 갱신 |
+| 대상 | api · ws-gateway · worker · web · proxy(nginx 접근 로그) |
+| 제외 | 외부 업로드·백업 대상이 아니다(개인정보 최소화) |
+
+```mermaid
+flowchart TD
+    TM["systemd 타이머 pf-archive-logs (일 1회 03:10)"] --> A["archive-logs.sh"]
+    A --> L{"flock 획득?"}
+    L -- "아니오" --> X["건너뜀 + last_run.json ok=false (detail=locked)"]
+    L -- "예" --> S["서비스 목록 순회"]
+    S --> D["docker logs --since 어제00:00 --until 오늘00:00"]
+    D --> W["YYYY-MM-DD/서비스.jsonl 에 기록"]
+    W --> G["gzip + chmod 0640"]
+    G --> N{"다음 서비스?"}
+    N -- "예" --> S
+    N -- "아니오" --> P["7일 지난 날짜 디렉터리 삭제"]
+    P --> T["status/archive_logs/last_run.json 갱신 (원자적 rename)"]
+    T --> M["worker StatusFileCollector 가 pf_ops_* 지표로 노출 (OB-16)"]
+```
+
+```mermaid
+sequenceDiagram
+    participant TM as systemd 타이머
+    participant A as archive-logs.sh
+    participant DK as Docker 로그
+    participant FS as PF_LOG_DIR/archive
+    participant ST as status/archive_logs
+    TM->>A: 실행 (User=pf)
+    A->>A: flock (중복 실행 방지)
+    loop 서비스마다
+        A->>DK: docker logs --since --until
+        DK-->>A: JSON 줄들
+        A->>FS: YYYY-MM-DD/svc.jsonl.gz (0640)
+    end
+    A->>FS: 7일 지난 디렉터리 삭제
+    alt 모든 서비스 성공
+        A->>ST: last_run.json {ok:true, last_success_at:지금}
+    else 일부 실패
+        A->>ST: last_run.json {ok:false, detail.failed[]} (last_success_at 은 직전 값 유지)
+    end
+    Note over A,ST: 실패해도 Docker 로그 크기 상한이 안전망
+```
+
+**조회 `logq.sh`** (jq 래퍼; 현재 Docker 로그 + 아카이브를 읽는다):
+
+```
+logq.sh --app api --level error --since 1h
+logq.sh --trace 0192f3c0-…                  # 앱 로그를 trace_id 로 추적
+logq.sh --app proxy --status 5xx --since 24h
+logq.sh --rid <nginx rid>                   # 접근 로그 rid = 앱 로그 req_id
+```
+
+- 접근 로그의 `rid`(= nginx `$request_id`)는 업스트림에 `X-Request-Id` 로 전달되고 앱 로그의 `req_id` 와 같다 → 접근 로그 ↔ 앱 로그 연결. 앱 로그의 `trace_id` ↔ 감사 로그(`audit_log.trace_id`) 연결.
+
+```mermaid
+classDiagram
+    class ArchiveLogs {
+        <<script>>
+        +services string[]
+        +retentionDays int
+        +run() int
+    }
+    class LogQuery {
+        <<script>>
+        +app string
+        +trace string
+        +rid string
+        +level string
+        +status string
+        +since duration
+    }
+    class StatusFile {
+        +job string
+        +started_at Instant
+        +finished_at Instant
+        +ok bool
+        +detail object
+        +version string
+        +last_success_at Instant
+    }
+    ArchiveLogs --> StatusFile : 쓰기
+    LogQuery ..> ArchiveLogs : 아카이브 읽기
+```
+
+> 스크립트라서 클래스는 구조 설명용이다(코드 클래스 아님). 구현은 bash + jq, `shellcheck` 대상(09 PR 검사).
+
+| 항목 | 내용 |
+|---|---|
+| 오류/경보 | 아카이브 26시간 이상 미성공 → `OpsJobStale`, 마지막 실행 실패 → `OpsRunFailed`(§16.3). 디스크 여유 부족(사전 검사 실패) → 실패 기록. 일부 서비스 로그 없음은 경고만 |
+| 지표 | `pf_ops_last_success_timestamp{job="archive_logs"}`·`pf_ops_last_run_ok`·`pf_ops_status_age_seconds`(OB-16 이 노출), `pf_log_redactions_total{rule}`(C, 마스킹 발동 — 코드가 금지 데이터를 로그에 넘긴 신호), `pf_audit_records_total{category,action,outcome}`(C) — 호스트 스크립트의 상태는 지표를 직접 내지 않고 **상태 파일**로 남긴다 |
+| 시험 | 08: 7일 지난 아카이브 삭제, 중복 실행 방지, 권한 0640, 접근 로그에 쿼리·IP 부재, `rid`↔`req_id` 연결 |
+
+### 16.1.0 아카이브 스크립트 구현 주의 (로컬 실측, 2026-11-04)
+
+더미 컨테이너 로그로 `archive-logs.sh` 를 구현해 확인했다. **동작 확인**: `docker logs --since/--until`(epoch 초)이 범위 밖 로그를 제외한다 · gzip 은 임시 파일에 쓰고 `mv` 로 확정 · 디렉터리 0750/파일 0640 · `flock` 중복 실행은 `locked` 로 종료.
+
+| 함정 | 내용 | 규칙 |
+|---|---|---|
+| `date` 의 `+ 1 day` | `date -d "$DAY 00:00:00 + 1 day"` 는 `+ 1` 을 **시간대 오프셋으로 읽어** 8시간만 더한다(KST 에서 확인) | 다음 날은 `$(date -d "$DAY +1 day" +%F) 00:00:00` 로 계산한다 |
+| stdout/stderr 순서 | `docker logs … 2>&1` 은 두 스트림의 **순서를 보존하지 않는다**(같은 시각 줄의 stderr 가 stdout 보다 먼저 옴) | `--timestamps` 로 받아 **시각순 정렬** 후 타임스탬프 접두를 제거해 기록한다. 같은 시각 줄의 상대 순서는 보장하지 않음을 한계로 문서화 |
+| 보관 경계 | `find -mtime +7`(mtime 기준)과 날짜 디렉터리 이름 기준의 경계가 다를 수 있다 | **디렉터리 이름 기준으로 하나만 쓴다**: "오늘 − 7일 보다 이른 날짜 디렉터리를 삭제"(`<` 비교, 오늘 포함 최근 8개 날짜 이름이 남을 수 있음을 허용) |
+
+### 16.1.1 호스트 작업 실행 수단 — systemd 타이머 (결정 2026-11-04)
+
+로그 아카이브·백업·pull 배포를 **같은 방식(systemd 타이머)** 으로 돌린다. 이 호스트의 init 은 systemd 이고 cron 도 있으나, 타이머는 놓친 실행 보충(`Persistent=true`)과 journald 기록을 쓸 수 있어 채택했다. cron 은 systemd 가 없는 호스트의 대체 수단이다(같은 스크립트, 같은 상태 파일).
+
+```
+infra/systemd/
+├─ pf-archive-logs.service / .timer   # OnCalendar=*-*-* 03:10:00  Persistent=true  RandomizedDelaySec=120
+├─ pf-backup.service       / .timer   # OnCalendar=*-*-* 03:30:00  Persistent=true  RandomizedDelaySec=120
+└─ pf-pull-deploy.service  / .timer   # OnBootSec=2min  OnUnitActiveSec=5min  RandomizedDelaySec=30
+```
+
+| 항목 | 값 (제안/미검증) |
+|---|---|
+| 서비스 형태 | `Type=oneshot`, `User=pf`, `Group=pf`, `SupplementaryGroups=docker`, `EnvironmentFile=/etc/pf/pf.env` |
+| 격리 | `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=@PF_LOG_DIR@ @STATUS_DIR@ /var/lib/pf` — **`$VAR` 를 쓰면 안 된다**(아래) |
+| 중복 방지 | 스크립트마다 `flock`(주기가 겹쳐도 한 개만) |
+| 로그 | 스크립트 출력은 journald(`journalctl -u pf-*`) — 앱 로그 규약과 같은 마스킹 규칙(IP·토큰 금지) |
+| 설치 | `infra/scripts/install-systemd.sh`(제안): 유닛 **템플릿**(`*.service.in`)의 `@PF_LOG_DIR@`·`@STATUS_DIR@` 를 `/etc/pf/pf.env` 의 절대 경로로 치환해 `/etc/systemd/system/` 에 설치 → `systemd-analyze verify` → `daemon-reload` → `enable --now *.timer` → `systemctl list-timers` 로 확인 |
+
+**실측 (2026-11-04, systemd 255)**: `ReadWritePaths=$PF_LOG_DIR …` 는 systemd 가 **환경변수를 확장하지 않고** `path is not absolute, ignoring` 경고와 함께 무시한다(`systemd-run -p 'ReadWritePaths=$X'` 는 `Invalid ReadWritePaths` 로 거부). `ProtectSystem=strict` 와 같이 쓰면 `/var/lib/pf` 외 경로에 쓸 수 없어 `/var/log/pf` 아카이브가 **실패할 수 있다**. 그래서 설치 스크립트가 유닛 생성 시 절대 경로로 치환한다. 유닛 6개의 `systemd-analyze verify` 는 치환 후 통과, `OnCalendar=*-*-* 03:10:00` 은 호스트 **로컬 시간대(KST)** 기준 03:10 으로 해석됨을 확인했다. **실제 `pf` 사용자로 실행해 쓰기가 되는지는 확인하지 못했다 → S8-1.**
+
+**경로와 권한**
+
+| 경로 | 소유·권한 | 용도 |
+|---|---|---|
+| `PF_LOG_DIR` (기본 `/var/log/pf`) | `pf:pf` 0750, 하위 파일 0640 | 로그 아카이브(운영 스크립트용 변수, 앱은 모른다) |
+| `STATUS_DIR` (기본 `/var/lib/pf/status`) | `pf:pf` 0750 | 작업 상태 파일. worker 컨테이너에 **읽기 전용** 마운트 |
+| rootless Docker 대체 | `PF_LOG_DIR=~/.local/state/pf/logs`, `STATUS_DIR=~/.local/state/pf/status`, `systemctl --user` 타이머 + `loginctl enable-linger` | 호스트가 rootless 일 때(미확인) |
+
+> **주의**: `docker` 그룹 구성원은 사실상 root 와 동급이다. `pf` 사용자의 쉘 로그인을 막고(`nologin`) 유닛으로만 실행한다([10 §5](../10-security.md)). 이 호스트(WSL2)는 rootful Docker 이고 systemd 가 PID 1 이다(확인). Oracle 호스트·집 PC 실제 환경은 S8-1 에서 재확인한다.
+
+## 16.2 OB-16 운영 상태 파일 수집 (`StatusFileCollector`)
+
+**목적.** 호스트 스크립트(백업·로그 아카이브·pull 배포)의 결과를 **파일 하나의 규약**으로 받아 `/metrics` 로 노출한다. 스크립트가 지표 서버를 두지 않고(Pushgateway·node_exporter 없음), worker 가 **스크레이프 때** 파일을 읽는다.
+
+**트리거.** worker `/metrics` 스크레이프(`MetricsCollector.collect()`), 캐시 10초.
+
+**상태 파일 규약** `status/<job>/last_run.json` (`job` ∈ `backup` · `archive_logs` · `pull_deploy`)
+
+```json
+{ "job": "backup", "started_at": "2026-11-05T03:30:02Z", "finished_at": "2026-11-05T03:31:10Z",
+  "ok": true, "detail": { "bytes": 1048576, "external": "ok" }, "version": "1",
+  "last_success_at": "2026-11-05T03:31:10Z" }
+```
+
+| 필드 | 규칙 |
+|---|---|
+| `job`, `started_at`, `finished_at`, `ok`, `detail`, `version` | 필수. `version` 은 스키마 버전 문자열 |
+| `last_success_at` | **제안으로 추가**: 실패해도 직전 성공 시각을 유지한다(`ok=false` 라도 마지막 성공 나이를 계산하려고) |
+| `detail` | 작업별 작은 객체. **본문·IP·토큰 금지**, 길이 제한 |
+| 쓰기 | 임시 파일에 쓰고 `rename`(원자적). 읽는 쪽은 부분 쓰기를 보지 않는다 |
+| 쓰는 시점 | **매 실행마다**(성공·실패·건너뜀 모두) — 타이머가 멈췄는지를 `status_age` 로 알기 위해 |
+
+| 구분 | 내용 |
+|---|---|
+| 사전 조건 | worker 에 `STATUS_DIR` 이 읽기 전용으로 마운트(`STATUS_DIR` 환경변수) |
+| 사후 조건 | 잡마다 `pf_ops_last_success_timestamp`, `pf_ops_last_run_ok`, `pf_ops_status_age_seconds` 설정. **파일 없음**이면 해당 시리즈를 내지 않는다(없음 ≠ 실패), **깨진 파일**이면 `pf_collector_errors_total{collector="status_file"}` 증가 |
+
+```mermaid
+classDiagram
+    class MetricsCollector {
+        <<abstract>>
+        +collect() void
+    }
+    class StatusFileCollector {
+        -dir string
+        -jobs string[]
+        -cacheMs int
+        +collect() void
+    }
+    class StatusFileReader {
+        +read(job) StatusFile | Missing | Corrupt
+    }
+    class StatusFile {
+        +job string
+        +finished_at Instant
+        +ok bool
+        +last_success_at Instant
+        +detail object
+    }
+    MetricsCollector <|-- StatusFileCollector
+    StatusFileCollector --> StatusFileReader
+    StatusFileReader ..> StatusFile
+```
+
+```mermaid
+sequenceDiagram
+    participant P as Prometheus
+    participant W as worker /metrics
+    participant C as StatusFileCollector
+    participant F as STATUS_DIR (읽기 전용)
+    participant R as MetricsRegistry
+    P->>W: scrape
+    W->>C: collect() (캐시 만료 시)
+    loop job in backup, archive_logs, pull_deploy
+        C->>F: last_run.json 읽기
+        alt 없음
+            F-->>C: Missing
+            C->>R: 시리즈 생략 (OpsStatusMissing 은 absent() 로 감지)
+        else 깨짐
+            F-->>C: Corrupt
+            C->>R: pf_collector_errors_total{collector=status_file}
+        else 정상
+            F-->>C: StatusFile
+            C->>R: last_success_timestamp, last_run_ok, status_age_seconds
+        end
+    end
+    W-->>P: 지표 텍스트
+```
+
+```mermaid
+flowchart TD
+    A["잡마다 파일 읽기"] --> B{"파일 있음?"}
+    B -- "아니오" --> M["시리즈 없음 (absent 경보 후보)"]
+    B -- "예" --> C{"JSON·version 유효?"}
+    C -- "아니오" --> E["collector_errors +1, 시리즈 유지하지 않음"]
+    C -- "예" --> D["last_success_timestamp = last_success_at"]
+    D --> F["last_run_ok = ok ? 1 : 0"]
+    F --> G["status_age = now - finished_at"]
+```
+
+| 항목 | 내용 |
+|---|---|
+| 오류/경보 | 파일 없음(`OpsStatusMissing`), 마지막 실행 실패(`OpsRunFailed`·`DeployFailed`), 오래된 성공(`OpsJobStale`), 타이머 정지(`PullDeployTimerStopped`) — §16.3 |
+| 지표 | `pf_ops_last_success_timestamp{job}` · `pf_ops_last_run_ok{job}` · `pf_ops_status_age_seconds{job}` (§4.1) |
+| 시험 | 08: **파일 없음 / 오래됨 / `ok=false` 를 서로 다른 결과로 구분**, 깨진 파일 처리, 부분 쓰기 방지(rename) |
+
+## 16.3 OB-17 경보 라우팅 (Discord)
+
+**목적.** 경보 규칙의 결과를 사람에게 전달한다. 알림 채널은 **Discord 웹훅**(사용자 선택, 무료·카드 불필요).
+
+**구성 (제안/미검증 — 이 환경에서 Discord·Grafana 알림을 실행해 보지 않았다)**
+
+| 항목 | 내용 |
+|---|---|
+| 평가자 | **Grafana 알림 규칙**(Prometheus 데이터 소스, 프로비저닝). Alertmanager 는 두지 않는다 |
+| 식의 정본 | `infra/prometheus/rules/pf.yml` — CI 에서 `promtool check rules` · `promtool test rules` 로 검증. Prometheus 런타임은 이 파일을 **로드하지 않는다**(평가자 하나) |
+| Grafana 규칙 | `infra/grafana/provisioning/alerting/rules.yml` 은 위 식에서 `scripts/gen-grafana-alerts.ts` 가 생성(제안, 미검증) |
+| 연락처 | `infra/grafana/provisioning/alerting/contact-points.yml`: 종류 `discord`, URL 은 `$__file{/run/secrets/discord_webhook_url}` 또는 `${DISCORD_WEBHOOK_URL}`. **두 방식 모두 프로비저닝 YAML 에서 동작(로컬 실측, Grafana 13.3.0, 시크릿 파일 끝 개행 허용)** — envsubst 대안은 필요 없다 |
+| 정책 | `policies.yml`: 루트 → Discord. `group_by=[alertname, severity]`, `group_wait=30s`, `group_interval=5m`, **`repeat_interval=4h`**, 해소 알림 켬 |
+| 심각도 | `critical`(즉시 확인) · `warn`(업무 시간 확인) · `info`(대시보드에만, Discord 로 보내지 않음) |
+| 시크릿 | `DISCORD_WEBHOOK_URL` 은 **grafana 컨테이너에만** 주입한다. 앱·worker 는 모른다 |
+| 개발 모드 | 웹훅 미설정이면 **알림 프로비저닝 디렉터리 자체를 마운트하지 않는다**(또는 `gen-grafana-alerts.ts` 가 DISCORD 미설정 시 `alerting/` 파일을 생성하지 않는다). Grafana 가 대신 해주지 않는다 — 아래 "누락 시 동작" |
+| 메시지 내용 | 규칙 이름·심각도·요약만. **알림 본문에는 라벨·어노테이션·Grafana 루트 URL(silence 링크)이 그대로 들어간다**(실측) → 규칙 라벨에 사용자 식별자·IP·본문을 싣지 않는다(지표 레이블 규칙과 같음). `GF_SERVER_ROOT_URL` 이 **공개 URL 인지 점검**(내부 주소가 Discord 메시지에 노출되지 않게) |
+
+```mermaid
+sequenceDiagram
+    participant P as Prometheus
+    participant G as Grafana 알림 평가
+    participant N as 알림 정책
+    participant D as Discord 웹훅
+    loop 평가 주기 (1분)
+        G->>P: PromQL 쿼리
+        P-->>G: 값
+        alt 조건 충족이 for 기간 지속
+            G->>N: firing(severity)
+            alt severity = info
+                N-->>N: Discord 로 보내지 않음 (대시보드 표시)
+            else critical 또는 warn
+                N->>D: 메시지 (그룹 30초 대기)
+                N-->>D: 같은 알림은 4시간마다 반복
+            end
+        else 조건 해소
+            G->>N: resolved
+            N->>D: 해소 메시지
+        end
+    end
+```
+
+```mermaid
+flowchart TD
+    A["규칙 평가"] --> B{"조건 충족?"}
+    B -- "아니오" --> R{"이전에 firing?"}
+    R -- "예" --> RS["해소 알림 전송"]
+    R -- "아니오" --> Z["없음"]
+    B -- "예" --> F{"for 기간 경과?"}
+    F -- "아니오" --> PD["pending (전송 안 함)"]
+    F -- "예" --> S{"심각도 info?"}
+    S -- "예" --> DB["대시보드에만"]
+    S -- "아니오" --> G["그룹핑 30초 → Discord 전송 → 4시간 뒤 반복"]
+```
+
+**로컬 실측 요약 (Grafana 13.3.0, 가짜 수신 서버, 2026-11-04)**
+
+| 항목 | 결과 |
+|---|---|
+| `$__file{}` / `${VAR}` 확장 | 둘 다 프로비저닝 YAML 에서 동작. `GET /api/v1/provisioning/contact-points` 는 `settings.url` 을 `[REDACTED]` 로 보여 **API 값으로는 확인 불가**, 실제 전송으로 확인 |
+| **누락 시 동작** | 시크릿 파일이 없거나(`$__file{}` stat 실패) 환경변수가 비면(`could not find webhook url property`) **alerting 프로비저닝 전체가 실패**한다. Grafana 자체는 기동하지만 **연락처가 하나도 등록되지 않는다** → 운영에서는 배포 전 점검(readiness 가 아님)으로 시크릿 파일 존재·비어 있지 않음을 확인한다 |
+| 시험 알림 API | Grafana 13.3 에서 `POST /api/alertmanager/grafana/config/api/v1/receivers/test` 는 **제거**됐다. 새 경로 `POST /apis/notifications.alerting.grafana.app/v1beta1/namespaces/{namespace}/receivers/{uid}/test` 의 `{uid}` 는 **연락처 이름의 base64url**(integration uid 가 아님). 본문 `{"integration":{"uid":"…","type":"discord","settings":{},"secureFields":{"url":true}}}` — OpenAPI 에 없어 시행착오로 확인 |
+| Discord 타입 URL 검증 | 호스트/도메인 검증이 없다(`http://127.0.0.1:…` 도 그대로 전송). 스킴이 없으면 프로비저닝은 통과하고 전송 시 `unsupported protocol scheme` 로 실패 |
+| 수신 본문 | `Content-Type: application/json`, 필드 `username`·`content`(Firing/Value/Labels/Annotations/Silence URL)·`embeds[]`(title `[FIRING:1] …`, url, color, footer) |
+
+> 임계값 수치는 모두 **트래픽 미측정 추정**이다(동시 접속 50 규모에서 정상 시 해당 지표가 거의 0 이라는 가정). 운영 데이터가 쌓이면 조정한다.
+
+| 오류/시험 | 내용 |
+|---|---|
+| 오류 | 웹훅 전송 실패는 Grafana 가 재시도하고 실패를 자체 상태에 남긴다. Discord 장애 시 경보가 안 나갈 수 있다 → 대시보드의 경보 패널이 보조 |
+| 시험 | 08: `promtool test rules` 로 식 단위 시험(예: `LoginFailedSpike` 10회 경계), 프로비저닝 파일 lint. 전송은 L4 수동 확인(시험 알림 1건) |
+
+## 17. 경보 규칙 요약 (OB-17 의 식 정본)
+
+반복 간격은 전부 4시간, 해소 알림은 전부 켬. 임계값은 **트래픽 미측정 추정(운영 후 조정)**. 식은 `promtool check rules`·`test rules` 로 문법·의미를 확인했다(OpsJobStale · LoginFailedSpike · GitHubUnavailable, 로컬 실측 — 단 세 규칙 모두 `for: 0` 이라 **`for` 경과 시나리오는 시험하지 못했고**, Grafana 알림 규칙으로 변환한 뒤의 평가도 미시험).
+
+> **표의 `\|` 주의**: 마크다운 표 안의 정규식 파이프는 `\|` 로 이스케이프돼 있다. 이를 **규칙 파일에 그대로 옮기면 PromQL 리터럴 `|` 가 되어 어떤 job 에도 매치되지 않는다**(실측: OpsJobStale 영구 불발). **정본 규칙 파일(`pf.yml`)에는 `backup|archive_logs` 로 쓰고**, `gen-grafana-alerts.ts` 가 이 표를 파싱한다면 `\|` → `|` 로 풀어야 한다. 가능하면 정규식은 표 밖 코드 블록으로 분리해 이스케이프를 없앤다.
+
+| 경보 | 식 | for | 심각도 | 의미 |
+|---|---|---|---|---|
+| NoDispatcherLeader | `sum(pf_dispatcher_leader) == 0` | 1m | critical | 디스패처 리더 없음 |
+| TargetDown | `up == 0` | 5m | critical | 앱 다운 |
+| Api5xxHigh | 5xx 비율 > 0.02 | 5m | critical | 장애 |
+| DeployFailed | `pf_ops_last_run_ok{job="pull_deploy"} == 0` | 0 | critical | 배포 롤백됨/실패 |
+| PullDeployTimerStopped | `pf_ops_status_age_seconds{job="pull_deploy"} > 900` | 0 | warn | 배포 타이머 정지(5분 주기의 3배) |
+| OpsJobStale | `time()-pf_ops_last_success_timestamp{job=~"backup\|archive_logs"} > 26*3600` | 0 | critical | 백업·아카이브 26시간 초과 정체(24h + 유예 2h) |
+| OpsRunFailed | `pf_ops_last_run_ok{job=~"backup\|archive_logs"} == 0` | 0 | warn | 마지막 실행 실패 |
+| OpsStatusMissing | `absent(pf_ops_last_success_timestamp{job="backup"})` | 30m | warn | 상태 파일 없음(타이머 미설치 등) |
+| OutboxStuck | `max(pf_outbox_oldest_age_seconds{status="new"}) > 60` | 2m | warn | 디스패처/리더 문제 |
+| DeadLetterGrowing | `increase(pf_outbox_dead_total[15m]) > 0` | 0 | warn | 영구 실패 증가 |
+| InboxBacklog | `max(pf_inbox_oldest_age_seconds{status="received"}) > 60` | 2m | warn | 소비 지연 |
+| ProjectionDrift | `max(pf_projection_drift) > 0` | 30m | warn | 읽기 모델 불일치 |
+| ApiLatencyHigh | `histogram_quantile(0.95, …) > 0.3` | 10m | warn | AC-013 위반 |
+| JobStalled | `time()-pf_job_last_success_timestamp_seconds > 3*주기` | 0 | warn | 잡 정지 |
+| LoginFailedSpike | `sum(increase(pf_auth_login_failed_total[10m])) >= 10` | 0 | warn | 로그인 실패 급증(10분 10회) |
+| GitHubUnavailable | `increase(pf_auth_login_failed_total{reason="github_unavailable"}[5m]) >= 3` | 0 | warn | GitHub 장애/차단 의심(5분 3회) |
+| LogRedactionSpike | `rate(pf_log_redactions_total[10m]) > 0` | 10m | warn | 코드가 금지 데이터를 로그에 넘김 |
+| WsOverflow | `rate(pf_ws_queue_overflow_total[5m]) > 0` | 5m | info | 느린 소비자 격리 발생(대시보드만) |
+
+`LoginFailedSpike` 임계값은 이전 초안(10분 20회)에서 **10분 10회**로 낮췄다: 동시 접속 50 규모에서는 정상 실패가 시간당 1건 미만일 것이라는 추정에 근거하며(미측정), GitHub 장애는 별도 규칙(`GitHubUnavailable`)이 잡는다.
 
 ## 18. 시험 연결 요약 (08)
 
@@ -1845,8 +2180,11 @@ flowchart TD
 | Envoy Gateway 의 WebSocket 타임아웃 정책 리소스 | G8 |
 | Cloudflare 정적 미러 수단과 무료 한도 | G11 |
 | 무료 외부 백업 저장소, 암호화 도구(`age` 가용성) | G12 |
+| Grafana 프로비저닝의 `$__file{}` 시크릿 확장·Discord 연락처 동작, `gen-grafana-alerts.ts` 생성 방식 | S7-6 (미검증) |
+| Oracle 호스트·집 PC 에서 `pf` 사용자·`docker` 그룹·rootless 여부, `PF_LOG_DIR` 권한 | S8-1 |
+| 경보 임계값(로그인 실패 10/10m, GitHub 3/5m, 26h 등) | 운영 데이터 확보 후 조정 |
 | 스크레이프 주기(15초) · 보존(7일/1GB) 조정 | 구현 중 측정 |
-| 통지 채널(Alertmanager) 도입 여부 | M1 후반 |
+| 통지 채널 | **Discord 웹훅 확정**(§16.3). 연락처 프로비저닝 동작은 S7-6 에서 확인 |
 | Next 정적 내보내기로 폴백 한정 빌드 가능 여부 | G3 |
 | 속도 제한 수치(nginx·세션) | S6-4 부하 시험 |
 

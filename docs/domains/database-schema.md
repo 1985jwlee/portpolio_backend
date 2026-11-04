@@ -111,7 +111,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 |---|---|
 | `id` PK, `entry_id` FK, `reporter_key` | UNIQUE (`entry_id`, `reporter_key`) |
 | `reason_code` | `ReasonCode` 열거(앱 고정 값, DB 는 길이 `CHECK`) |
-| `note` | 신고자 메모, 길이 ≤ 200. **이벤트에 싣지 않는다**(05) |
+| `note_enc` | 신고자 메모를 **AES-256-GCM 봉투**(`v1.<keyId>.<base64url>`, AAD `guestbook.report.note:<id>`)로 암호화한 text. 평문 컬럼 없음. 길이 ≤ 200 은 암호화 전 앱 검사. **이벤트·읽기 모델에 싣지 않는다**(05, ADR-026) |
 | `status` | `open` / `resolved`. `open → resolved` 는 **조건부 UPDATE**(동시 처리 시 한 명만 성공) |
 | `resolution` | `dismissed` / `entry_hidden` (`resolved` 일 때) |
 | `resolved_by` | uuid, 관리자 `user_id`, FK 없음 |
@@ -183,6 +183,26 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `at` | timestamptz |
 | `detail` | 짧은 jsonb. **글 본문을 넣지 않는다** |
 | `owner_key` | 상세를 볼 수 있는 행위자 = 내부 행위자 키 그대로(`session:<id>` / `user:<id>`, 05) |
+
+**`audit_log`** — 감사 로그(**추가 전용**, 보안·운영 감사, ADR-027)
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `id` | bigint identity | PK. 키셋 조회 커서 |
+| `at` | timestamptz | NOT NULL. `tx.now` |
+| `category` | text | `auth` / `admin` / `system` (`CHECK`) |
+| `action` | text | 고정 열거(`login_succeeded`, `login_failed`, `logout`, `entry_hidden`, `entry_unhidden`, `report_resolved`, `write_lock_changed`, `report_note_read`, `dead_requeued`, `field_keys_rotated`, `projection_rebuilt`, `retention_ran`) |
+| `actor_role` | text | `anonymous` / `user` / `admin` / `system` |
+| `actor_key` | text | `session:<id>` / `user:<id>` / NULL(system) |
+| `target_type`, `target_id` | text | 대상(`entry`·`report`·`write_lock`·`session` …), `target_id` 는 uuid 문자열 또는 NULL |
+| `outcome` | text | `success` / `denied` / `failed` |
+| `reason_code` | text | 실패·거절 사유(고정 열거: `state_invalid`·`state_expired`·`github_rejected`·`github_unavailable` …), 길이 `CHECK` |
+| `trace_id` | uuid | 앱 로그·`trace_step` 과 연결 |
+| `detail` | jsonb | 작은 메타(개수·버전). **본문·IP·토큰·메모 금지**, 크기 `CHECK` |
+
+- **추가 전용**: 애플리케이션 경로에 UPDATE/DELETE 가 없다. 삭제는 보관 정리 규칙만 한다.
+- **행위와 같은 트랜잭션**에서 쓴다(`AuditWriter.record(tx, entry)`, `OutboxWriter` 와 같은 패턴 — `events` 모듈 소유, 다른 모듈의 usecase 가 자기 tx 안에서 호출). 롤백되면 감사 행도 사라진다.
+- 보관: `auth` 7일, `admin`·`system` 90일(**확정**, ADR-027 후속 결정). §9.
 
 ### 4-4. `realtime` (쓰기)
 **`inbox_message`** — 소비자 `realtime-broadcaster` (§4-5 공통 형태). 이 모듈은 쓰기 모델이 inbox 뿐이다.
@@ -331,6 +351,7 @@ flowchart LR
     I -->|"guestbook-projector"| V["guestbook_read.entry_view · report_queue"]
     I -->|"realtime-broadcaster"| C["realtime_read.change_log"]
     T["events.trace_step"] -.->|"주기 집계"| F["events_read.flow_counter"]
+    A["명령·관리 usecase (같은 tx)"] -->|"AuditWriter"| L["events.audit_log (추가 전용)"]
 ```
 
 ## 7. 스키마 간 참조 (FK 없음, id 값으로만)
@@ -359,7 +380,8 @@ flowchart LR
 | 집합체별 선두 규칙 | `inbox_message (consumer, aggregate_id, seq) WHERE status IN ('received','processing')`, `outbox_event (aggregate_id, seq)` |
 | 흐름 상세·증분 읽기 | `trace_step (trace_id, id)`, PK `id` |
 | 재구성 상태 | `projection_state` PK `name` |
-| 정리 작업 | `outbox_event (created_at)`, `inbox_message (received_at)`, `trace_step (at)`, `flow_counter (bucket)` |
+| 정리 작업 | `outbox_event (created_at)`, `inbox_message (received_at)`, `trace_step (at)`, `flow_counter (bucket)`, `audit_log (category, at)` |
+| 감사 조회 | `audit_log (at)`, `(category, at)`, `(action, at)`, PK `id` 로 키셋 |
 | 재접속 복구 | `change_log` 기본키가 곧 인덱스 |
 
 인덱스는 질의가 생길 때 추가한다. 위는 M1 에서 이미 필요한 것만 적었다.
@@ -378,6 +400,8 @@ flowchart LR
 | `reaction.actor_key` (`session:`) | 세션 삭제 시 행마다 무작위 값으로 교체 | 집계는 유지, 행위자 식별은 불가 |
 | `outbox_event`(`published`), `inbox_message`(`processed`), `trace_step`, `flow_counter` | 7일 | 정리 작업 |
 | `request_key` | 24시간 | 정리 작업 |
+| `audit_log` (`category = auth`) | 7일 | 정리 작업(events 소유 RetentionRule, ADR-027) |
+| `audit_log` (`category = admin`·`system`) | 90일(**확정**) | 정리 작업 |
 | `my_reaction` (`session:` 행위자) | 세션 삭제 시 함께 | **읽기 모델 직접 쓰기 예외 ①** — 정리 작업이 이벤트 없이 삭제 |
 | `outbox_event`·`inbox_message` (`dead`) | 30일, 테이블당 1만 건 상한 | ADR-023 |
 | `realtime_read.change_log` | 1시간 또는 채널당 1만 행 중 먼저 닿는 쪽 | realtime 이 소유한 `ChangeLogRule`(ADR-023) |
@@ -387,6 +411,105 @@ flowchart LR
 **읽기 모델·쓰기 모델 경계의 예외(모두 명시)**: ① 위 익명화 두 건(`entry_view.author_actor_key`, `my_reaction`)은 이벤트 없이 직접 쓴다 ② 재구성 잡은 `entry_view_next` 를 채우고 교체한다 ③ `LoadEntryForConflict`(409 응답용)는 쓰기 스키마 `guestbook.entry` 를 읽는다. 그 외 모든 읽기 모델 갱신은 inbox 경유 이벤트다.
 
 **모듈 사이 읽기는 테이블이 아니라 공개 usecase 포트로 한다**(예외 아님): realtime 의 스냅샷은 `guestbook.ReadPublicEntries`(guestbook 의 읽기 모델 조회)와 `events.FlowSummaryReader`·`events.TraceReader`(events 의 읽기·추적 조회)를 호출하고, worker 의 세션 정리 잡은 `identity` 공개 usecase 와 `guestbook.AnonymizeSessionData` 를 호출한다. 남의 테이블에 직접 `SELECT`/`DELETE` 하는 곳은 위 ①~③ 뿐이다.
+
+## 9.1 필드 보호 구분 (컬럼 단위, ADR-026)
+
+모든 컬럼의 보호 등급이다. **새 컬럼은 이 표에 등급을 적지 않으면 추가할 수 없다**(`check:classification`, 아래 "검사").
+
+| 등급 | 뜻 | 저장 방식 |
+|---|---|---|
+| **PUB** | 공개 데이터 | 평문 |
+| **SYS** | 운영 메타(시각·상태·순번·내부 ID) | 평문 |
+| **PSD** | 가명 식별자(세션·행위자·내부 사용자 ID) | 평문 + 만료 시 익명화/삭제(§9), 로그·지표 레이블 금지 |
+| **PII** | 개인 연결 정보(GitHub 공개 프로필 파생) | 평문, 최소 수집 |
+| **HSH** | 해시 | 원문 저장 금지, 해시만 |
+| **ENC** | 필드 암호화 | AES-256-GCM 봉투(ADR-026) |
+
+**저장하지 않는 것**: 접속 IP, 이메일, 세션 토큰 원문, GitHub 액세스 토큰, OAuth `code_verifier`(서명 쿠키 10분), `User-Agent`, 비밀번호(없음).
+
+### identity
+| 테이블.컬럼 | 등급 | 비고 |
+|---|---|---|
+| `user_account.id` | PSD | |
+| `user_account.github_id` | PII | 평문 — 유일 조회·관리자 허용목록 대조에 필요, 공개 프로필 값 |
+| `user_account.login` | PII | 평문 — 공개 프로필 표시용 스냅샷 |
+| `user_account.display_name` | PII | 평문 — 사용자가 공개를 의도한 표시 이름 |
+| `user_account.created_at`, `last_login_at` | SYS | |
+| `session.id` | PSD | |
+| `session.token_hash` | **HSH** | SHA-256, 원문 없음 |
+| `session.user_id` | PSD | |
+| `session.created_at`, `last_seen_at`, `expires_at` | SYS | |
+| `request_key.actor_key` | PSD | 24시간 후 삭제 |
+| `request_key.key`, `status`, `response_status`, `created_at` | SYS | |
+| `request_key.request_hash` | **HSH** | 요청 본문 해시 |
+| `request_key.response_body` | PSD | 재생용 원 응답(`me` 등), 24시간 후 삭제 |
+
+### guestbook (쓰기)
+| 테이블.컬럼 | 등급 | 비고 |
+|---|---|---|
+| `entry.id`, `status`, `version`, `*_at` | SYS | |
+| `entry.author_session_id` | PSD | 세션 만료 시 NULL |
+| `entry.author_user_id` | PSD | |
+| `entry.display_name`, `body` | PUB | 공개 데이터 |
+| `reaction.entry_id`, `created_at` | SYS | |
+| `reaction.actor_key` | PSD | 세션 만료 시 `purged:<uuid>` |
+| `reaction.emoji` | PUB | |
+| `report.id`, `entry_id`, `status`, `resolution`, `*_at` | SYS | |
+| `report.reason_code` | SYS | 고정 열거 |
+| `report.reporter_key` | PSD | |
+| `report.resolved_by` | PSD | 관리자 `user_id` |
+| **`report.note_enc`** | **ENC** | 신고자 자유 텍스트. AAD `guestbook.report.note:<id>` |
+| `moderation_action.id`, `entry_id`, `action`, `created_at` | SYS | |
+| `moderation_action.admin_user_id` | PSD | |
+| `moderation_action.reason` | SYS | 관리자 입력 사유, 평문 — **개인정보를 넣지 않는 운영 규칙**(길이 ≤200). 후보: 필요하면 ENC 로 상향 |
+| `write_lock.id`, `locked`, `changed_at`, `version` | SYS | |
+| `write_lock.reason` | PUB | 사용자에게 표시되는 문구 |
+| `write_lock.changed_by` | PSD | |
+| `request_key.*` | identity 와 동일 | `response_body` 는 PUB(공개 뷰) — 24시간 |
+
+### events · inbox (outbox·모든 inbox 공통)
+| 테이블.컬럼 | 등급 | 비고 |
+|---|---|---|
+| `id`, `seq`, `consumer`, `message_id`, `source`, `type`, `aggregate_type`, `aggregate_id`, `aggregate_version`, `schema_version`, `occurred_at`, `trace_id`, `status`, `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at`, `*_at` | SYS | `claim_token` 은 임대 토큰(비밀 아님, 수명 짧음) |
+| `owner_key` | PSD | 행위자 키 |
+| `payload` | PUB | 공개 변환 전 이벤트 본문(글 본문·표시 이름·발췌). **`note` 는 싣지 않는다**(05). 7일 후 삭제 |
+| `last_error` | SYS | **본문·키·토큰 금지**, 길이 제한(오류 분류와 짧은 메시지만) |
+| `trace_step.id`, `trace_id`, `step`, `at` | SYS | |
+| `trace_step.detail` | SYS | 글 본문 금지(짧은 메타) |
+| `trace_step.owner_key` | PSD | |
+| `audit_log.id`, `at`, `category`, `action`, `actor_role`, `target_type`, `target_id`, `outcome`, `reason_code`, `trace_id` | SYS | 고정 열거·내부 ID |
+| `audit_log.actor_key` | PSD | 행위자 키, 로그·지표 레이블 금지 |
+| `audit_log.detail` | SYS | **본문·IP·토큰·신고 메모 금지**, 작은 jsonb(개수·버전) |
+
+### 읽기 모델
+| 테이블.컬럼 | 등급 | 비고 |
+|---|---|---|
+| `entry_view.display_name`, `body`, `reactions` | PUB | 삭제 글은 비움 |
+| `entry_view.author_actor_key` | PSD | 응답에 노출하지 않음, 세션 정리가 NULL |
+| `entry_view` 나머지(`entry_id`, `status`, `version`, `author_kind`, 시각, `*_seq`) | SYS | |
+| `report_queue.entry_excerpt` | PUB | 공개 본문의 앞부분(관리자 전용 조회) |
+| `report_queue` 나머지 | SYS | `note` 없음 |
+| `my_reaction.actor_key` | PSD | 세션 정리가 삭제 |
+| `my_reaction.entry_id`, `emoji`, `present`, `last_seq` | PUB·SYS | |
+| `flow_counter.*` | SYS | 집계 개수만 |
+| `change_log.payload` | PUB | **공개 변환 후** 본문(식별자·ownerKey 없음, AC-009) |
+| `change_log` 나머지, `channel_seq.*`, `projection_state.*` | SYS | |
+
+### 현재 결정과 상향 후보
+현재 ENC 는 `report.note_enc` 하나다(사용자 선택, ADR-026). 아래는 평문으로 두기로 한 근거와 상향 조건이다.
+
+| 필드 | 평문 근거 | ENC 로 올릴 조건 |
+|---|---|---|
+| `user_account.login`·`display_name` | 공개 프로필, 화면에 표시 | 이메일 등 비공개 개인정보를 수집하게 될 때 |
+| `user_account.github_id` | 유일 조회·허용목록 대조 | 올리려면 HMAC 블라인드 인덱스 필요 |
+| `report.reporter_key` | 가명 식별자, 중복 신고 방지 유일 키에 사용 | 신고자 신원 보호 요구가 생길 때(블라인드 인덱스 필요) |
+| `moderation_action.reason` | 관리자 본인 입력, 외부 노출 없음 | 관리 사유에 개인정보가 들어가는 운영 사례가 생길 때 |
+
+### 검사 (`check:classification`)
+- 각 모듈의 `adapter/postgres/classification.ts` 가 `테이블 → 컬럼 → 등급` 맵을 가진다.
+- 시험이 Drizzle 스키마의 모든 컬럼(`getTableColumns`)과 맵을 대조해 **분류 누락·미존재 컬럼**을 CI 에서 실패시킨다.
+- 등급이 `ENC` 인 컬럼은 `FieldCipher` 를 거치는 쓰기 경로만 허용한다(평문 컬럼이 없음을 스키마가 보장하고, 시험이 덤프에 평문 센티널이 없음을 확인).
+- 등급이 `PSD` 인 컬럼은 로그·지표 레이블에 쓰지 않는다(`Redactor` 규칙과 08 의 로그 시험).
 
 ## 10. 일관성 점검
 

@@ -26,8 +26,8 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | ID-03 | 세션 갱신(슬라이딩) | ID-02 에서 1시간 경과 시 | `TouchSession`(usecase) | `session` W | FR-010 | S2-1 |
 | ID-04 | 내 정보 조회 | `GET /api/me` | `GetMe` | `session`·`user_account` R | FR-010,011 | S2-2 |
 | ID-05 | GitHub 로그인 시작 | `GET /api/auth/github` | `BeginGithubLogin`, `OAuthStateCodec` | — (서명 쿠키) | FR-011 | S2-3 |
-| ID-06 | GitHub 로그인 완료 | `GET /api/auth/github/callback` | `CompleteGithubLogin`, `GithubClient` | `user_account` W, `session` W/D | FR-011 | S2-3 |
-| ID-07 | 로그아웃 | `POST /api/auth/logout` | `Logout` | `session` D | FR-011 | S2-3 |
+| ID-06 | GitHub 로그인 완료 | `GET /api/auth/github/callback` | `CompleteGithubLogin`, `GithubClient` | `user_account` W, `session` W/D | FR-011 | S2-3 · 감사: `auth.login_succeeded`/`login_failed` |
+| ID-07 | 로그아웃 | `POST /api/auth/logout` | `Logout` | `session` D | FR-011 | S2-3 · 감사: `auth.logout` |
 | ID-08 | 표시 이름 변경 | `PUT /api/me/profile` | `UpdateProfile` | `user_account` W | FR-011 | S2-3 |
 | ID-09 | 관리자 판정 | ID-04/가드 | `AdminPolicy` | — (설정) | FR-012 | S2-4 |
 | ID-10 | 만료 세션 정리·익명화 | worker 잡 | `PurgeExpiredSessions` — **worker 잡이 두 모듈의 공개 usecase 를 차례로 호출**: `identity.ListExpiredSessionIds` → `guestbook.AnonymizeSessionData`(GB-12) → `identity.DeleteSessions` | `session` D, (GB-12 경유) `entry`·`reaction` W | FR-080, AC-011 | S6-6 |
@@ -42,10 +42,10 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | GB-04 | 반응 추가 | `PUT …/reactions/{emoji}` | `AddReaction` | `reaction` W(유일 키), outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
 | GB-05 | 반응 취소 | `DELETE …/reactions/{emoji}` | `RemoveReaction` | `reaction` D, outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
 | GB-06 | 신고 | `POST …/reports` | `ReportEntry` | `report` W, outbox, request_key | `report.filed` | FR-023 | S6-3 |
-| GB-07 | 숨김 | `POST /api/admin/entries/{id}/hide` | `HideEntry` | `entry` W(version), `moderation_action` W, outbox | `entry.hidden` | FR-023 / AC-006 | S6-3 |
-| GB-08 | 숨김 해제 | `POST …/unhide` | `UnhideEntry` | 위와 동일 | `entry.unhidden` | FR-023 | S6-3 |
-| GB-09 | 신고 처리 | `POST /api/admin/reports/{id}/resolve` | `ResolveReport` | `report` W(`open→resolved` 조건부), outbox | `report.resolved` | FR-023 | S6-3 |
-| GB-10 | 쓰기 잠금 스위치 | `POST /api/admin/write-lock` | `SetWriteLock` | `guestbook.write_lock` W(신규) | — | ADR-008/023 | S6-4 |
+| GB-07 | 숨김 | `POST /api/admin/entries/{id}/hide` | `HideEntry` | `entry` W(version), `moderation_action` W, outbox | `entry.hidden` | FR-023 / AC-006 | S6-3 · 감사: `admin.entry_hidden` |
+| GB-08 | 숨김 해제 | `POST …/unhide` | `UnhideEntry` | 위와 동일 | `entry.unhidden` | FR-023 | S6-3 · 감사: `admin.entry_unhidden` |
+| GB-09 | 신고 처리 | `POST /api/admin/reports/{id}/resolve` | `ResolveReport` | `report` W(`open→resolved` 조건부), outbox | `report.resolved` | FR-023 | S6-3 · 감사: `admin.report_resolved` |
+| GB-10 | 쓰기 잠금 스위치 | `POST /api/admin/write-lock` | `SetWriteLock` | `guestbook.write_lock` W(신규) | — | ADR-008/023 | S6-4 · 감사: `admin.write_lock_changed` |
 | GB-11 | 쓰기 잠금 검사 | GB-01,02,04,06 진입 | `WriteLockPolicy` | `write_lock` R | — | ADR-008 | S6-4 |
 | GB-12 | 세션 데이터 익명화 | worker ID-10 잡이 호출 | `AnonymizeSessionData`(guestbook 공개 usecase) | `entry`·`reaction` W(쓰기 모델) + `entry_view`·`my_reaction` W(**이벤트 없이 직접 쓰는 보관 정리 예외**) | — | FR-080 / AC-011 | S6-6 |
 
@@ -59,7 +59,8 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | GB-23 | entry 계열 프로젝션 | inbox `entry.*` | `GuestbookProjector.onEntry*` | `entry_view` W | FR-035 / AC-017 | S3-5 |
 | GB-24 | 반응 프로젝션 | inbox `reaction.changed` | `onReactionChanged` | `entry_view.reactions`·`my_reaction` W | FR-021,035 | S6-1 |
 | GB-25 | 신고 프로젝션 | inbox `report.*` | `onReport*` | `report_queue` W | FR-023 | S6-3 |
-| GB-26 | 읽기 모델 재구성 | worker CLI `rebuild` | `RebuildEntryView`, `ProjectionState` | `entry_view_next` W, `projection_state` W | AC-017 / ADR-023 | S6-5 |
+| GB-27 | 신고 메모 복호화 조회(관리자) | `GET /api/admin/reports/{id}/note` | `GetReportNote`, `FieldCipher` | `report` R(쓰기 모델, 명령 쪽 읽기 예외) | ADR-026 | S6-3 · 감사: `admin.report_note_read` |
+| GB-26 | 읽기 모델 재구성 | worker CLI `rebuild` | `RebuildEntryView`, `ProjectionState` | `entry_view_next` W, `projection_state` W | AC-017 / ADR-023 | S6-5 · 감사: `system.projection_rebuilt` |
 
 ## 4. events (EV)
 
@@ -71,13 +72,15 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | EV-04 | 메시지 처리 러너(선점·핸들러·완료) | worker 루프 | `MessageRunner`, `ClaimToken` | `inbox_message` W + 핸들러 대상 | FR-031,033 | S3-4 |
 | EV-05 | 임대 회수(reaper) | worker 주기 | `LeaseReaper` | outbox·inbox W | FR-033 / AC-015 | S3-3 |
 | EV-06 | 재시도·백오프·dead 전이 | EV-02,04 실패 경로 | `RetryPolicy`, `ErrorClassifier` | outbox·inbox W | FR-032 | S3-4 |
-| EV-07 | dead 재투입 | worker CLI `dead-requeue` | `DeadRequeueCommand` | outbox·inbox W | ADR-023 | S6-7 |
+| EV-07 | dead 재투입 | worker CLI `dead-requeue` | `DeadRequeueCommand` | outbox·inbox W | ADR-023 | S6-7 · 감사: `system.dead_requeued` |
 | EV-08 | 흐름 단계 기록 | EV-01,02,03,04 훅 | `TraceRecorder` | `trace_step` W | FR-040 | S3-7 |
 | EV-09 | 흐름 집계 | worker 주기 | `FlowAggregator` | `trace_step` R, `flow_counter` W | FR-041 | S4-7 |
-| EV-10 | 보관 정리 | worker 주기 | `RetentionRunner`, 테이블별 `RetentionRule` | 전 테이블 D | FR-080 / AC-011 | S6-6 |
+| EV-10 | 보관 정리 | worker 주기 | `RetentionRunner`, 테이블별 `RetentionRule` | 전 테이블 D | FR-080 / AC-011 | S6-6 · 감사: `system.retention_ran` |
 | EV-11 | 흐름 상세 조회 | `GET /api/flow/trace/{id}` | `GetTrace` | `trace_step` R | FR-040 | S4-6 |
 | EV-12 | 흐름 요약 조회 | `GET /api/flow/summary` | `GetFlowSummary` | `flow_counter` R | FR-041 | S4-7 |
 | EV-13 | 깨우기 신호(NOTIFY 발행/수신) | outbox·change_log·trace 변경 | `NotifyEmitter`, `NotifyListener` | — (Postgres NOTIFY) | FR-030 | S3-3 |
+| EV-14 | 감사 기록 | 명령·관리 usecase 내부 / CLI | `AuditWriter`, `PostgresAuditWriter` | `audit_log` W(호출자의 같은 tx) | ADR-027 | S1-14 |
+| EV-15 | 감사 조회 | `GET /api/admin/audit`, `worker audit:list` | `ListAuditLog`, `AuditCursorCodec` | `audit_log` R | ADR-027 | S6-9 |
 
 ## 5. realtime (RT)
 
@@ -137,9 +140,10 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | CM-05 | DB 풀·UoW·마이그레이션 실행 | `packages/db` | | S1-4 |
 | CM-06 | 조립(compose) 루트와 생명주기(기동·종료) | `apps/*/compose` | api·worker·ws-gateway·web 각각 | S1-7 |
 | CM-07 | 보조 포트 구현(RateLimiter·PresenceCounter·KeyValueCache·EventTransport) | `packages/infra` | ADR-024 | S1-8 |
-| CM-08 | 시드·관리 CLI (`db:seed`, `worker rebuild\|dead-requeue\|admin write-lock\|retention:run`) | `scripts/`, `apps/worker/cli` | design/02, F16 §11 | S1-7 (프레임·시드), S6-5/S6-6/S6-4 (각 명령) |
+| CM-08 | 시드·관리 CLI (`db:seed`, `worker rebuild\|dead-requeue\|rotate-field-keys\|admin write-lock\|audit:list\|retention:run` (모든 관리 CLI 는 `AuditWriter` 로 `system.*` 감사 기록)) | `scripts/`, `apps/worker/cli` | design/02, F16 §11 | S1-7 (프레임·시드), S6-5/S6-6/S6-4 (각 명령) |
 | CM-09 | 프로토콜 스키마·JSON Schema 내보내기 | `packages/protocol` | design/01 | S1-9 |
 | CM-10 | 시험 지원(testkit) | `packages/testkit` | design/08 | S1-10 |
+| CM-12 | 컬럼 보호 등급 검사 | `modules/*/adapter/postgres/classification.ts` + `check:classification` | ADR-026, database-schema §9.1 | S1-13 |
 | CM-11 | 시계·식별자 주입 | `kernel` 포트 | | S1-2 |
 
 ## 8. 운영 (OB)
@@ -160,19 +164,22 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | OB-12 | CI 워크플로(PR 검사·빌드·릴리스) | `.github/workflows` | — | S1-6,S8-6 |
 | OB-13 | 쓰기 잠금·긴급 스위치 운영 절차 (`worker admin write-lock` + `POST /api/admin/write-lock`) | 런북 | ADR-008 | S6-4 (도구), S8-1 (런북) |
 | OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | ADR-002 (AC-014 는 집 PC·Oracle) | S8-5 |
+| OB-15 | 로그 아카이브·조회 | **systemd 타이머**(`pf-archive-logs`, 일 1회 03:10) / 운영자 | `archive-logs.sh`, `logq.sh`, `infra/systemd/*` | — (Docker 로그 → `$PF_LOG_DIR/archive`), 상태는 `status/archive_logs/last_run.json` | ADR-027 | S8-7 |
+| OB-16 | 운영 상태 파일 수집 | worker `/metrics` 스크레이프 | `StatusFileCollector`, `StatusFileReader` (`status/<job>/last_run.json` → `pf_ops_*` 지표) | `STATUS_DIR` 파일(읽기 전용) | ADR-027 | S7-5 |
+| OB-17 | 경보 라우팅(Discord) | Grafana 알림 평가 | Grafana 알림 규칙·연락처·정책 프로비저닝 (`infra/grafana/provisioning/alerting/**`, 식 정본 `infra/prometheus/rules/pf.yml`) | — | ADR-027 | S7-6 |
 
 ## 9. 합계
 
 | 영역 | 기능 수 |
 |---|---|
 | ID | 10 |
-| GB | 12 + 7 = 19 |
-| EV | 13 |
+| GB | 12 + 8 = 20 |
+| EV | 15 |
 | RT | 16 |
 | WB | 21 |
-| CM | 11 |
-| OB | 14 |
-| **합** | **104** |
+| CM | 12 |
+| OB | 17 |
+| **합** | **111** |
 
 ## 9.1 공개 usecase / 공개 포트 등록 (모듈 경계용)
 
@@ -186,7 +193,15 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | events | `TraceReader` | realtime(TraceWatcher) | `trace_step` 증분 읽기 (private 채널 `flow.step`) |
 | events | `FlowSummaryReader` | realtime(SnapshotBuilder, FlowSummaryPublisher) | 익명 요약 읽기 |
 | identity | `ResolveSession` | api 가드, ws-gateway(private) | 세션 해석 |
+| events | `AuditWriter`(`record(tx, entry)`) | 모든 명령·관리 usecase, worker CLI | 행위와 같은 트랜잭션의 감사 기록 (EV-14) |
+| events | `ListAuditLog` | api(`GET /api/admin/audit`), worker CLI | 감사 조회 (EV-15, 관리자 전용) |
 | identity | `ListExpiredSessionIds`, `DeleteSessions` | worker(`PurgeExpiredSessions`) | 만료 세션 정리 |
+
+## 9.2 백로그 (M1 이후, 위 합계에 포함하지 않음)
+
+| ID | 기능 | 사유 |
+|---|---|---|
+| WB-22 | 관리자 감사 로그 화면(`/admin/audit`) | 관리자가 한 명이라 API(`GET /api/admin/audit`)와 CLI(`worker audit:list`)로 충분하다. M1 밖(2026-11-04 결정) |
 
 ## 10. 스키마 반영 항목 (상세 설계 F10~F17 이 요구, [database-schema.md](../../domains/database-schema.md) 에 반영됨)
 

@@ -244,6 +244,15 @@ classDiagram
     class PresenceCounter {
         <<interface>>
     }
+    class AuditWriter {
+        <<interface>>
+        +record(tx, entry) void
+    }
+    class FieldCipher {
+        <<interface>>
+        +encrypt(plain, ctx) string
+        +decrypt(envelope, ctx) string
+    }
     class KeyValueCache {
         <<interface>>
     }
@@ -274,6 +283,7 @@ classDiagram
 
 - **`CommandHandler` 는 `ReadRepository` 를, `QueryHandler` 는 `WriteRepository` 를 주입받을 수 없다**(타입으로 분리 + dependency-cruiser 규칙). 이것이 구조적 CQRS 강제다.
 - 포트 구현(`adapter/postgres`)은 엔트리포인트의 조립 단계에서만 연결한다.
+- `AuditWriter.record(tx, entry)` 는 `OutboxWriter` 와 같은 패턴이다: `events` 모듈이 소유하고(`events.audit_log`), 다른 모듈의 usecase 가 **자기 트랜잭션 안에서** 호출해 행위와 감사 기록이 원자적이다([ADR-027](../adr/ADR-027-server-logs.md)).
 - **모든 쓰기(C·U·D)는 `UnitOfWork.run` 의 트랜잭션 안에서만** 실행한다. `DbPool` 은 읽기 전용 핸들만 주고 쓰기 메서드는 `TxContext` 에만 있다([ADR-025](../adr/ADR-025-query-layer.md)).
 - `OutboxWriter.append(events, ctx)` 는 **현재 `UnitOfWork` 트랜잭션 안에서** 호출되며, 도메인 이벤트를 봉투로 인코딩(어댑터의 `EventCodec`)해 `outbox_event` 에 쓰고 같은 트랜잭션에서 `trace_step`(written·outboxed)과 `pg_notify('outbox_new')` 를 처리한다(F13 EV-01). 명령 usecase 는 `trace_step` 을 따로 쓰지 않는다.
 - `RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport` 는 **M1 에서 메모리/Postgres 어댑터**(`packages/infra`)이고, Redis 어댑터는 도입 기준 충족 시 포트 구현만 추가한다([ADR-024](../adr/ADR-024-redis-seam.md)).

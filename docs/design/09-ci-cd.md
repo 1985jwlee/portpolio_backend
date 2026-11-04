@@ -173,10 +173,11 @@ sequenceDiagram
 
 | 항목 | 내용 | 상태 |
 |---|---|---|
-| 확인 주기 | 5분 간격 폴링(systemd timer 또는 cron) | **제안** — 가져오는 주기·트리거는 tech-stack.md §7 에서 미결. 웹훅은 집 PC 가 수신해야 하므로 제외 |
+| 확인 주기 | 5분 간격 폴링 — **systemd 타이머 `pf-pull-deploy.timer`**(`infra/systemd/`, F17 §16.1.1)로 확정. 매 실행마다 `status/pull_deploy/last_run.json` 을 쓴다(변경 없음도 `ok=true`) | 확정(2026-11-04). 웹훅은 집 PC 가 수신해야 하므로 제외 |
 | 교체 순서 | worker(소비자) → api → ws-gateway → web. ws-gateway 교체 시 단절이 생기며 클라이언트가 재접속·복구 (ADR-014: Compose 는 "짧은 단절 후 복구") | 확정(ADR-014) |
 | 마이그레이션 | 교체 전 일회성 컨테이너로 `db:migrate`. 실패하면 교체하지 않는다 | 확정 |
 | 헬스 게이트 | 서비스별 헬스 통과 후 다음 서비스 — **worker 는 `/healthz`**(readyz 없음, F17 §5.1), api·ws-gateway·web 은 `/readyz` | 확정 |
+| 상태 기록 | 결과를 `status/pull_deploy/last_run.json` `{job, started_at, finished_at, ok, detail, version, last_success_at}` 로 남기고 worker 가 `pf_ops_*` 지표로 노출, 실패(`ok=false`)는 `DeployFailed` 경보(F17 §16.2·§17) | 확정 |
 | 롤백 | 직전 다이제스트로 되돌림. 마이그레이션은 되돌리지 않는다(앞으로 호환 규칙으로 흡수, §4) | 확정 |
 | 스크립트 위치 | `infra/scripts/pull-deploy.sh` (구현 시 작성) | 미작성 |
 

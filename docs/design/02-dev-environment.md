@@ -84,6 +84,19 @@ sequenceDiagram
     Dev->>Dev: http://localhost:8080 접속
 ```
 
+### 2.3 로깅 옵션과 호스트 아카이브 (ADR-027, 제안/미검증)
+
+| 항목 | 내용 |
+|---|---|
+| 컨테이너 로깅 | 모든 서비스 `logging: { driver: json-file, options: { max-size: "20m", max-file: "10" } }` (컨테이너당 최대 약 200MB). 개발 오버라이드는 기본값 사용 |
+| 호스트 아카이브 | `$PF_LOG_DIR/archive/YYYY-MM-DD/<service>.jsonl.gz` — `PF_LOG_DIR` 기본 `/var/log/pf`(`pf:pf` 0750, 파일 0640). rootless Docker 면 `~/.local/state/pf/logs`. **실제 호스트(집 PC·Oracle) 권한은 S8-1 에서 재확인** |
+| 실행 | **systemd 타이머로 확정**(2026-11-04): `pf-archive-logs.timer` 일 1회 03:10 → `infra/scripts/archive-logs.sh`. 백업(03:30)·pull 배포(5분)도 같은 방식. 유닛은 `infra/systemd/`, 설치는 `infra/scripts/install-systemd.sh`(제안): 유닛 복사 → `systemctl daemon-reload` → `enable --now *.timer` → `list-timers` 확인. `Persistent=true` 로 꺼져 있던 동안의 실행을 보충. cron 은 systemd 가 없는 호스트의 대체 수단 (F17 §16.1.1) |
+| 상태 파일 | 각 작업이 `$STATUS_DIR/<job>/last_run.json` 을 매 실행마다 갱신 → worker 가 읽기 전용으로 마운트해 지표로 노출(F17 §16.2) |
+| 조회 | `infra/scripts/logq.sh --app api --level error --since 1h` (jq 필요) |
+| 개발 | 아카이브·타이머 불필요(`docker compose logs` 로 충분). **개발 모드에서는 경보를 비활성**: Grafana 는 시크릿 파일/환경변수가 없으면 alerting 프로비저닝 **전체가 실패**하므로(실측) 개발 오버라이드는 `alerting/` 프로비저닝 디렉터리를 **마운트하지 않는다** |
+| 유닛 설치 | `infra/scripts/install-systemd.sh`(제안)가 `*.service.in` 템플릿의 `@PF_LOG_DIR@`·`@STATUS_DIR@` 를 `/etc/pf/pf.env` 의 **절대 경로로 치환**해 설치한다 — systemd 는 `ReadWritePaths=$VAR` 를 확장하지 않고 무시한다(실측). 설치 후 `systemd-analyze verify` 로 경고 0 확인. 실제 `pf` 사용자 실행 권한은 S8-1 |
+| 메트릭 선초기화 | 앱은 기동 시 고정 열거 레이블 카운터(`pf_auth_login_failed_total{reason}` 4종 등)를 0 으로 미리 노출한다(F17 §3.2) — 개발에서 경보 규칙 시험이 첫 건을 놓치지 않게 |
+
 ## 3. 개발 환경 전제
 
 | 항목 | 값 |
@@ -148,6 +161,8 @@ classDiagram
 |---|---|---|---|
 | `DATABASE_URL`(비밀번호 포함) | `.env` | `secrets/database_url` 파일 → `DATABASE_URL_FILE` | 없음 |
 | `GITHUB_CLIENT_SECRET` | `.env` (**개발용 OAuth 앱**) | `secrets/github_client_secret` (**운영용 OAuth 앱**) | 없음 |
+| `FIELD_KEYS` (필드 암호화 키링 JSON, ADR-026) | `.env` (개발용 임의 키링) | `secrets/field_keys.json` → `FIELD_KEYS_FILE` | 없음 |
+| `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 개발에서는 미설정(경보 비활성, alerting 프로비저닝 미마운트) — **운영에서 파일이 없거나 비면 Grafana 연락처가 0개가 된다** | `secrets/discord_webhook` → `DISCORD_WEBHOOK_URL_FILE` | 없음 |
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, 32바이트 이상) | `.env` (개발용 임의 값) | `secrets/oauth_state_secret` → `OAUTH_STATE_SECRET_FILE` | 없음 |
 | Cloudflare Tunnel 토큰 | (로컬 시험 시 일회용) | `secrets/tunnel_token` | 없음 |
 | Grafana 관리자 비밀번호 | `.env` | `secrets/grafana_admin_password` | 없음 |

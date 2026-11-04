@@ -62,6 +62,58 @@ flowchart TB
 | 브라우저 구동, k6 | 서브프로세스·네트워크 | L3 |
 | 터널 경유 측정 | 실환경 | L4 |
 
+### 2.0d 운영 실측 회귀 시험 (ADR-027, 로컬 실측 반영)
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| 카운터 선초기화 | 앱 기동 직후 `pf_auth_login_failed_total` 4개 reason 모두 0 으로 노출. 선초기화를 끄면(음성 시험) 실제 10건에도 `increase` 가 10 미만 — 회귀 방지 | L2·L3 |
+| `promtool test rules` 이스케이프 회귀 | 정본 `pf.yml` 에 `\|` 가 없고(린트), `job=~"backup|archive_logs"` 가 두 job 에 모두 매치, 리터럴 `\|` 면 불발인 음성 시험 | L1·L2 |
+| 시크릿 누락 시 프로비저닝 | `DISCORD_WEBHOOK_URL_FILE` 이 없거나 비면 배포 전 점검이 실패(Grafana 는 연락처 0개로 기동) | L3 |
+| 아카이브 `+1 day` 계산 | KST 등 오프셋 있는 시간대에서 어제 00:00~오늘 00:00 범위가 24시간 | L3 |
+| 아카이브 줄 순서 | `--timestamps` 정렬 후 같은 스트림 내 순서 보존(스트림 간 같은 시각 순서는 비보장) | L3 |
+| 보관 경계 | 날짜 디렉터리 이름 기준 `<오늘−7일` 삭제, `touch -d` 로 mtime 을 바꿔도 결과 동일 | L3 |
+| systemd 유닛 | 템플릿 치환 후 `systemd-analyze verify` 경고 0 (`ReadWritePaths` 가 절대 경로) | L1 |
+
+### 2.0c 서버 기록·감사 (ADR-027)
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| 감사 대상 usecase 의 행위를 중간에 실패(`faults.failAt`)시킴 | 행위·outbox·**감사 행 모두 0행**(롤백) | L3 |
+| 감사 INSERT 를 실패시킴 | 행위도 롤백(감사만 빠진 성공 없음) | L3 |
+| `AuditEntry.detail` 에 금지 키(`body`·`note`·`token`·`ip`·`cookie`) | `DetailValidator` 가 거부(`PermanentError`) | L2 |
+| 로그인 실패(`state_invalid` 등) | 별도 tx 로 `auth.login_failed` 가 남는다, IP·`code`·`state` 없음 | L3 |
+| 신고 메모 열람(GB-27) | `admin.report_note_read` 1행, `detail` 에 메모 없음 | L3 |
+| 접근 로그: `GET /api/auth/github/callback?code=SECRET&state=X` 요청 | nginx 로그의 `uri` 에 쿼리 없음, 주소·UA·리퍼러·쿠키 필드 부재 | L3 |
+| `rid` ↔ `req_id` | 한 요청의 nginx `rid` 가 앱 로그 `req_id` 와 같음 | L3 |
+| `Redactor` 센티널 | 거부 키·토큰 패턴·IP 가 로그에서 `[redacted]`, `pf_log_redactions_total` 증가 | L2 |
+| `archive-logs.sh` | 7일 지난 날짜 디렉터리 삭제, 중복 실행 방지(flock), 파일 권한 0640, `status/archive_logs/last_run.json` 갱신 | L3(스크립트) |
+| `StatusFileCollector` | **파일 없음**(시리즈 없음, `absent()` 대상) / **오래됨**(`pf_ops_status_age_seconds` 큼) / **`ok=false`**(`pf_ops_last_run_ok=0`) / **깨진 JSON**(`pf_collector_errors_total`)을 서로 다른 결과로 구분 | L2 |
+| 상태 파일 쓰기 | 임시 파일 + rename 이라 읽는 쪽이 부분 쓰기를 못 봄, 실패해도 `last_success_at` 유지 | L2·L3 |
+| 경보 규칙 | `promtool check rules`·`promtool test rules`: `LoginFailedSpike` 10회 경계(9회 불발/10회 발화), `GitHubUnavailable` 3회/5분, `OpsJobStale` 26시간 경계, `DeployFailed` | L3(도구) |
+| 알림 프로비저닝 | 연락처·정책·규칙 파일 lint, 웹훅 미설정 시 규칙 미로드, 시험 알림 1건 수동 확인 | L3·L4 |
+| systemd 유닛 | `systemd-analyze verify infra/systemd/*.service *.timer`, `list-timers` 에 3개 등록, `Persistent=true` | L3(호스트) |
+| 감사 보관 규칙 | `auth` 7일·`admin`/`system` 90일 경계에서 정확히 삭제, 배치별 별도 tx | L3 |
+| 감사 조회 API | 비관리자 403, 키셋 이어받기, `since`·`category` 필터 | L3 |
+
+### 2.0b 데이터 보호 (ADR-026)
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| `check:classification` | 모든 컬럼에 등급, 맵에 없는 컬럼/남은 항목 없음 | L1·L2 |
+| PSD 컬럼 값이 로그·지표 레이블에 | 나타나지 않음 | L3 |
+
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| `FieldCipher` 왕복 | 복호화 결과 = 원문 | L2 |
+| AAD(문맥) 불일치 / 암호문 변조 / 태그 변조 | 복호화 거부 | L2 |
+| 같은 평문 두 번 암호화 | 서로 다른 봉투(iv 중복 없음) | L2 |
+| 키 ID 선택, 없는 키 | 해당 키로 복호화 / 없으면 `PermanentError` + 지표 | L2 |
+| `rotate-field-keys` 재실행 | 멱등, 중간 중단 후 이어서 완료, 끝나면 옛 키 행 0 | L3 |
+| 신고 후 `pg_dump` 결과 | 센티널 평문이 덤프·outbox payload·`request_key.response_body` 어디에도 없음 | L3 |
+| 로그·지표 | 평문 note·키 부재 | L3 |
+| 세션 토큰 | DB 에 원문 없음, 비교는 길이 검사 후 `timingSafeEqual` | L2 |
+
 ### 2.0a 쓰기는 트랜잭션 (ADR-025)
 
 | 시험 | 기대값 | 등급 |

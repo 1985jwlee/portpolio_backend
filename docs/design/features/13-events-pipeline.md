@@ -1,4 +1,4 @@
-# F13. events 파이프라인 상세 설계 (EV-01 ~ EV-13)
+# F13. events 파이프라인 상세 설계 (EV-01 ~ EV-15)
 
 명령 트랜잭션이 남긴 이벤트가 **outbox → 디스패처 → 모듈별 inbox → 러너 → 핸들러**를 지나 읽기 모델과 실시간으로 이어지는 길의 구현 수준 설계다.
 정본 이름·기반 클래스는 [00](../00-system-overview.md), 봉투·이벤트 종류·상태 수명은 [05](../05-event-catalog.md), 기능 ID는 [F00](00-feature-catalog.md).
@@ -13,7 +13,7 @@
 | §1 | 파이프라인 아키텍처 다이어그램 |
 | §2 | 통합 클래스 다이어그램 (저장·전달 / 실행 / 보관·조회) |
 | §3 | 모든 기능이 공유하는 규약: 트랜잭션 경계, 선점 SQL, 순서 규칙, 구독 레지스트리, 시간 규칙, NOTIFY, 잡 주기, 추적 위치, 보관 표 |
-| §4 | EV-01 ~ EV-13 기능별 상세 (클래스·시퀀스·순서도·오류·지표·시험) |
+| §4 | EV-01 ~ EV-15 기능별 상세(EV-14·15 는 감사 로그, ADR-027) (클래스·시퀀스·순서도·오류·지표·시험) |
 | §5 | 지표·로그 총괄, 시험 매트릭스, 스키마 반영 요청 |
 
 ## 1. 아키텍처
@@ -576,6 +576,7 @@ RETURNING o.id, o.status;
 | `OutboxPublishedRule`·`OutboxDeadRule`·`TraceStepRule`·`FlowCounterRule` | events |
 | `InboxProcessedRule`·`InboxDeadRule` | 각 inbox 소유 모듈(guestbook, realtime) — 같은 클래스를 모듈 자기 테이블로 인스턴스화 |
 | `RequestKeyRule` | guestbook, identity (각자 `request_key`) |
+| `AuditLogAuthRule`·`AuditLogAdminSystemRule` | events (`events.audit_log`, ADR-027) |
 | `ChangeLogRule` | **realtime** (F14 의 `ChangeLogTrimmer` 가 이 규칙이다 — 별도 삭제 로직을 두지 않는다) |
 | 세션 정리 `PurgeExpiredSessions` | **identity** 가 소유하는 별도 잡(익명화 선행이 필요해 이 틀을 쓰지 않는다, F10 ID-10) |
 
@@ -588,6 +589,8 @@ RETURNING o.id, o.status;
 | `TraceStepRule` | `events.trace_step` | `at` | 7일 | — | 2000(제안) | 10min |
 | `FlowCounterRule` | `events_read.flow_counter` | `bucket` | 7일 | — | 2000(제안) | 10min |
 | `ChangeLogRule` (realtime 소유) | `realtime_read.change_log` | `created_at` | **1시간** 또는 **채널당 1만 행** 중 먼저 | 채널별 상한 | 1000(제안) | **1min**(제안) |
+| `AuditLogAuthRule` | `events.audit_log` | `at` | 7일(**확정**) | `category='auth'` | 1000(제안) | 10min |
+| `AuditLogAdminSystemRule` | `events.audit_log` | `at` | 90일(**확정**, 2026-11-04) | `category IN ('admin','system')` | 1000(제안) | 10min |
 | `RequestKeyRule` | `guestbook.request_key`·`identity.request_key` | `created_at` | 24시간 | — | 1000(제안) | 10min |
 | (ID-10 `PurgeExpiredSessions`) | `identity.session` 등 | `expires_at` | 만료 즉시 | | | identity 소유·worker 등록(이 표의 규칙 틀 밖) |
 
@@ -1763,6 +1766,181 @@ flowchart TD
 | 오류 | 연결 끊김 → 재연결 + 즉시 보충 실행. LISTEN 불가(풀러 등) → 폴링만으로 계속 동작(지표로 가시화) |
 | 지표/로그 | `pf_notify_connected`†(0/1), `pf_notify_wakeups_total{channel,source}`†(source: `notify`·`poll`), 재연결 횟수 |
 | 시험 | 08 §5·G4: NOTIFY 차단 상태에서도 폴링으로 전달됨. 재연결 후 즉시 보충. 디바운스가 폭주 신호를 합침 |
+
+### EV-14 감사 기록 (`AuditWriter`)
+
+| 항목 | 내용 |
+|---|---|
+| 목적 | 로그인·관리 조치·운영 작업을 **행위와 같은 트랜잭션**으로 기록해 "일어나지 않은 일은 기록되지 않게" 한다(ADR-027) |
+| 트리거 | ID-06·07, GB-07·08·09·10·27 usecase 안, 그리고 worker 관리 CLI(`dead-requeue`·`rotate-field-keys`·`rebuild`·`retention:run`)의 마지막 단계 |
+| 사전 조건 | 호출자가 연 `TxContext` 가 있다(ADR-025). `actor`·`trace_id`·`tx.now` 가 컨텍스트에 있다 |
+| 사후 조건 | `events.audit_log` 에 1행(추가 전용). 호출 트랜잭션이 롤백되면 이 행도 없다 |
+| 읽기/쓰기 | W: `events.audit_log` (호출자의 같은 tx, 읽기 없음) |
+
+```mermaid
+classDiagram
+    class AuditWriter {
+        <<interface>>
+        +record(tx, entry AuditEntry) void
+    }
+    class AuditEntry {
+        +category AuditCategory
+        +action AuditAction
+        +actorRole string
+        +actorKey string
+        +targetType string
+        +targetId string
+        +outcome string
+        +reasonCode string
+        +traceId Uuid
+        +detail object
+    }
+    class PostgresAuditWriter {
+        -validator DetailValidator
+        +record(tx, entry) void
+    }
+    class DetailValidator {
+        +check(detail) void
+    }
+    class NoopAuditWriter
+    AuditWriter <|.. PostgresAuditWriter
+    AuditWriter <|.. NoopAuditWriter
+    AuditWriter ..> AuditEntry
+    PostgresAuditWriter --> DetailValidator
+```
+
+- `DetailValidator`: `detail` 는 작은 평면 객체(키 화이트리스트: `count`·`version`·`from`·`to` 등), **문자열 길이 상한**, 금지 키(`body`·`note`·`token`·`ip`·`cookie`)가 있으면 `PermanentError`(프로그래밍 오류). `Redactor` 2차선과 별개의 1차선이다.
+- `NoopAuditWriter` 는 시험·시드에서 감사를 끄는 용도(운영 조립에서는 쓰지 않는다).
+- `actorKey`·`targetType`·`targetId`·`reasonCode` 는 해당 없으면 NULL(선택).
+
+```mermaid
+sequenceDiagram
+    participant U as 명령/관리 usecase
+    participant T as UnitOfWork (tx)
+    participant D as 도메인 쓰기
+    participant W as AuditWriter
+    participant DB as Postgres
+    U->>T: run(tx)
+    T->>D: 상태 변경 + outbox append
+    D->>DB: UPDATE entry 등 (같은 tx)
+    U->>W: record(tx, admin / entry_hidden / entry:id)
+    W->>W: DetailValidator.check
+    W->>DB: INSERT events.audit_log (같은 tx)
+    alt 커밋
+        T-->>U: ok (행위 + outbox + 감사 3종이 함께 반영)
+    else 롤백 (버전 충돌, 오류)
+        T-->>U: Result.err — 행위·outbox·감사 행이 모두 사라짐
+    end
+    Note over U,DB: 의도된 거절(denied)을 남기려면 별도 짧은 tx 로 outcome=denied 행만 기록
+```
+
+```mermaid
+flowchart TD
+    A["감사 대상 행위 수행"] --> B{"성공 (커밋 예정)?"}
+    B -- "예" --> C["record(outcome=success)"]
+    B -- "아니오: 권한 거절 등 의도된 거절" --> D["별도 짧은 tx 에 record(outcome=denied, reason_code)"]
+    B -- "아니오: 예상 밖 실패/롤백" --> E["감사 행 없음 (앱 로그 error 로 추적)"]
+    C --> F{"detail 검증 통과?"}
+    D --> F
+    F -- "아니오" --> G["PermanentError — 개발 중 즉시 발견"]
+    F -- "예" --> H["INSERT audit_log"]
+```
+
+- 로그인 실패(`auth.login_failed`)는 의도된 거절이라 **별도 짧은 tx** 로 기록한다(OAuth 콜백은 세션을 만들지 못하는 경로).
+- 기록 대상 행위 목록·`reason_code` 열거는 ADR-027 이 정본이다.
+
+| 항목 | 내용 |
+|---|---|
+| 오류 | `DetailValidator` 위반 → `PermanentError`(프로그래밍 오류). DB 오류 → 호출 tx 가 롤백(감사만 실패하고 행위가 성공하는 일은 없다) |
+| 지표/로그 | `pf_audit_records_total{category,action,outcome}`†. 로그에는 `action`·`outcome` 만, `actor_key` 는 남기지 않는다(감사 표가 정본) |
+| 시험 | 행위 롤백 시 감사 행도 없음(L3), 감사 INSERT 실패 시 행위도 롤백, `detail` 금지 키 거부(L2), 거절(denied)은 별도 tx 로 남음 |
+
+### EV-15 감사 조회 (`ListAuditLog`)
+
+| 항목 | 내용 |
+|---|---|
+| 목적 | 관리자가 감사 기록을 조건별로 조회한다(ADR-027) |
+| 트리거 | `GET /api/admin/audit?category&action&since&cursor&limit`(관리자), `worker audit:list` CLI |
+| 사전 조건 | 관리자 권한(`RequireAdmin`), CLI 는 호스트 접근 |
+| 사후 조건 | 키셋 페이지(`id DESC`), 읽기 전용. 조회 자체는 감사 기록하지 않는다 |
+| 읽기/쓰기 | R: `events.audit_log` (읽기 핸들 `ReadDb`, 트랜잭션 없음) |
+
+```mermaid
+classDiagram
+    class ListAuditLog {
+        +execute(ctx, q AuditQuery) Result
+    }
+    class AuditQuery {
+        +category AuditCategory
+        +action AuditAction
+        +since Instant
+        +cursor string
+        +limit int
+    }
+    class AuditReadRepository {
+        <<interface>>
+        +page(q) AuditRecord[]
+    }
+    class AuditCursorCodec {
+        +encode(id) string
+        +decode(s) int64
+    }
+    class AuditRecordView {
+        +id string
+        +at Instant
+        +category string
+        +action string
+        +actorRole string
+        +actorKey string
+        +targetType string
+        +targetId string
+        +outcome string
+        +reasonCode string
+        +traceId Uuid
+    }
+    ListAuditLog --> AuditReadRepository
+    ListAuditLog --> AuditCursorCodec
+    ListAuditLog ..> AuditQuery
+    ListAuditLog ..> AuditRecordView
+```
+
+```mermaid
+sequenceDiagram
+    participant A as 관리자
+    participant R as api 라우트
+    participant G as 가드 체인
+    participant U as ListAuditLog
+    participant DB as audit_log
+    A->>R: GET /api/admin/audit?category=admin&since=…&limit=50
+    R->>G: Origin·Session·RateLimit·Schema·RequireAdmin
+    alt 관리자 아님
+        G-->>A: 403 forbidden
+    else 관리자
+        G->>U: execute(ctx, query)
+        U->>DB: 조건 + id < cursor ORDER BY id DESC LIMIT n+1
+        DB-->>U: rows
+        U-->>A: 200 Page(items, nextCursor)
+    end
+```
+
+```mermaid
+flowchart TD
+    A["요청"] --> B{"관리자?"}
+    B -- "아니오" --> X["403"]
+    B -- "예" --> C{"limit 1~100, category/action 열거 유효?"}
+    C -- "아니오" --> Y["400 validation_failed"]
+    C -- "예" --> D["키셋 조회"]
+    D --> E{"n+1 행?"}
+    E -- "예" --> F["nextCursor = 마지막 id"]
+    E -- "아니오" --> G["nextCursor = null"]
+```
+
+| 항목 | 내용 |
+|---|---|
+| 오류 | `ForbiddenError`(403), `ValidationError`(400: 잘못된 커서·열거) |
+| 지표/로그 | 일반 HTTP 지표만. 응답에 `detail` 은 포함하지 않는다(필요 시 후속 결정) |
+| 시험 | 비관리자 403, 커서 이어받기, `since` 경계, 카테고리 필터(L3) |
+
 
 ## 5. 총괄
 

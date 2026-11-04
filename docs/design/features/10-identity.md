@@ -919,7 +919,7 @@ classDiagram
 | 트리거 | `GET /api/auth/github/callback?code&state` (또는 `error=…`) |
 | 사전 조건 | OAuth 임시 쿠키 존재 |
 | 사후 조건 | `user_account` upsert, 새 로그인 세션 1건, 이전 세션(익명) 즉시 만료 처리, 임시 쿠키 삭제, `302` → 안전한 `returnTo` |
-| 접근 테이블 | `user_account` W, `session` W(삽입, 이전 세션 만료 처리) |
+| 접근 테이블 | `user_account` W, `session` W(삽입, 이전 세션 만료 처리), `events.audit_log` W(`AuditWriter`, ADR-027) |
 
 ```mermaid
 classDiagram
@@ -1026,6 +1026,11 @@ flowchart TD
 | DB 일시 장애 | `TransientError` | 503 | `unavailable` |
 
 사용자 거부(`error=access_denied`)는 오류가 아니라 정상 분기(리다이렉트 + 안내)다.
+
+**감사 기록 (ADR-027, EV-14)**
+- 성공: 사용자·세션 쓰기와 **같은 tx** 에서 `AuditWriter.record(category=auth, action=login_succeeded, actor_role=user, actor_key=user:<id>, outcome=success)`. 로그인 사용자 이름·`github_id` 는 `detail` 에 넣지 않는다.
+- 실패: 세션이 만들어지지 않는 경로이므로 **별도 짧은 tx** 로 `action=login_failed, outcome=failed|denied, actor_role=anonymous` 를 기록한다. `reason_code` 는 `state_invalid` · `state_expired` · `github_rejected` · `github_unavailable`(위 오류 표와 1:1). 사용자 거부(`access_denied`)는 `outcome=denied, reason_code=user_denied`.
+- 실패 기록의 `actor_key` 는 이전 익명 세션 키(있으면), IP·`code`·`state` 는 남기지 않는다.
 지표: `identity_login_total{result="success|denied|state_invalid|state_expired|github_error|db_error"}`, `identity_github_call_duration_seconds{call="token|user"}`. 로그: `outcome`, 오류 코드(GitHub 응답 본문·토큰·login 은 남기지 않는다).
 시험: 단위 L2(분기 전부 — 06 §3.2 순서도 표), 통합 L3(`GithubClient` 대역으로 성공·거절·시간 초과, 동시 첫 로그인 두 요청 → `user_account` 1건, 회전 후 이전 세션이 `ID-02` 에서 부재), L4(실제 GitHub 로그인은 릴리스 후 수동).
 
@@ -1039,7 +1044,7 @@ flowchart TD
 | 트리거 | `POST /api/auth/logout` |
 | 사전 조건 | 없음(세션이 없어도 호출 가능) |
 | 사후 조건 | 현재 세션 `expires_at = now`(즉시 만료), 쿠키 삭제(`Max-Age=0`). 응답 `200 {}` |
-| 접근 테이블 | `session` W |
+| 접근 테이블 | `session` W, `events.audit_log` W(`auth.logout`, 같은 tx, ADR-027) |
 
 ```mermaid
 classDiagram

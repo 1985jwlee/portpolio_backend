@@ -28,7 +28,7 @@ portpolio_backend/
 │  ├─ realtime/
 │  └─ observability/
 ├─ packages/                     # 공용 라이브러리 (모듈에 의존하지 않는다)
-│  ├─ kernel/                    # 기반 클래스·오류·Result (00 §4) + ports/ (RateLimiter·PresenceCounter·KeyValueCache·EventTransport, ADR-024)
+│  ├─ kernel/                    # 기반 클래스·오류·Result (00 §4) + ports/ (RateLimiter·PresenceCounter·KeyValueCache·EventTransport, ADR-024 · FieldCipher, ADR-026 · AuditWriter, ADR-027)
 │  ├─ protocol/                  # REST·WS·이벤트 스키마와 상수 (TypeBox 정의 + JSON Schema 내보내기)
 │  ├─ db/                        # 풀·트랜잭션·마이그레이션·드리즐 구성
 │  ├─ infra/                     # 보조 포트 구현: memory/ postgres/ (redis/ 는 도입 시, ADR-024)
@@ -39,8 +39,9 @@ portpolio_backend/
 │  ├─ docker/                    # Dockerfile.server, Dockerfile.web, (조건부) Dockerfile.proxy
 │  ├─ nginx/                     # nginx.conf, conf.d/, 정적 폴백 페이지 (G7)
 │  ├─ k8s/                       # k3d 검증 매니페스트 (Gateway API, Deployment …)
-│  ├─ prometheus/  grafana/      # 설정·대시보드 프로비저닝
-│  └─ scripts/                   # pull-deploy.sh, backup.sh 등 (09, 02)
+│  ├─ prometheus/  grafana/      # 설정·대시보드 프로비저닝 (grafana/provisioning/alerting/: 연락처·정책·규칙, F17 §16.3)
+│  ├─ systemd/                   # pf-archive-logs · pf-backup · pf-pull-deploy 의 .service/.timer (F17 §16.1.1)
+│  └─ scripts/                   # pull-deploy.sh, backup.sh, archive-logs.sh, logq.sh 등 (09, 02, ADR-027)
 ├─ scripts/                      # TypeScript(Bun) 저장소 도구: check-purity.ts, gen-schema.ts, seed.ts
 ├─ test/                         # 교차 시험: chaos/(동시성·장애), e2e/, load/ (k6) (08 §11). 재접속 시험은 apps/ws-gateway/test/
 ├─ docs/  specs/                 # 문서
@@ -215,6 +216,7 @@ flowchart LR
 | `db:seed` | 개발 시드 (02) |
 | `compose:up` · `compose:down` | 로컬 인프라 |
 | `k3d:up` · `k3d:down` | 로컬 K8s 검증 환경 (02) |
+| `check:classification` | 모든 Drizzle 컬럼이 `classification.ts` 에 등급(PUB·SYS·PSD·PII·HSH·ENC)을 가졌는지 검사 (ADR-026) |
 | `content:check` | 사이트 변수·프로필 스키마 검사. 비면 경고, `CONTENT_STRICT=1` 이면 릴리스 필수 변수가 비었을 때 실패 (12 §1.1) |
 | `check` | `lint → typecheck → arch → gen:schema --check → test:unit` (CI 의 PR 검사와 같은 순서). `content:check` 는 릴리스 워크플로가 별도 실행 (09) |
 
@@ -366,6 +368,11 @@ flowchart TD
 | `API_PORT` | int | `3001` | 아니오 | 아니오 | |
 | `GITHUB_CLIENT_ID` | string | — | **예** | 아니오 | |
 | `GITHUB_CLIENT_SECRET` | string | — | **예** | **예** | |
+| `FIELD_KEYS` | 키링(JSON `{active, keys{id→32바이트 base64}}`) | — | **예** | **예**(api·worker) | 필드 암호화 키링 ([ADR-026](../adr/ADR-026-data-protection.md)). `FIELD_KEYS_FILE` 로 주입, 회전은 키 추가 후 `active` 변경 + 재암호화 잡 |
+| `PF_LOG_DIR` | 경로 | `/var/log/pf` | 아니오 | **운영 스크립트 전용(앱 아님)** | 아니오 | 로그 아카이브 디렉터리. `/etc/pf/pf.env` 로 주입하고 **systemd 유닛 템플릿의 `@PF_LOG_DIR@` 로 절대 경로 치환**(유닛이 `$VAR` 를 확장하지 않음, 실측). rootless Docker 면 `~/.local/state/pf/logs` (F17 §16.1.1) |
+| `STATUS_DIR` | 경로 | `/var/lib/pf/status` | 아니오 | W(읽기 전용 마운트) + 운영 스크립트 | 아니오 | `status/<job>/last_run.json` 위치. worker 의 `StatusFileCollector` 가 읽기 전용으로 읽는다 (F17 §16.2) |
+| `DISCORD_WEBHOOK_URL` | URL | — | 운영 경보 시 | **grafana 컨테이너 전용** | **예** | Grafana 알림 연락처(Discord). `DISCORD_WEBHOOK_URL_FILE` 로 주입(Grafana 쪽은 `$__file{/run/secrets/…}`), 앱·worker 에는 주지 않는다. **누락/빈 값이면 Grafana alerting 프로비저닝 전체가 실패** — 개발은 프로비저닝을 마운트하지 않고, 운영은 배포 전 점검 (F17 §16.3, ADR-027) |
+| `BACKUP_AGE_RECIPIENT` | string(`age1…` 공개키) | — | 백업 시 | 아니오 | 백업 암호화 수신자 공개키(**비밀 아님**). 개인키는 서버에 두지 않는다 (ADR-026, F17) |
 | `OAUTH_STATE_SECRET` | string(32바이트 이상) | — | **예** | **예** | OAuth 임시 쿠키(`state`·PKCE verifier) 서명 키 ([06](06-auth.md) §3, ID-05). 회전 시 진행 중 로그인만 무효 |
 | `GITHUB_REDIRECT_URI` | URL | `PUBLIC_ORIGIN` + `/api/auth/github/callback` | 아니오 | 아니오 | |
 | `ADMIN_GITHUB_IDS` | 숫자 ID 쉼표 목록 | — | **예** | 아니오 | 로그인 이름이 아니라 **숫자 ID** (이름은 바뀔 수 있다) |

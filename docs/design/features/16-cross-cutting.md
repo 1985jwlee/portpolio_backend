@@ -335,6 +335,19 @@ classDiagram
         +leave(connId) void
         +count() int
     }
+    class AuditWriter {
+        <<interface>>
+        +record(tx, entry AuditEntry) void
+    }
+    class PostgresAuditWriter
+    class NoopAuditWriter
+    AuditWriter <|.. PostgresAuditWriter
+    AuditWriter <|.. NoopAuditWriter
+    class FieldCipher {
+        <<interface>>
+        +encrypt(plain, context) string
+        +decrypt(envelope, context) string
+    }
     class KeyValueCache {
         <<interface>>
         +get(key) value
@@ -1206,6 +1219,8 @@ M1 에서는 `redis` 분기가 구현되지 않는다(분기 자리만 문서화
 | `worker rebuild <projection>` | `apps/worker/src/cli` | 읽기 모델 그림자 재구성(GB-26) | 예 | `--projection entry_view`, `--dry-run` |
 | `worker dead-requeue` | 〃 | `dead` → 대기 재투입(EV-07) | 예 | `--consumer`, `--type`, `--id`, `--all`, `--limit`, `--reason`(필수) |
 | `worker admin write-lock on\|off` | 〃 | 긴급 쓰기 잠금(GB-10) | 예 | `--reason` |
+| `worker rotate-field-keys` | 〃 | 필드 암호화 키 회전: 옛 키로 암호화된 행을 `active` 키로 배치 재암호화(멱등, 배치마다 짧은 tx, ADR-026) | 예 | `--field report.note`, `--batch`, `--dry-run` |
+| `worker audit:list` | 〃 | 감사 로그 조회(EV-15): 읽기 전용, 감사 기록 없음 | 아니오 | `--category`, `--action`, `--since`, `--limit` |
 | `worker retention:run` | 〃 | 정리 규칙 즉시 1회 실행(EV-10, 점검용) | 예 | `--once`, `--dry-run` |
 | `content:check` | `scripts/content-check.ts` | 사이트 변수·프로필 검사(12 §1.1) | 예(CI 릴리스) | `CONTENT_STRICT=1` |
 | `db:migrate` | `packages/db` 실행기 | 마이그레이션 적용(CM-05) | 예(배포 전) | — |
@@ -1259,6 +1274,8 @@ classDiagram
 - **행위자**: CLI 는 `ActorContext{ kind: 'system', actorKey: 'system:cli:<user>' }` 로 usecase 를 호출하고, 조치 이력(`moderation_action`, `write_lock.changed_by`)에 남긴다. CLI 는 HTTP 가드를 거치지 않으므로 **usecase 공개 API 만** 호출한다(쓰기 포트 직접 호출 금지).
 - 종료 코드: `0` 성공, `2` 사용법 오류, `3` 대상 없음, `78` 설정, 그 밖 `1`. 결과는 JSON 한 줄(`--json`) 또는 사람이 읽는 요약.
 - 위험 작업(`dead-requeue --all`, `rebuild`)은 **확인 문구 또는 `--yes`** 가 필요하고 `--dry-run` 으로 영향 범위를 먼저 보여 준다.
+
+> **감사 기록 (ADR-027)**: 쓰기 CLI(`dead-requeue`·`rotate-field-keys`·`rebuild`·`retention:run`·`admin write-lock`)는 **작업과 같은 tx** 에서 `AuditWriter.record(category=system, action=dead_requeued | field_keys_rotated | projection_rebuilt | retention_ran | write_lock_changed, actor_role=system, detail={count …})` 를 호출한다. `audit:list` 와 `--dry-run` 은 기록하지 않는다. 배치 작업(`rotate-field-keys`·`retention:run`)은 배치마다가 아니라 **작업 요약 1행**(총 건수)을 마지막 tx 에 기록한다.
 
 ### 11.4 시퀀스 — `worker dead-requeue`
 
