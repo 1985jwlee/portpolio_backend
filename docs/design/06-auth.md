@@ -37,9 +37,9 @@
 
 반응의 유일 키·멱등 키 범위가 이 값을 쓴다. **이벤트 봉투의 `ownerKey` 도 이 값 그대로**(`session:<id>`/`user:<id>`)이며, 별도 해시·HMAC 변환을 하지 않는다. 공개 채널 변환에서는 항상 제거된다([05 §1](05-event-catalog.md)). 세션이 삭제되면 `reaction.actor_key` 는 무작위 값으로 교체되어 집계만 남는다(database-schema §11).
 
-## 3. GitHub 로그인 (인가 코드 + PKCE)
+## 3. GitHub 로그인 (인가 코드 + state, PKCE 는 지원 확인 후)
 
-GitHub **OAuth App**을 쓴다(웹 서버 흐름). 콜백 URL 은 환경별로 다른 앱(운영/개발)을 만든다([02](02-dev-environment.md)).
+GitHub **OAuth App**을 쓴다(웹 서버 흐름). **PKCE(S256)는 GitHub OAuth App 의 지원을 확인한 뒤 쓴다(미확인); 미지원이면 `state` 만으로 로그인 CSRF·코드 가로채기를 막는다**(client_secret 이 서버에만 있어 코드 교환은 보호된다). 아래 시퀀스의 `code_challenge`/`code_verifier` 는 지원 확인 시에만 포함한다. 콜백 URL 은 환경별로 다른 앱(운영/개발)을 만든다([02](02-dev-environment.md)).
 
 ### 3.1 시퀀스
 
@@ -98,7 +98,7 @@ flowchart TD
 | JSON 전용 | 본문은 `application/json` 만 → 폼 전송 차단 |
 | `Idempotency-Key` 필수 | 사용자 지정 헤더라 교차 사이트 폼으로 보낼 수 없음 |
 | 로그인 시작·콜백 | `GET` 이지만 **상태를 바꾸지 않는다**(세션 발급은 콜백의 서버 결정). `state` 가 로그인 CSRF 를 막는다 |
-| 로그아웃 | `POST` |
+| 로그아웃 | `POST /api/auth/logout`. **`Idempotency-Key` 면제**(재호출해도 같은 결과)이므로 방어는 `SameSite=Lax` + `OriginGuard` + JSON 전용 **3중**이다 |
 
 ## 5. 관리자
 
@@ -179,10 +179,6 @@ classDiagram
     }
     class AdminPolicy {
         +isAdmin(githubId) bool
-    }
-    class CsrfService {
-        +tokenFor(sessionId) string
-        +verify(sessionId, token) bool
     }
     class SessionRepository {
         <<interface>>

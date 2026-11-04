@@ -71,7 +71,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | EV-04 | 메시지 처리 러너(선점·핸들러·완료) | worker 루프 | `MessageRunner`, `ClaimToken` | `inbox_message` W + 핸들러 대상 | FR-031,033 | S3-4 |
 | EV-05 | 임대 회수(reaper) | worker 주기 | `LeaseReaper` | outbox·inbox W | FR-033 / AC-015 | S3-3 |
 | EV-06 | 재시도·백오프·dead 전이 | EV-02,04 실패 경로 | `RetryPolicy`, `ErrorClassifier` | outbox·inbox W | FR-032 | S3-4 |
-| EV-07 | dead 재투입 | worker CLI `dead-requeue` | `DeadRequeueCommand` | outbox·inbox W | ADR-023 | S6-6 |
+| EV-07 | dead 재투입 | worker CLI `dead-requeue` | `DeadRequeueCommand` | outbox·inbox W | ADR-023 | S6-7 |
 | EV-08 | 흐름 단계 기록 | EV-01,02,03,04 훅 | `TraceRecorder` | `trace_step` W | FR-040 | S3-7 |
 | EV-09 | 흐름 집계 | worker 주기 | `FlowAggregator` | `trace_step` R, `flow_counter` W | FR-041 | S4-7 |
 | EV-10 | 보관 정리 | worker 주기 | `RetentionRunner`, 테이블별 `RetentionRule` | 전 테이블 D | FR-080 / AC-011 | S6-6 |
@@ -84,7 +84,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | ID | 기능 | 트리거 | 클래스 | 접근 테이블 | 요구 | 작업 |
 |---|---|---|---|---|---|---|
 | RT-01 | 브로드캐스터(inbox 소비 → change_log) | inbox `entry.*`·`reaction.changed` | `RealtimeBroadcaster`, `PublicMessageMapper` | `change_log` W | FR-050 | S4-1 |
-| RT-02 | change_log 순번 부여·정리 | RT-01, 주기 | `ChangeLogWriter`, `ChangeLogTrimmer` | `change_log` W/D | ADR-023 | S4-1 |
+| RT-02 | change_log 순번 부여·정리(정리는 realtime 이 등록하는 `RetentionRule`) | RT-01, 주기 | `ChangeLogWriter`, `ChangeLogRetentionRule` | `change_log` W/D | ADR-023 | S4-1 (순번), S4-3 (정리) |
 | RT-03 | public 소켓(업그레이드·hello·welcome·live) | `/ws/public` | `PublicSocketHandler` | — | FR-050 | S4-2 |
 | RT-04 | 재개(replay/snapshot 판단) | RT-03 hello | `ResumeService` | `change_log` R | FR-051 / AC-008 | S4-3 |
 | RT-05 | 스냅샷 구성 | RT-04 | `SnapshotBuilder` | `entry_view`·`flow_counter` R | FR-051 | S4-3 |
@@ -137,9 +137,9 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | CM-05 | DB 풀·UoW·마이그레이션 실행 | `packages/db` | | S1-4 |
 | CM-06 | 조립(compose) 루트와 생명주기(기동·종료) | `apps/*/compose` | api·worker·ws-gateway·web 각각 | S1-7 |
 | CM-07 | 보조 포트 구현(RateLimiter·PresenceCounter·KeyValueCache·EventTransport) | `packages/infra` | ADR-024 | S1-8 |
-| CM-08 | 시드·관리 CLI | `scripts/`, `apps/worker/cli` | design/02 | S1-7 |
-| CM-09 | 프로토콜 스키마·JSON Schema 내보내기 | `packages/protocol` | design/01 | S1-1 |
-| CM-10 | 시험 지원(testkit) | `packages/testkit` | design/08 | S1-6 |
+| CM-08 | 시드·관리 CLI (`db:seed`, `worker rebuild\|dead-requeue\|admin write-lock\|retention:run`) | `scripts/`, `apps/worker/cli` | design/02, F16 §11 | S1-7 (프레임·시드), S6-5/S6-6/S6-4 (각 명령) |
+| CM-09 | 프로토콜 스키마·JSON Schema 내보내기 | `packages/protocol` | design/01 | S1-9 |
+| CM-10 | 시험 지원(testkit) | `packages/testkit` | design/08 | S1-10 |
 | CM-11 | 시계·식별자 주입 | `kernel` 포트 | | S1-2 |
 
 ## 8. 운영 (OB)
@@ -148,18 +148,18 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 |---|---|---|---|---|
 | OB-01 | 지표 레지스트리·HTTP 지표 미들웨어 | `modules/observability` | FR-060 | S7-1 |
 | OB-02 | 도메인 지표(outbox 적체, 처리 지연, WS 연결, 큐 길이, dead 수) | 각 앱 | FR-060 | S7-1 |
-| OB-03 | `/healthz` · `/readyz` | 각 앱 | ADR-014 | S1-7 |
-| OB-04 | 구조화 로그·trace_id 전파·마스킹 | `observability` | ADR-008 | S1-7 |
+| OB-03 | `/healthz` · `/readyz` (worker 는 `/healthz` 만) | 각 앱 | ADR-014 | S1-11 |
+| OB-04 | 구조화 로그·trace_id 전파·마스킹 | `observability` | ADR-008 | S1-11 |
 | OB-05 | Prometheus 수집 설정·규칙 | `infra/prometheus` | FR-060 | S7-2 |
 | OB-06 | Grafana 프로비저닝·대시보드·Public dashboards | `infra/grafana` | FR-061 | S7-2,3 |
 | OB-07 | nginx 프록시(라우팅·limit_req·realip·헤더·WS) | `infra/nginx` | AC-007,014 | S8-1 |
-| OB-08 | 정적 폴백 1단계 | `infra/nginx` | FR-070 / AC-010 | S8-2 |
+| OB-08 | 정적 폴백 1단계 (`build:fallback`) | `infra/nginx` | FR-070 / AC-010 | S8-2 |
 | OB-09 | Cloudflare 정적 미러 2단계 | Cloudflare | FR-070 | S8-3 |
 | OB-10 | 백업·복구 | `infra/scripts/backup.sh` | ADR-023 | S8-4 |
 | OB-11 | pull 배포 | `infra/scripts/pull-deploy.sh` | ADR-014 | S8-6 |
 | OB-12 | CI 워크플로(PR 검사·빌드·릴리스) | `.github/workflows` | — | S1-6,S8-6 |
-| OB-13 | 쓰기 잠금·긴급 스위치 운영 절차 | 런북 | ADR-008 | S8-1 |
-| OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | AC-014 | S8-5 |
+| OB-13 | 쓰기 잠금·긴급 스위치 운영 절차 (`worker admin write-lock` + `POST /api/admin/write-lock`) | 런북 | ADR-008 | S6-4 (도구), S8-1 (런북) |
+| OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | ADR-002 (AC-014 는 집 PC·Oracle) | S8-5 |
 
 ## 9. 합계
 
@@ -173,6 +173,20 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | CM | 11 |
 | OB | 14 |
 | **합** | **104** |
+
+## 9.1 공개 usecase / 공개 포트 등록 (모듈 경계용)
+
+모듈이 다른 모듈에 내놓는 읽기·조회 진입점이다. 모듈 의존 표(architecture §4)와 같은 목록이어야 하며, 목록에 없는 직접 참조는 경계 규칙(B4)으로 CI 가 막는다.
+
+| 소유 모듈 | 공개 이름 | 호출하는 쪽 | 용도 |
+|---|---|---|---|
+| guestbook | `ReadPublicEntries` | realtime(SnapshotBuilder) | 스냅샷의 공개 글 목록 (`PublicEntryView` 조회, GB-20 과 별개) |
+| guestbook | `GetWriteLockState` (GB-11) | api 조립부(`/api/me`), 가드 | 쓰기 잠금 여부. identity 가 guestbook 테이블을 읽지 않도록 라우트 조립부가 합친다 |
+| guestbook | `AnonymizeSessionData` (GB-12) | worker(`PurgeExpiredSessions`) | 세션 만료 익명화 |
+| events | `TraceReader` | realtime(TraceWatcher) | `trace_step` 증분 읽기 (private 채널 `flow.step`) |
+| events | `FlowSummaryReader` | realtime(SnapshotBuilder, FlowSummaryPublisher) | 익명 요약 읽기 |
+| identity | `ResolveSession` | api 가드, ws-gateway(private) | 세션 해석 |
+| identity | `ListExpiredSessionIds`, `DeleteSessions` | worker(`PurgeExpiredSessions`) | 만료 세션 정리 |
 
 ## 10. 스키마 반영 항목 (상세 설계 F10~F17 이 요구, [database-schema.md](../../domains/database-schema.md) 에 반영됨)
 

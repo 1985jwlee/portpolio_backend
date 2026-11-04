@@ -33,7 +33,7 @@
 | 영역 | 선택 | 버전 | 상태 | 비고 |
 |---|---|---|---|---|
 | HTTP·WebSocket 프레임워크 | **ElysiaJS** | 1.4.30 | 확정 | 의존: `@sinclair/typebox` ≥ 0.34 < 1 |
-| 입력 검증 | TypeBox (Elysia 내장 방식) | — | 확정 | 메시지 스키마의 정본은 `packages/protocol` |
+| 입력 검증 | TypeBox (Elysia 내장 방식) | — | 확정 | 메시지 스키마의 정본은 `packages/protocol`. 별도 설치한 `@sinclair/typebox` 0.34 를 Elysia 라우트에 그대로 쓸 수 있음(실측). `typebox` 1.x 는 Elysia 1.4.30 peer 범위(`< 1`) 밖이라 쓰지 않는다. 스키마에 `discriminator` 옵션은 넣지 않는다(비표준 키). 브라우저는 `Value.Check` 만(약 13.9KB gzip) — `TypeCompiler` 는 22KB 이고 `new Function` 때문에 CSP 위험(미확인) |
 | WebSocket | Elysia 내장(Bun 기반) | — | **관문부 G2** | 백프레셔 `backpressureLimit` 기본 16MB, `idleTimeout` 기본 120초. 다수 연결 장시간 안정성은 근거 부족. 느린 소비자 차단은 설정 위치에 따라 동작이 갈려(Elysia 라우트 옵션 무시) 직접 시험·구현(ADR-022 측정) |
 | 구조 | 모듈러 모놀리스, domain·service·usecase, CQRS, outbox/inbox | — | 확정 | ADR-001·018·019·020·021 |
 | 인증 | **직접 구현**: GitHub OAuth(PKCE S256 + state), 세션은 우리 `identity.session`(토큰 해시 저장) | — | 확정 | Arctic 은 2026-07 deprecated, Better Auth 는 해시 저장 여부 불명 |
@@ -48,7 +48,7 @@
 | DB | **PostgreSQL** | 18.6 | 확정 | `uuidv7()` 내장. 공식 이미지 `18-alpine`(arm64 포함) |
 | 구조 정본·마이그레이션 | **Drizzle** (스키마 + `drizzle-kit`) | drizzle-orm **0.45.x 고정**, drizzle-kit 0.31.x | 확정 | 1.0 은 아직 rc(마이그레이션 폴더 구조 변경). 안정화 후 업그레이드 |
 | 마이그레이션 방식 | forward-only, 표현 불가 기능은 `generate --custom` raw SQL | — | 확정 | 부분 인덱스·확장 등 |
-| DB 드라이버 | 후보: postgres.js / Bun.sql / node-postgres | — | **스파이크 G4** | 기준: Drizzle 호환, 트랜잭션, **LISTEN/NOTIFY 전용 연결**, `FOR UPDATE SKIP LOCKED`, 안정성 |
+| DB 드라이버 | **Bun.sql**(Bun 내장) | Bun 1.4.4 | **G4 실측 통과(로컬)** | 전 항목 통과. LISTEN 전용 연결의 자동 재구독이 백엔드 종료·서버 재시작 모두에서 동작한 것은 Bun.sql 뿐(postgres.js 4.0.0 은 재시작 후 복구 못함 → 쓰려면 3.4.7 고정, pg 는 재구독 직접 구현). SQLSTATE 는 `err.code` 가 아니라 **`errno`** 문자열로 읽는다. 차선 `postgres@3.4.7` |
 | 기본키 | uuid v7 | — | 확정 | 앱 생성(outbox 이벤트 id 를 트랜잭션 전에 알아야 함, ADR-017). DB 내장 `uuidv7()` 은 보조 |
 | 캐시·스트림 | Redis 또는 Valkey | Redis 8.10 / Valkey 9.1 | **M1 에서 쓰지 않음**(포트 뒤 이음새만, ADR-024) | Phase 2·3 에서 ADR-006 측정 후 선택. 클라이언트 후보 ioredis 등은 그때 |
 
@@ -93,7 +93,7 @@
 | 지표 수집 | **Prometheus** | 3.15.1 | 확정 | |
 | 대시보드 | **Grafana** | 13.3.0 | 확정 | |
 | 공개 방식 | **Public dashboards 우선** | — | **관문부 G6** | iframe 임베드 허용 설정 키를 문서로 확인하지 못함 → 실측, 안 되면 익명 읽기 전용 뷰(`[auth.anonymous]` `org_role = Viewer`)로 후퇴 |
-| 앱 지표 라이브러리 | 후보: prom-client / OpenTelemetry(`@elysiajs/opentelemetry` 1.4.11) | — | **스파이크 G5** | Bun 호환 공식 근거 없음 |
+| 앱 지표 라이브러리 | 후보: prom-client / OpenTelemetry(`@elysiajs/opentelemetry` 1.4.11) | — | **스파이크 G5(부분 실측)** | prom-client 15.1.3 이 Bun 1.4.4 에서 Registry·Counter·Histogram·`/metrics` 동작. 단 `nodejs_gc_duration_seconds` 는 샘플 없음, `nodejs_eventloop_lag_seconds` 는 항상 0, `nodejs_active_handles` 류는 무의미 → 이벤트 루프는 `nodejs_eventloop_lag_{max,p99}_seconds` 로 본다 |
 | 부하 시험 | **k6** | 2.3.0 | 확정 | Docker(`grafana/k6`)로 실행, Arm 이미지 지원은 미확인 |
 
 ## 9. 개발 도구·품질
@@ -127,15 +127,28 @@
 | **G1** | Cloudflare Tunnel | ① WebSocket 이 터널을 통과한다 ② `CF-Connecting-IP` 가 붙어 nginx 에서 읽힌다 | ① 실패 → SSE 등 대체(ADR-003 후속) ② 실패 → 속도 제한 기준을 세션으로만 |
 | **G2** | Bun WebSocket 장시간 | 목표 연결 수(측정 기준을 시험 전에 고정)에서 장시간 메모리가 증가하지 않고 재접속 복구가 정상, 느린 소비자가 메모리를 무한히 키우지 않음 | Go ws-gateway 로 교체(프로토콜을 언어 중립 스키마로 두어 교체 비용을 낮춘다) |
 | **G3** | Next.js on Bun | 빌드·`standalone` 실행·SSR·ISR·정적 에셋·`next-intl`·이미지 최적화가 Bun 런타임에서 정상 | web 만 Node 22 LTS 로 실행 |
-| **G4** | DB 드라이버 | Drizzle 호환 + 트랜잭션 + **LISTEN/NOTIFY 전용 연결** + `SKIP LOCKED` 동시성 시험 통과 | 후보 순서대로 대체 |
+| **G4** | DB 드라이버 | Drizzle 호환 + 트랜잭션 + **LISTEN/NOTIFY 전용 연결** + `SKIP LOCKED` 동시성 시험 통과 | 후보 순서대로 대체. **로컬 실측 결과: Bun.sql 통과, 권장(ADR-022 관문 결과)** |
 | **G5** | 지표·로깅 | `/metrics` 에 요청 수·지연·outbox 적체 지표가 나오고 레이블 규칙(식별자 금지)을 지킴 | 후보 교체 |
 | **G6** | Grafana 임베드 | Public dashboards 가 사이트에 임베드되고 편집·탐색 UI 가 노출되지 않음 | 익명 Viewer + 프로비저닝 대시보드 |
 | **G7** | nginx | ① 사용할 이미지에서 `nginx -V` 로 `realip` 포함 확인 ② 클라이언트가 보낸 주소 헤더가 버려지고 정규화됨 ③ Oracle 경로 TLS 자동 발급·갱신 방식 확정 | 모듈 포함 이미지 사용 또는 직접 빌드, 인증서 발급 컨테이너 분리 |
 | **G8** | Envoy Gateway on k3d | HTTPRoute 로 `/api`, `/ws`(WebSocket), `/` 가 라우팅됨 | 다른 구현체 |
-| **G9** | Testcontainers on Bun | (선택) Bun 에서 동작 | compose 서비스 유지 |
+| **G9** | Testcontainers on Bun | (선택, **S1-6 에서 확인**) Bun 에서 동작 | compose 서비스 유지 |
 | **G10** | Drizzle 마이그레이션 | `generate --custom` raw SQL 이 부분 인덱스·어드바이저리 락 보조 객체를 만들고, 빈 DB 에서 처음부터 적용·재현됨 | 마이그레이션 SQL 직접 관리 |
 | **G11** | Cloudflare 정적 미러 | 원본을 내렸을 때 무료 한도 안에서 정적 페이지 응답(ADR-023) | nginx 폴백만 유지 |
 | **G12** | 무료 외부 백업 저장소 | 카드 없이 가입·업로드·복원 가능(ADR-023) | 로컬만, 수동 반출 절차 |
+
+**쿼리 계층**: 기본 Drizzle 빌더, 표현 불가·측정 정당화 시에만 같은 `tx` 의 `sql` 템플릿(T1), 트랜잭션 밖 전용 연결(T2: LISTEN, 리더 락). 규칙과 raw 레지스트리는 [ADR-025](../adr/ADR-025-query-layer.md).
+
+### 11.1 관문 로컬 실측 요약 (2026-11-04, WSL2·Bun 1.4.4·Docker)
+
+| 관문 | 결과 | 비고 |
+|---|---|---|
+| G4 | **통과(로컬)**, Bun.sql 권장 | Drizzle 0.45.4 의 bun-sql·postgres-js·node-postgres 어댑터 모두 동작. 어떤 드라이버든 끊긴 동안의 NOTIFY 는 유실되므로 재구독 후 `change_log` 를 마지막 seq 부터 다시 읽는 보정은 유지 |
+| G7 ①② | **통과(로컬)** | 공식 nginx 이미지(stable·alpine·mainline) 모두 realip 포함. 신뢰 대역 밖 `CF-Connecting-IP` 는 무시되고 위조 `X-Forwarded-For` 등은 정규화. 신뢰 대역은 G1 에서 실제 Tunnel 로 확인 필요 |
+| G7 ③ | 미확인 | 이미지에 `ngx_http_acme_module.so` 가 있으나 동작 시험은 안 함 |
+| G10 | **통과(로컬)** | 아래 운영 규칙 |
+
+**Drizzle 마이그레이션 운영 규칙(G10 실측)**: ① `drizzle-kit push` 금지 — 스키마 정의에 없는 raw 부분 인덱스·CHECK 를 지우려 한다. `generate` + `migrate` 만 쓴다. ② 대기 중 마이그레이션은 한 트랜잭션이라 `CREATE INDEX CONCURRENTLY` 불가(필요하면 별도 절차). ③ 이미 적용된 파일을 고치면 해시 검사가 없어 조용히 무시된다 → 적용된 파일은 수정 금지. ④ 이력의 마지막 `when` 보다 과거인 새 마이그레이션은 조용히 건너뛴다 → 브랜치 병합 시 저널 순서 확인. ⑤ `schemaFilter` 는 스키마 이름을 나열한다(`*` 불가). ⑥ raw 객체(부분 인덱스·함수·트리거) 목록은 스냅샷에 없으므로 따로 관리한다.
 
 ## 12. 버전 고정 정책
 
@@ -150,7 +163,7 @@
 | 항목 | 결정 시점 |
 |---|---|
 | 로깅·지표 라이브러리 | G5 |
-| DB 드라이버 | G4 |
+| ~~DB 드라이버~~ | G4 로컬 실측으로 Bun.sql 선택(실서버 재시험은 S0-4) |
 | Oracle 경로 TLS 자동화 방식 | G7 |
 | Redis vs Valkey, 클라이언트 | ADR-006 측정(Phase 2) |
 | E2E 도구 | E2E 시작 시 |

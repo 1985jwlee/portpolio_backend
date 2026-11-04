@@ -148,6 +148,7 @@ classDiagram
 |---|---|---|---|
 | `DATABASE_URL`(비밀번호 포함) | `.env` | `secrets/database_url` 파일 → `DATABASE_URL_FILE` | 없음 |
 | `GITHUB_CLIENT_SECRET` | `.env` (**개발용 OAuth 앱**) | `secrets/github_client_secret` (**운영용 OAuth 앱**) | 없음 |
+| `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, 32바이트 이상) | `.env` (개발용 임의 값) | `secrets/oauth_state_secret` → `OAUTH_STATE_SECRET_FILE` | 없음 |
 | Cloudflare Tunnel 토큰 | (로컬 시험 시 일회용) | `secrets/tunnel_token` | 없음 |
 | Grafana 관리자 비밀번호 | `.env` | `secrets/grafana_admin_password` | 없음 |
 | 백업 암호화 키 | 개발에서는 미사용 | `secrets/backup_key` + **별도 오프라인 사본** | 없음 |
@@ -166,6 +167,7 @@ PUBLIC_ORIGIN=http://localhost:8080
 DATABASE_URL=postgres://pf:CHANGE_ME@localhost:55432/pf
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+OAUTH_STATE_SECRET=
 ADMIN_GITHUB_IDS=
 SESSION_COOKIE_NAME=sid
 COOKIE_SECURE=false

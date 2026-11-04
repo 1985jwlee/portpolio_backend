@@ -9,6 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-04 | [ADR-025](ADR-025-query-layer.md) | 쿼리 계층: Drizzle 빌더 기본, 같은 tx 의 sql 템플릿(T1), 트랜잭션 밖 별도 연결(T2), raw 레지스트리 | Accepted |
 | 2026-11-04 | [ADR-024](ADR-024-redis-seam.md) | Redis: M1 제외, 포트 뒤 도입 이음새, 도입 기준·장애 거동 | Accepted |
 | 2026-11-04 | [ADR-023](ADR-023-operational-policies.md) | 운영 정책 선제 확정: 임대·백오프, 길이 상한, IP 미저장, 보관, 그림자 재구성, 2단계 폴백, 알림, 백업 | Accepted |
 | 2026-11-04 | [ADR-022](ADR-022-tech-stack-definition.md) | 전체 기술 스택 확정, 추천에서 바뀐 곳(web=Bun, nginx), 구현 초기 관문 G1~G10 | Accepted |

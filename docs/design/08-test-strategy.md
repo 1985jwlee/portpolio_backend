@@ -44,7 +44,7 @@ flowchart TB
 | 계약 | `packages/protocol` 의 REST/WS/이벤트 스키마: 골든 JSON 인코딩·디코딩·업캐스트, 서버·클라이언트가 같은 스키마를 쓰는지 | **L2** | 매 PR | `packages/protocol/test/` |
 | 모듈 통합 | usecase + 실제 Postgres 어댑터, 트랜잭션·outbox·inbox·읽기 모델·마이그레이션 | **L3** | 매 PR | `modules/<m>/test/integration/` |
 | 동시성·장애 | 선점 경쟁, fencing, 재구성, 디스패처 락 이동, dead | **L3** | 매 PR(빠른 것) / 야간(느린 것) | `test/chaos/` |
-| 재접속 | ws-gateway + 실제 Postgres + 가짜 클라이언트 | **L3** | 매 PR | `apps/ws-gateway/test/` |
+| 재접속 | ws-gateway + 실제 Postgres + 가짜 클라이언트 | **L3** | main 병합 후·야간(PR 게이트 아님, 09 §2) | `apps/ws-gateway/test/` |
 | E2E | 브라우저(작성→시각화, 실시간 복구, 정적 폴백) | **L3** | main 병합 후 | `test/e2e/` (도구 미결, §11) |
 | 부하·소크 | k6 (API p95, WS 다수 연결, 느린 소비자) | **L3** | 수동·야간 | `test/load/` |
 | 실환경 | Tunnel 경유 성능, Oracle·집 PC 양쪽, 실제 GitHub OAuth | **L4** | 릴리스 전 수동 | 체크리스트 |
@@ -61,6 +61,20 @@ flowchart TB
 | 읽기 모델 프로젝터 **규칙**(`last_seq` 비교, `count` 덮어쓰기) | 인메모리 저장소 대역으로 순수 | **L2** (SQL 반영은 L3) |
 | 브라우저 구동, k6 | 서브프로세스·네트워크 | L3 |
 | 터널 경유 측정 | 실환경 | L4 |
+
+### 2.0a 쓰기는 트랜잭션 (ADR-025)
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| `ReadDb` 로 insert/update/delete 호출 | 타입 오류(컴파일), 우회 시 런타임 거절 | L1·L2 |
+| 모든 쓰기 포트 메서드가 `TxContext` 없이 호출되면 | 시그니처상 불가 | L1 |
+| 잡(reaper·세션 갱신·정리·집계) 실행 중 쓰기 | 트랜잭션 안에서 일어남(`pg_stat_activity.xact_start` 또는 쿼리 로그로 검증) | L3 |
+| 대량 삭제 | 배치마다 별도 커밋(중간에 중단해도 앞 배치는 반영) | L3 |
+| `check-purity` | `adapter/postgres` 밖의 `.insert(` 등을 검출 | L1 |
+
+### 2.0 raw 쿼리 시험 (ADR-025)
+
+`adapter/postgres/raw/` 의 쿼리마다 실제 Postgres 통합 시험을 하나 이상 둔다(경합이 있는 선점 쿼리는 §5 동시성 시험). 반환 행의 런타임 검증 실패, 그리고 **명령 트랜잭션 안에서 T2(별도 연결) 호출이 없음**을 구조 검사로 확인한다.
 
 ### 2.1 포트 계약 시험 스위트 (ADR-024)
 
@@ -109,7 +123,7 @@ classDiagram
     FaultInjector "1" o-- "*" Gate
 ```
 
-- `FaultInjector` 의 **주입 지점(point)** 은 코드에 이름 붙은 훅 한 줄(`await faults.hit('outbox.afterClaim')`)로 심는다. 운영 구현은 빈 함수다. 지점 이름은 §5 의 시나리오에서 쓴다.
+- `FaultInjector` 의 **주입 지점(point)** 은 코드에 이름 붙은 훅 한 줄(`await faults.hit('events.outbox_dispatcher.after_claim')`)로 심는다. 운영 구현은 빈 함수다. 지점 이름 규칙은 **`<모듈>.<usecase 또는 컴포넌트>.<지점>` 소문자 snake_case**(`guestbook.edit_entry.before_save`, `events.outbox_dispatcher.after_claim`)이고, 상수 목록은 `packages/testkit` 이 관리한다(F16 §13.6). §5 의 시나리오에서 쓴다.
 - `Gate.reached` 는 "해당 지점까지 도달했다"를 알리고, `release()` 가 진행을 허용한다. 이것이 `sleep` 없는 결정적 순서 강제다.
 - `TestDb` 는 시험마다 **새 스키마**(또는 트랜잭션 롤백)를 쓴다. 병렬 시험이 서로 보지 못한다.
 
@@ -141,6 +155,9 @@ classDiagram
         #faults FaultInjector
         #workers WorkerHarness
     }
+    class ApiHarness {
+        +request(req) Response
+    }
     class GatewayHarness {
         +connect(cookie) FakeClient
         +changeLog
@@ -150,6 +167,7 @@ classDiagram
     DbHarness <|-- ModuleHarness
     DbHarness <|-- ChaosHarness
     DbHarness <|-- GatewayHarness
+    DbHarness <|-- ApiHarness
 ```
 
 | 클래스 | 용도 |
@@ -157,6 +175,7 @@ classDiagram
 | `UnitHarness` | 인메모리 포트 구현(저장소·outbox·inbox·Clock·IdGenerator). L2 |
 | `ModuleHarness` | 실제 Postgres + 실제 어댑터로 usecase 직접 호출 |
 | `ChaosHarness` | 여러 워커 인스턴스·결함 주입·가짜 시계 |
+| `ApiHarness` | api 조립 루트를 프로세스 안에서 구동하고 `request(req)` 로 HTTP 계약·가드·오류 매핑을 시험 (F16 `AppHarness` 와 같은 것) |
 | `GatewayHarness` | ws-gateway 인스턴스 + `FakeClient`(프레임 기록·지연 수신·읽기 중단 가능) |
 
 ## 4. 시험 대상 매트릭스 (AC ↔ 시험)
@@ -164,7 +183,7 @@ classDiagram
 | AC | 요지 | 시험 종류 | 계층·등급 | 위치 |
 |---|---|---|---|---|
 | AC-001 | 작성→outbox→전달→소비 단계 | 모듈 통합(행·`trace_step` 순서) + E2E(화면 단계) | L3 | `modules/guestbook/test/integration/post-entry.test.ts`, `test/e2e/flow-visualization.spec.ts` |
-| AC-002 | 저장·outbox 원자성 | 결함 주입(`faults.failAt('outbox.append')`)으로 롤백 확인 | L3 | `modules/guestbook/test/integration/atomicity.test.ts` |
+| AC-002 | 저장·outbox 원자성 | 결함 주입(`faults.failAt('events.outbox_writer.before_append')`)으로 롤백 확인 | L3 | `modules/guestbook/test/integration/atomicity.test.ts` |
 | AC-003 | 멱등 소비 | 같은 이벤트 2회 `receive` → inbox 1행, 집계 1회 | L3 (규칙 부분 L2) | `modules/guestbook/test/integration/idempotent-consume.test.ts` |
 | AC-004 | 익명 글 수정 403 | usecase 단위(권한 규칙 L2) + API 계약 시험 | L2·L3 | `modules/guestbook/test/unit/`, `apps/api/test/contract/` |
 | AC-005 | 로그인 글 수정·삭제, 타 사용자 403 | API 통합(세션 2종) | L3 | `apps/api/test/integration/edit-delete.test.ts` |
@@ -212,7 +231,7 @@ sequenceDiagram
 
 | 단계 | 동작 |
 |---|---|
-| 1 | 워커 A 가 선점(토큰 a), `faults.delayAt('inbox.beforeComplete')` 에서 정지 |
+| 1 | 워커 A 가 선점(토큰 a), `faults.delayAt('events.message_runner.before_complete')` 에서 정지 |
 | 2 | `FakeClock.advance(lease+1s)` 후 reaper 실행 → `received` 로 회수 |
 | 3 | 워커 B 가 선점(토큰 b)하고 처리·`processed` |
 | 4 | A 의 게이트를 `release()` → A 가 완료 시도 |
@@ -241,7 +260,7 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 준비 | 로그인 사용자의 글 `version=3` |
-| 행동 | 요청 R1·R2 가 `expectedVersion=3` 으로 동시 `PATCH`. 두 요청을 `faults.delayAt('entry.beforeSave')` 에서 모아 같은 시점에 풀어 `UPDATE … WHERE version=3` 이 겹치게 한다 |
+| 행동 | 요청 R1·R2 가 `expectedVersion=3` 으로 동시 `PATCH`. 두 요청을 `faults.delayAt('guestbook.edit_entry.before_save')` 에서 모아 같은 시점에 풀어 `UPDATE … WHERE version=3` 이 겹치게 한다 |
 | 기대 | 하나는 200(`version=4`), 하나는 409 `version_conflict` + `details.current`(본문=승자 값, `version=4`). outbox 이벤트 **1건**(`entry.edited`) |
 | 반복 | 승자는 매번 달라도 **불변식**(성공 1·409 1·이벤트 1)이 유지됨을 검사 |
 
@@ -253,7 +272,7 @@ sequenceDiagram
 | 같은 키·다른 본문 | `422 idempotency_key_reuse` |
 | 응답 유실 후 재전송 | 첫 요청 커밋 후 연결을 끊고 같은 키로 재요청 → 재생 응답, 글 1건 |
 
-결정성: `request_key` 선점 직후 `faults.delayAt('request.afterReserve')` 에서 정지시켜 두 번째 요청이 "처리 중"을 만나게 한다.
+결정성: `request_key` 선점 직후 `faults.delayAt('guestbook.idempotency.after_reserve')` 에서 정지시켜 두 번째 요청이 "처리 중"을 만나게 한다.
 
 ### 5.5 유일 키 반응 중복
 
@@ -279,6 +298,7 @@ sequenceDiagram
 | 이력 부족 → snapshot | `change_log` 최소 seq 를 resume 보다 크게 만든 뒤 재접속 | `mode: snapshot`, `snapshot.head` 이후만 이어짐 |
 | 처음 접속 | `hello` 에 `resume` 없음 | snapshot |
 | NOTIFY 유실 | `NOTIFY` 를 막고 변경 삽입 | 1초 이내 폴링으로 전달 |
+| (종료 순서) | 서버가 `stop()` 을 **await 없이** 호출 → 각 소켓에 `bye`+`close(1001)` → 타임아웃 후 대기. `await server.stop()` 을 먼저 하면 열린 WS 때문에 교착(Bun 1.4.4 실측) | `GatewayHarness` 에서 교착 없이 종료됨을 시험 |
 | `bye` → 재접속 | 게이트웨이에 SIGTERM 상당 호출 | `bye{reconnectAfterMs}` 후 `1001`, 클라이언트는 지터 지연 뒤 새 인스턴스에 `resume`, 놓침 0 |
 | 쓰기 재시도 | 연결 단절 중 `POST` 응답을 못 받음 → 같은 `Idempotency-Key` 재전송 | 글 1건, 재생 응답 |
 | `hello` 누락 | 5초 안에 `hello` 없음 | `4400` |
@@ -449,7 +469,7 @@ modules/<m>/
     unit/            *.test.ts       (L2)
     integration/     *.test.ts       (L3, Postgres)
 apps/<a>/test/       contract/ integration/
-packages/protocol/{test,golden}/
+packages/protocol/{test,golden}/   # 골든 JSON 은 packages/protocol/golden/ 한 경로
 packages/testkit/                    (FakeClock · FakeIdGenerator · TestDb · 하니스)
 test/
   chaos/             동시성·장애 (L3)
@@ -470,8 +490,8 @@ test/
 
 | 단계 | 돌리는 것 |
 |---|---|
-| PR | L1 전부 + `test:unit` + 계약 + `test:integration` + 빠른 `test:chaos` + 재접속 |
-| main 병합 후 | 위 전부 + 전체 `test:chaos` + `test:e2e`(compose 위) |
+| PR | L1 전부 + `test:unit` + 계약 + `test:integration` + 빠른 `test:chaos` (재접속은 PR 에서 돌리지 않는다 — 09 §2 정본) |
+| main 병합 후 | 위 전부 + 전체 `test:chaos` + **재접속 시험(`apps/ws-gateway/test/`)** + `test:e2e`(compose 위) |
 | 야간 | `[slow]` + 반복 500 회 동시성 + k6 소크 |
 | 릴리스 전(수동) | 터널 경유 k6·Lighthouse, 두 호스트 E2E(AC-014), 실제 GitHub 로그인 |
 
@@ -490,7 +510,7 @@ test/
 | 항목 | 결정 시점 |
 |---|---|
 | E2E 도구(Playwright 등)와 Bun 호환 | E2E 시작 시 (tech-stack §13) |
-| Testcontainers on Bun | 관문 G9. 실패·미확인 시 **compose 의 `postgres` 서비스를 시험 DB 로** 쓰고 스키마 격리로 병렬 처리 |
+| Testcontainers on Bun | 관문 G9(S1-6 에서 확인). 실패·미확인 시 **compose 의 `postgres` 서비스를 시험 DB 로** 쓰고 스키마 격리로 병렬 처리 |
 | 작성→시각화 반영 지연(p95) 합격선 | 측정 후 (현재 수치 없음) |
 | 뮤테이션 점검 도구 | 수동 가드 제거로 시작, 자동화는 선택 |
 | 2단계 정적 미러 시험 방법 | 관문 G11 |

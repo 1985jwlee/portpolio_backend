@@ -55,7 +55,7 @@
 - 감수: 사후에 주소로 차단할 수 없다. 스팸 폭주는 관리자 쓰기 잠금 스위치와 nginx 제한으로 대응한다. 재검토: 스팸이 이것으로 감당되지 않을 때.
 
 ### 4. `change_log` 보관
-- **1시간 또는 채널당 1만 행 중 먼저 닿는 쪽**까지 보관, `worker` 가 주기 삭제.
+- **1시간 또는 채널당 1만 행 중 먼저 닿는 쪽**까지 보관. 삭제 규칙(`ChangeLogRule`)은 테이블 소유 모듈(realtime)이 등록하고 worker 가 실행한다.
 - 재접속 시 클라이언트의 마지막 seq 가 가장 오래된 행보다 앞이면 **스냅샷 경로**(ADR-014). 롤링 배포의 단절 시간(분 단위)을 충분히 덮는다.
 
 ### 5. `dead` 보관
@@ -66,12 +66,12 @@
 ```
 1. projection_state 에 (name, status=rebuilding, fence_seq) 기록
 2. 새 테이블 <name>_next 를 쓰기 모델 스냅샷으로 채움 (읽기는 계속 기존 테이블)
-3. fence_seq 이후 이벤트를 <name>_next 에 따라잡음 (last_seq 규칙으로 멱등)
+3. fence_seq 이후 이벤트를 <name>_next 에 따라잡음 (필드별 순번 규칙으로 멱등)
 4. 격차가 임계 이하가 되면 한 트랜잭션에서: 기존 ↔ _next 이름 교체 + status=live
-5. 이전 테이블은 보관 후 삭제
+5. 이전 테이블은 `<name>_old` 로 이름을 바꿔 보관 후 삭제
 ```
 - 점검 모드 없음, 읽기는 끊기지 않는다. 프로젝터는 재구성 중 **양쪽 테이블에 적용**한다.
-- 실행은 `worker` 서브커맨드(`rebuild <projection>`). **M1 대상은 `guestbook_read.entry_view`** 하나이고, 나머지(`flow_counter` 등)는 이벤트 재생으로 비우고 다시 채운다.
+- 실행은 `worker` 서브커맨드(`rebuild <projection>`). **M1 의 그림자 교체 대상은 `guestbook_read.entry_view`** 하나다(`my_reaction` 은 같은 잡이 함께 채운다). 나머지는 원천이 다르다: `report_queue` 는 쓰기 모델 `report` 스냅샷으로, `flow_counter` 는 `trace_step` **재집계**(이벤트 재생이 아니며 보관 7일 범위만 복구)로 다시 채운다 — database-schema §5-1.
 - 시험: 재구성 중 쓰기가 들어와도 최종 결과가 정본과 같다(AC 로 추가).
 
 ### 7. 정적 폴백 — 2단계

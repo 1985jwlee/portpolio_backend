@@ -39,7 +39,7 @@
 
 - **도메인 지표는 `pf_` 접두**를 붙인다(`pf_outbox_depth`). 기존 문서(ADR-007, architecture §11)의 이름과의 대응은 §OB-02 표의 "기존 이름" 열에 둔다. 구현은 `pf_` 이름을 쓰고 기존 문서는 구현 시 이 표로 갱신한다.
 - 단위는 접미로 드러낸다: `_seconds` , `_bytes` , `_total`(카운터), 접미 없음(게이지의 개수).
-- **레이블 허용목록(전역)**: `app`, `method`, `route`, `status_class`, `code`, `kind`, `status`, `consumer`, `type`, `outcome`, `projection`, `job`, `channel`, `mode`, `table`, `result`, `state`, `resource`, `source`, `layer`, `usecase`, `version`, `commit`.
+- **레이블 허용목록(전역)**: `app`, `method`, `route`, `status_class`, `code`, `kind`, `status`, `consumer`, `type`, `outcome`, `projection`, `job`, `channel`, `mode`, `table`, `result`, `state`, `resource`, `source`, `layer`, `usecase`, `version`, `commit`, `guard`, `reason`, `rule`, `decision`, `op`, `step`, `to`, `duplicate`(`true`/`false`). 마지막 여덟 개(`guard`~`duplicate`)는 상세 설계 F13·F14·F16 이 요구해 추가했다 — 모두 **작은 열거형**이어야 하며(`rule` ≤ 6, `reason` ≤ 15, `guard` ≤ 6, `step` ≤ 8) 자유 문자열은 안 된다.
 - **레이블 금지(전역)**: 세션·사용자·글·추적 식별자, IP, 원본 경로(`route` 는 템플릿만), 본문, 표시 이름, 임의 문자열(ADR-007/008). `route` 는 `/api/entries/:id` 같은 **템플릿**이다.
 
 ### 0.4 의존 관계 요약
@@ -268,7 +268,7 @@ flowchart LR
         NG["nginx/<br/>nginx.conf<br/>conf.d/*.conf<br/>fallback/"]
         PM["prometheus/<br/>prometheus.yml<br/>rules/*.yml"]
         GF["grafana/<br/>provisioning/datasources<br/>provisioning/dashboards<br/>dashboards/*.json"]
-        SC["scripts/<br/>backup.sh<br/>restore-drill.sh<br/>pull-deploy.sh<br/>write-lock.sh"]
+        SC["scripts/<br/>backup.sh<br/>restore-drill.sh<br/>pull-deploy.sh"]
         CP["compose/<br/>compose.yaml<br/>compose.dev.yaml<br/>compose.live.yaml"]
         K8["k8s/<br/>base/<br/>overlays/k3d/"]
     end
@@ -296,7 +296,7 @@ flowchart LR
 
 **구성.** §2.1 의 `MetricsRegistry` · `LabelPolicy` · `HttpMetricsMiddleware`.
 
-- **라이브러리는 미확인(G5).** 후보: `prom-client`(Node 계열, Bun 호환 미확인), OpenTelemetry Prometheus 내보내기(베타). 결정 전까지 레지스트리는 **어댑터 뒤**에 두어(`MetricsBackend` 포트) 구현을 바꿀 수 있게 한다.
+- **라이브러리는 G5 부분 실측.** `prom-client` 15.1.3 이 Bun 1.4.4 에서 Registry·Counter·Histogram·Gauge·`/metrics` 출력은 동작(기본 지표 일부 제외, §4.1). 후보 비교는 계속 열어 둔다: `prom-client`, OpenTelemetry Prometheus 내보내기(베타). 결정 전까지 레지스트리는 **어댑터 뒤**에 두어(`MetricsBackend` 포트) 구현을 바꿀 수 있게 한다.
 - 라우트 템플릿은 Elysia 가 매칭한 패턴에서 얻는다. 매칭 실패(404)는 `route="unmatched"` 하나로 모은다(카디널리티 방지).
 - 히스토그램 버킷(제안, 초): `0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2.5, 5` — p95 300ms 판정(AC-013)에 0.3 이 경계로 들어간다.
 
@@ -381,12 +381,12 @@ flowchart TD
 | `pf_errors_total` | C | `app`,`code` | 건 | errorToResponse | `internal` 코드 증가 |
 | `pf_rate_limited_total` | C | `app`,`layer`(`session`) | 건 | RateLimitGuard | 급증(스팸 신호) |
 | `pf_version_conflicts_total` | C | `resource`(`entry`,`report`) | 건 | CAS 실패 경로 | 정보(ADR-021) |
-| `pf_idempotent_replays_total` | C | `app` | 건 | 멱등 키 재생 | 정보 |
+| `pf_idempotent_replays_total` | C | `app` | 건 | 멱등 키 재생 (`pf_idempotency_total{outcome="replayed"}` 와 같은 값의 별칭, 대시보드는 후자를 쓴다) | 정보 |
 | `pf_write_locked_total` | C | `app` | 건 | WriteLockPolicy | 잠금 중 증가(정보) |
 | `pf_build_info` | G(=1) | `app`,`version`,`commit` | — | 기동 시 | — |
 | `pf_metrics_dropped_total` | C | `app` | 건 | LabelPolicy | §3.3 |
 | `pf_db_pool_connections` | G | `app`,`state`(`idle`,`in_use`,`waiting`) | 개 | DbPoolCollector | `waiting` > 0 지속 |
-| `pf_db_tx_duration_seconds` | H | `app`,`usecase` | 초 | UnitOfWork | p95 상승(정보) |
+| `pf_db_tx_duration_seconds` | H | `app`,`usecase`,`outcome` | 초 | UnitOfWork | p95 상승(정보) |
 
 **outbox · inbox · 동시성** (기존 이름 대응: architecture §11, ADR-007)
 
@@ -399,7 +399,7 @@ flowchart TD
 | `pf_inbox_oldest_age_seconds` | G | `consumer`,`status` | 초 | InboxGaugeCollector | `inbox_oldest_age_seconds` | > 60 |
 | `pf_inbox_dead_total` | C | `consumer` | 건 | EV-06 | — | 증가 |
 | `pf_claim_attempts_total` | C | `kind`(`outbox`,`inbox`),`result`(`won`,`lost`) | 건 | EV-02·04 | "선점 실패 수" | `lost` 비율 급증(정보) |
-| `pf_lease_reclaimed_total` | C | `kind` | 건 | LeaseReaper | "임대 만료 회수 수" | 지속 발생 |
+| `pf_lease_reclaimed_total` | C | `kind`,`to`(`new`,`dead`) | 건 | LeaseReaper | "임대 만료 회수 수" | 지속 발생 |
 | `pf_lease_lost_total` | C | `kind` | 건 | fencing 거절 | — | 임대 길이 부적절 신호 |
 | `pf_retry_total` | C | `kind`,`type` | 건 | EV-06 | — | 급증 |
 | `pf_dispatcher_leader` | G | `app` | 0/1 | AdvisoryLeader | — | `sum()==0` (1분) **리더 없음** |
@@ -416,13 +416,13 @@ flowchart TD
 | `pf_ws_connections` | G | `channel`(`public`,`private`) | 개 | WsGaugeCollector | `ws_connections` | 상한 근접 |
 | `pf_ws_connects_total` | C | `channel` | 건 | 업그레이드 성공 | — | — |
 | `pf_ws_disconnects_total` | C | `channel`,`code` | 건 | 종료 | — | `4408`·`4500` 증가 |
-| `pf_ws_resume_total` | C | `mode`(`replay`,`snapshot`,`live`) | 건 | RT-04 | `ws_reconnects_total` 대응 | `snapshot` 비율 급증 |
+| `pf_ws_resume_total` | C | `mode`(`replay`,`snapshot`,`live`),`reason` | 건 | RT-04 | `ws_reconnects_total` 대응 | `snapshot` 비율 급증 |
 | `pf_ws_queue_overflow_total` | C | `channel` | 건 | SendQueue 상한 초과 | — | 증가 |
 | `pf_ws_send_queue_max` | G | `channel` | 건 | 스크레이프 시점 최댓값 | — | 정보 |
 | `pf_ws_messages_sent_total` | C | `channel`,`type` | 건 | 전송 | — | — |
 | `pf_ws_delivery_lag_seconds` | H | `channel` | 초 | `change_log.created_at` → 전송 | — | p95 > 1 |
 | `pf_ws_wake_total` | C | `source`(`notify`,`poll`) | 건 | WakeSignal | — | `poll` 비중 높음 = NOTIFY 이상 |
-| `pf_ws_session_cache_total` | C | `result`(`hit`,`miss`) | 건 | RT-13 | — | — |
+| `pf_ws_session_cache_total` | C | `result`(`hit`,`miss`,`negative`) | 건 | RT-13 | — | — |
 
 **잡 · 보관 · 운영**
 
@@ -435,6 +435,57 @@ flowchart TD
 | `pf_backup_last_size_bytes` | G | — | 바이트 | 위와 동일 | 급감(정보) |
 | `pf_deploy_last_success_timestamp_seconds` | G | — | 초(epoch) | FileStatusCollector (`deploy/current.json`) | 정보 |
 | `pf_deploy_failed` | G | — | 0/1 | FileStatusCollector (`deploy/failed.json` 존재) | `==1` |
+
+**추가 지표 — 상세 설계(F13·F14·F16)가 요구하는 이름의 정본** (위 표에 없던 것. 구현은 이 이름만 쓴다)
+
+| 이름 | 종류 | 레이블 | 발생 위치 |
+|---|---|---|---|
+| `pf_guard_rejections_total` | C | `app`,`guard`,`reason` | CM-01 가드 |
+| `pf_rate_limit_decisions_total` | C | `app`,`rule`,`decision`(`allow`,`deny`) | CM-01·07 (`pf_rate_limited_total` 은 deny 의 별칭 집계) |
+| `pf_idempotency_total` | C | `app`,`outcome`(`claimed`,`replayed`,`reuse`,`in_progress`) | CM-02 |
+| `pf_idempotency_wait_seconds` | H | `app` | CM-02 |
+| `pf_db_tx_retries_total` | C | `app`,`reason` | CM-05 |
+| `pf_migration_version` | G | `app` | CM-05 (적용된 마이그레이션 번호) |
+| `pf_notify_connected` | G | `app` | EV-13 / RT-12 (LISTEN 연결 0/1) |
+| `pf_notify_reconnects_total` | C | `app` | EV-13 / RT-12 |
+| `pf_notify_wakeups_total` | C | `app`,`channel`,`source`(`notify`,`poll`) | EV-13 |
+| `pf_app_ready` | G | `app` | CM-06 |
+| `pf_shutdown_duration_seconds` | H | `app` | CM-06 |
+| `pf_shutdown_forced_total` | C | `app` | CM-06 |
+| `pf_kv_cache_ops_total` | C | `app`,`op`,`result` | CM-07 |
+| `pf_presence_connections` | G | `app` | CM-07 / RT-09 |
+| `pf_rate_limit_buckets` | G | `app` | CM-07 (메모리 어댑터 누수 감지) |
+| `pf_outbox_appended_total` | C | `type` | EV-01 |
+| `pf_inbox_received_total` | C | `consumer`,`duplicate` | EV-03 |
+| `pf_dispatch_batch_size` | H | `app` | EV-02 |
+| `pf_dispatch_published_total` | C | `type` | EV-02 |
+| `pf_message_attempts_total` | C | `consumer`,`outcome` | EV-04·06 |
+| `pf_job_runs_total` | C | `job`,`result` | 잡 공통 |
+| `pf_retention_lag_seconds` | G | `rule` | EV-10 |
+| `pf_flow_agg_rows` | G | `app` | EV-09 |
+| `pf_trace_steps_total` | C | `step` | EV-08 |
+| `pf_ws_replay_messages` | H | `channel` | RT-04 |
+| `pf_ws_snapshot_build_seconds` · `pf_ws_snapshot_bytes` | H | `channel` | RT-05 |
+| `pf_ws_send_queue_length` · `pf_ws_send_queue_bytes` | H | `channel` | RT-06 |
+| `pf_ws_coalesced_total` | C | `channel` | RT-06 |
+| `pf_anonymized_rows_total` | C | `table` | ID-10 / GB-12 (세션 만료 익명화) |
+| `pf_dead_requeued_total` | C | `consumer` | EV-07 (dead 재투입 CLI) |
+| `pf_retention_skipped_total` | C | `rule`,`reason` | EV-10 (동시 실행·락 때문에 건너뜀) |
+| `pf_retry_delay_seconds` | H | `consumer` | EV-06 (백오프 지연 분포) |
+| `pf_write_lock_state` | G | `app` | GB-10 (쓰기 잠금 0/1) |
+| `pf_projection_rebuild_status` | G | `projection`,`state` | GB-26 (재구성 상태 라벨 1/0) |
+| `pf_ws_fanout_seconds` | H | `channel` | RT-06 (직렬화+전송 루프) |
+| `pf_ws_session_revalidate_closed_total` | C | `channel` | RT-13 |
+| `pf_ws_limit_rejected_total` · `pf_ws_evicted_total` | C | `channel`,`reason` | RT-15 |
+| `pf_ws_shutdown_connections` · `pf_ws_shutdown_forced_total` | G · C | `channel` | RT-11 |
+| `pf_realtime_broadcast_total` · `pf_realtime_broadcast_lag_seconds` | C · H | `type` · — | RT-01 |
+| `pf_changelog_head` · `pf_changelog_min_seq` · `pf_changelog_rows` | G | `channel` | RT-02 |
+| `pf_flow_step_delivered_total` | C | `channel` | RT-08 |
+| `pf_flow_summary_push_total` | C | `channel` | RT-14 |
+| `pf_trace_watch_lag_seconds` | H | `channel` | RT-08 |
+
+- **F13 이 쓰는 같은 개념의 다른 이름**은 F13 이 이 카탈로그의 이름으로 바꿔야 한다: `pf_outbox_pending`/`pf_outbox_dead`(게이지) → `pf_outbox_depth{status}`, `pf_inbox_pending`/`pf_inbox_dead` → `pf_inbox_depth{consumer,status}`, `pf_leader{job}` → `pf_dispatcher_leader{app}`(+ `pf_job_last_success_timestamp_seconds{job}`), `pf_message_handle_seconds` → `pf_event_process_duration_seconds`. ADR-024 의 `outbox_lag_seconds` 는 `pf_event_end_to_end_seconds` 로 읽는다.
+- **프로세스 지표**: prom-client 의 기본 지표는 Bun 1.4.4 에서 일부만 의미가 있다(실측). 쓸 수 있는 것: `process_cpu_*`, `process_resident_memory_bytes`, `process_open_fds`, `nodejs_eventloop_lag_{min,max,mean,p50,p90,p99}_seconds`, `nodejs_heap_size_*`. **쓰지 않는 것**: `nodejs_eventloop_lag_seconds`(항상 0), `nodejs_gc_duration_seconds`(샘플 없음), `nodejs_active_handles*`·`active_requests*`(의미 없음). GC 가시성은 M1 에서 포기하고 `process_resident_memory_bytes` 추이로 갈음한다. `healthz` 의 이벤트 루프 지연 판정(< 1초)은 `lag_max`/`p99` 를 쓴다.
 
 - **nginx 지표는 M1 에서 두지 않는다.** 액세스 로그에서 주소 필드를 뺐고(ADR-008) 로그 기반 지표 수집기(추가 컨테이너)를 쓰지 않기 때문이다. 필요해지면 `stub_status` + 내보내기 컨테이너를 별도 결정으로 추가한다.
 - 카디널리티 추정: `route` ≤ 20, `type` ≤ 10, `consumer` ≤ 3, `code` ≤ 15 → 최악 시리즈 수가 수천 이하(무료 자원에서 안전, 측정 후 확인).
@@ -962,7 +1013,7 @@ server {
   server_tokens off;
 
   # 내부 경로는 외부 404 (깊은 방어; 앱 루트라 원래 전달되지 않음)
-  location ~ ^/(healthz|readyz|metrics)(/|$) { return 404; }
+  location ~* ^/(healthz|readyz|metrics)(/|$) { return 404; }   # 대소문자 무시·후행 슬래시 포함(G7 실측: `location =` 정확 일치는 /healthz/ 와 /HEALTHZ 를 못 막는다)
   location = /nginx-health { access_log off; return 200; }
 
   location /api/ {
@@ -1412,7 +1463,7 @@ sequenceDiagram
 | 구분 | 내용 |
 |---|---|
 | 사전 조건 | 호스트에 compose 와 `infra/` 체크아웃(릴리스 태그), GHCR 읽기 권한(공개 저장소면 불필요) |
-| 사후 조건 | 모든 서비스가 새 다이제스트로 `readyz` 통과하거나, 직전 다이제스트로 복귀. 결과가 `status/deploy/*.json` 에 남는다 |
+| 사후 조건 | 모든 서비스가 새 다이제스트로 헬스(worker 는 `/healthz`, 그 외 `/readyz`)를 통과하거나, 직전 다이제스트로 복귀. 결과가 `status/deploy/*.json` 에 남는다 |
 
 ### 13.1 스크립트 흐름 (제안/미검증)
 
@@ -1427,7 +1478,7 @@ infra/scripts/pull-deploy.sh
  7. 새 이미지 pull
  8. 마이그레이션: 일회성 컨테이너 db:migrate  → 실패 시 교체하지 않고 종료(blocked 기록)
  9. 교체 순서: worker → api → ws-gateway → web → (proxy 설정 변경 시) proxy
-    각 단계: compose up -d --no-deps <svc> (다이제스트 고정) → /readyz 연속 N회 통과 대기 (타임아웃 60초)
+    각 단계: compose up -d --no-deps <svc> (다이제스트 고정) → 헬스 연속 N회 통과 대기 (타임아웃 60초) — worker 는 /healthz, api·ws-gateway·web 은 /readyz
 10. 모두 통과: current ← 새 다이제스트, failed.json 삭제
 11. 하나라도 실패: 직전 다이제스트로 되돌림(역순), blocked 에 새 다이제스트 추가, failed.json 기록
 ```
@@ -1461,7 +1512,7 @@ sequenceDiagram
         else 성공
             loop worker, api, ws-gateway, web
                 PD->>C: up -d --no-deps 서비스
-                PD->>C: /readyz 대기 (최대 60초)
+                PD->>C: 헬스 대기 (worker 는 /healthz, 나머지 /readyz, 최대 60초)
                 alt 통과
                     C-->>PD: ready
                 else 실패
@@ -1500,7 +1551,7 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     A["서비스 교체 시작"] --> B["새 다이제스트로 up -d --no-deps"]
-    B --> C["readyz 폴링 (간격 2초)"]
+    B --> C["헬스 폴링 (worker: healthz, 그 외: readyz, 간격 2초)"]
     C --> D{"연속 3회 200 ?"}
     D -- "예" --> OK["다음 서비스"]
     D -- "아니오" --> E{"60초 경과?"}
@@ -1599,13 +1650,13 @@ flowchart TD
 | 구분 | 내용 |
 |---|---|
 | 사전 조건 | 관리자 권한(허용목록) 또는 호스트 접근(CLI) |
-| 사후 조건 | 잠금 중 쓰기 요청은 `write_locked` 응답(제안: 503 + `Retry-After`, **03 계약에 반영 필요**), 읽기·WS 는 정상. 잠금 해제 시 즉시 복구 |
+| 사후 조건 | 잠금 중 쓰기 요청은 `write_locked` 응답(503 + `Retry-After`, 03 §2·§4.2 에 반영됨), 읽기·WS 는 정상. 잠금 해제 시 즉시 복구 |
 
 ### 15.1 절차 (런북)
 
 1. **감지**: 대시보드(api 패널의 429·요청률), 신고 큐 급증.
 2. **1차 대응(이미 자동)**: nginx `limit_req`, 앱 세션 속도 제한.
-3. **잠금**: 관리자 화면 또는 API `POST /api/admin/write-lock {locked:true, reason}`. 관리자 로그인이 불가하면 호스트에서 `infra/scripts/write-lock.sh on "<사유>"`(DB 단일 행 갱신).
+3. **잠금**: 관리자 화면 또는 API `POST /api/admin/write-lock {locked:true, reason}`. 관리자 로그인이 불가하면 호스트에서 `docker compose exec worker bun run worker admin write-lock on --reason "<사유>"`(DB 단일 행 갱신, F16 §11 정본).
 4. **확인**: 쓰기 요청이 `write_locked` 로 응답, `pf_write_locked_total` 증가, 읽기 정상.
 5. **정리**: 신고 큐에서 스팸 글 숨김(GB-07). 일괄 숨김이 필요하면 관리 CLI(후속).
 6. **해제**: 같은 경로로 `locked:false`. 쓰기 정상화 확인.
@@ -1645,7 +1696,7 @@ flowchart TD
     B -- "아니오" --> C{"api 가 응답하는가"}
     C -- "예" --> D["관리자 API 로 write-lock on"]
     C -- "아니오" --> E{"호스트 접근 가능?"}
-    E -- "예" --> F["write-lock.sh on 또는 90-write-block.conf + reload"]
+    E -- "예" --> F["worker admin write-lock on 또는 90-write-block.conf + reload"]
     E -- "아니오" --> G["Cloudflare 측 임시 차단 (WAF 규칙, 무료 범위 미확인)"]
     D --> H["스팸 정리 후 off"]
     F --> H
@@ -1701,7 +1752,7 @@ infra/k8s/
 | 타임아웃 | WS 경로의 유휴/요청 타임아웃을 Envoy Gateway 정책 리소스로 150초 이상(정책 리소스 이름·필드는 **미확인 G8**) |
 | 속도 제한 | nginx 가 없으므로 `limit_req` 상당은 **k3d 에서는 시험 범위 밖**(앱 세션 제한만). 정책으로 대체 가능한지 미확인 |
 
-- 02 §8 의 "라우팅 확인" 은 `/api/healthz` 를 예로 들었으나 **업무 경로 `/api/**` 아래에 `healthz` 는 없다**(§0.2). 라우팅 확인에는 `GET /api/me` 같은 실제 업무 경로를 쓴다 — **수정 요청**.
+- 02 §8 의 "라우팅 확인" 은 `/api/healthz` 를 예로 들었으나 **업무 경로 `/api/**` 아래에 `healthz` 는 없다**(§0.2). 라우팅 확인에는 `GET /api/me` 같은 실제 업무 경로를 쓴다 (02 §8 에 반영됨).
 
 ### 16.2 시퀀스 (ws-gateway 롤링)
 
@@ -1799,10 +1850,12 @@ flowchart TD
 | Next 정적 내보내기로 폴백 한정 빌드 가능 여부 | G3 |
 | 속도 제한 수치(nginx·세션) | S6-4 부하 시험 |
 
-## 20. 수정 요청 (다른 문서에 반영 필요)
+## 20. 수정 요청 (반영 완료 기록)
 
-1. **02 §8** 의 k3d 라우팅 확인 `/api/healthz` 는 존재하지 않는 경로다(운영 경로는 앱 루트). `GET /api/me` 등 업무 경로로 바꿀 것.
-2. **03 계약**에 쓰기 잠금 응답 추가: 코드 `write_locked`(제안 503 + `Retry-After`)와 `POST /api/admin/write-lock` 의 요청·응답, 그리고 `00 §4.3` 오류 표에 대응 클래스(예: `WriteLockedError` ← `DomainError`) 추가.
-3. **09 §2 PR 검사**에 §14 의 운영 산출물 검사(`nginx -t`, `promtool`, 대시보드 lint, `compose config`, `shellcheck`, 매니페스트 검증)를 추가.
-4. **12 §1.1 `site-vars`** 에 Grafana 공개 대시보드 임베드 URL 변수(예: `site.metricsEmbedUrl`, `null` 이면 링크 카드로 대체) 추가 — Public dashboards 토큰이 프로비저닝되지 않을 때를 대비.
-5. **ADR-007 / architecture §11** 의 지표 이름을 `pf_` 규약(§4.1 "기존 이름" 열)으로 갱신하고, **F00 §10** 에 `write_lock` 외 `pf_collector_errors_total`·`pf_log_redactions_total`·`pf_metrics_dropped_total` 같은 보조 지표를 허용한다는 점을 반영.
+> 아래 요청은 2026-11-04 에 정본 문서에 반영되었다. 이력으로 남긴다. 충돌 시 정본이 우선한다.
+
+1. 02 §8 라우팅 확인 경로 → `GET /api/me` 로 교체됨.
+2. 03 쓰기 잠금 계약(`write_locked` 503 + `Retry-After`, `POST /api/admin/write-lock`)과 00 §4.3 `WriteLockedError` → 반영됨.
+3. 09 §2 PR 검사의 `config check` 잡 → 반영됨.
+4. 12 §1.1 `site.metricsEmbedUrl` → 반영됨.
+5. ADR-007 / architecture §11 의 `pf_` 지표 이름 → 반영됨. 보조 지표 허용은 §4.1 "추가 지표" 표가 정본.

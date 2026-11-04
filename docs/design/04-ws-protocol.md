@@ -22,7 +22,7 @@
 |---|---|
 | 프록시 | nginx `location /ws/` 한 줄로 두 경로를 gateway 로 전달 (업그레이드 헤더·타임아웃은 10) |
 | 프레임 | **텍스트 JSON**만. 바이너리 프레임은 `4400` 으로 종료 |
-| `Origin` | 허용목록(사이트 도메인, 개발 로컬)만. 불일치는 업그레이드 `403` |
+| `Origin` | `PUBLIC_ORIGIN` 하나만(개발은 `http://localhost:8080`, 프록시 경유). 불일치는 업그레이드 `403` |
 | 크기 제한 | 클라이언트→서버 4KB, 서버→클라이언트 64KB |
 | 클라이언트 메시지 속도 | 초당 10건 초과 시 `4429` 종료 |
 | 하트비트 | 서버가 25초마다 `hb`, 프로토콜 ping/pong 은 60초 간격. 무응답 시 서버가 종료(`idleTimeout` 120초, G2에서 확인) |
@@ -256,7 +256,9 @@ stateDiagram-v2
     handshaking --> live : welcome (+snapshot/replay.end)
     handshaking --> backoff : 시간 초과 / 4401 이외 오류
     live --> backoff : close (1001/4408/4429/4500/네트워크)
-    live --> stopped : 1000 / 4400
+    live --> stopped : 1000 / 4400 / 4409
+    live --> idle : 숨김 탭 5분 (클라이언트가 close 1000)
+    idle --> connecting : 가시성 복귀
     backoff --> connecting : 지연 경과
     live --> live : seq 건너뜀 → 재연결 트리거
     stopped --> [*]
@@ -264,7 +266,8 @@ stateDiagram-v2
 
 - 두 연결은 **재접속도 독립**이다(public 이 끊겨도 private 은 유지). 아래 상태와 백오프는 연결마다 따로 돈다.
 - 백오프: **1초부터 2배**, 완전 지터, 상한 30초. `live` 가 30초 이상 유지되면 초기화. 서버가 `bye.reconnectAfterMs` 를 주면 그 값을 우선한다.
-- 탭이 숨겨져 있어도 연결은 유지하되, 오래(예: 5분) 숨겨지면 닫고 보일 때 다시 연다(자원 절약, 구현 시 판단).
+- 탭이 숨겨져 있어도 연결은 유지하되, **5분** 숨겨지면 클라이언트가 `close(1000)` 으로 의도적으로 닫는다. 이 경우는 종단 `stopped` 가 아니라 **`idle`** 이며 가시성이 돌아오면 `connecting` 으로 간다(public 은 `resume`). `4409` 는 다른 탭이 유효하다는 뜻이므로 `stopped`(재접속 안 함)로 가고, 배너는 "다른 탭에서 열려 있습니다"를 보인다.
+- `unstable`(연결은 살아 있으나 `hb` 지연) 판정 임계값은 `hb` 주기(25초)의 2배인 **50초 무수신**이다. 주기와 같은 값이면 지터만으로 깜빡인다.
 - `navigator.onLine` 복귀 시 대기 중인 백오프를 즉시 해제한다.
 
 ## 9. 클래스 구조
@@ -482,7 +485,7 @@ classDiagram
 
 | 항목 | 규칙 |
 |---|---|
-| Origin | 허용목록(사이트 도메인, 개발 로컬)만. 불일치는 업그레이드 거부 |
+| Origin | `PUBLIC_ORIGIN` 하나만(개발은 `http://localhost:8080`). 불일치는 업그레이드 거부 |
 | 세션 | 쿠키 `HttpOnly`·`Secure`·`SameSite=Lax`. WS 로 토큰을 주고받지 않는다. private 만 세션 필수 |
 | 개인정보 | 공개 채널에 ownerKey·세션·IP·userId 를 싣지 않는다(서버에서 변환 시 제거) |
 | 연결 수 | 접속 주소당 동시 연결 수는 nginx `limit_conn`, 전체 상한은 gateway 설정 |

@@ -634,6 +634,7 @@ sequenceDiagram
 | 컴포넌트 | `ComposeForm`(react-hook-form), `NameField`, `BodyField`, `CharCounter`, `SubmitButton`, `AnonymousNotice` |
 | 훅 | `usePostEntry()`, `useDraft()`(sessionStorage) |
 | 상태 | 폼 값, `phase`: `idle`→`sending`→`idle`/`failed`, `retryAfterUntil`, `idempotencyKey` |
+| 쓰기 잠금 | `Me.writeLocked` 가 true 이면 `SubmitButton` 을 비활성화하고 "점검 중" 안내를 보인다. 서버가 `503 write_locked`(+`Retry-After: 60`)를 돌려주면 같은 안내로 전환(07 §7.5) |
 | 검증 | 클라이언트도 서버와 **같은 TypeBox 스키마**(`@pf/protocol`)로 검증: 글 1~500자(코드포인트, NFC), 최대 10줄, 이름 2~20자·제어문자 거부 |
 
 ```
@@ -791,7 +792,7 @@ sequenceDiagram
 ```
 
 - 삭제: 확인 다이얼로그(포커스 트랩, 취소 시 호출 버튼으로 복귀) → 응답 대기 → 성공 시 제거. 409 이면 최신 뷰로 갱신하고 다시 확인을 요구한다.
-- WS `entry.updated`/`entry.removed` 가 **편집 중인 글**에 도착하면 편집을 닫지 않고 `ConflictNotice` 만 띄운다(입력 보존).
+- WS `entry.updated` 가 **편집 중인 글**에 도착하면 편집을 닫지 않고 `ConflictNotice` 만 띄운다(**입력 보존**). `entry.removed` 가 도착하면 **안내 후 편집을 종료**한다(삭제된 글은 저장해도 404).
 - **접근성**: 다이얼로그 `role="alertdialog"`, 충돌 안내 `role="status"`. **시험**: 컴포넌트(409 두 선택지), E2E 2탭 동시 수정(AC-016), 익명 글에 버튼 미노출(AC-004).
 
 ### WB-09 신고 다이얼로그 (S6-3)
@@ -799,7 +800,7 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 컴포넌트 | `ReportDialog`(`Dialog`), `ReasonSelect`, `NoteField` |
-| 입력 | `reasonCode`(UI 제안: `spam` `abusive` `personal_info` `other`), `note`(선택, 200자) — **코드 값 정본은 `@pf/protocol` 에서 확정 필요(미확인, 아래 수정 요청)** |
+| 입력 | `reasonCode`(확정, 03 §4.1: `spam` `abuse` `personal_info` `off_topic` `other`; UI 라벨은 i18n 키 `report.reason.<code>`), `note`(선택, 200자) |
 | 데이터 | `POST /api/entries/{id}/reports` → `202` |
 
 ```mermaid
@@ -985,7 +986,9 @@ public/private 상태 조합별 표시(상태 값: `connecting` `live` `unstable
 | live | stopped(4401 반복) | ◐ 일부 연결 | "로그인 상태를 확인하는 중" 후 `/api/me` 재조회 | 세션 회전 직후 |
 | connecting | any | ◐ 연결 중 | "연결 중…" (status) | 최초 진입 직후 3초 이내는 배너 숨김(깜빡임 방지) |
 | backoff | any | ⟳ 재연결 대기 | "실시간 갱신이 멈췄습니다. n초 후 재시도 [지금 시도]" (status) | 목록은 마지막 상태 유지, REST 동작 |
-| unstable(hb 지연) | any | ◐ 불안정 | "연결이 불안정합니다" (status) | hb 25초 초과 |
+| unstable(hb 지연) | any | ◐ 불안정 | "연결이 불안정합니다" (status) | 마지막 hb 이후 **50초**(주기 25초의 2배) 초과 |
+| idle(숨김 탭 5분 후 의도적 닫음) | idle | ○ 일시 중지 | 없음 (탭 복귀 시 자동 재연결, public 은 `resume`) | 종단 `stopped` 가 아님 |
+| stopped(4409) | any(private) | ◐ 일부 연결 | "다른 탭에서 열려 있습니다. 이 탭은 내 흐름을 받지 않습니다" (status) | 재접속하지 않음. 다른 탭이 유효 |
 | stopped(4400) | any | ✕ 비활성 | "실시간이 비활성입니다. 새로고침해 주세요" (**alert**) | 클라이언트 버그/버전 불일치 |
 | any | any, `online=false` | ○ 오프라인 | "오프라인입니다" 로 문구 교체 | `online` 이 우선 |
 
@@ -1028,7 +1031,7 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 경로·컴포넌트 | `/[locale]/metrics`(정적 셸) → `MetricsPage`, `GrafanaEmbed`, `MetricsFallback`, `MetricsExplainer` |
-| 데이터 | Grafana Public dashboards URL(설정 `GRAFANA_PUBLIC_URL` — 이름·위치 **미확인**, G6) |
+| 데이터 | Grafana Public dashboards URL(사이트 변수 **`site.metricsEmbedUrl`**, 12 §1.1; 비어 있으면 안내·링크. 임베드 동작은 G6) |
 | 정적 폴백 | 제외("점검 중") |
 
 iframe 요건(관문 G6 에서 실측으로 확정, 아래는 **현재 가정**):
@@ -1043,7 +1046,7 @@ iframe 요건(관문 G6 에서 실측으로 확정, 아래는 **현재 가정**)
 
 ```mermaid
 flowchart TD
-    M["페이지 진입"] --> CFG{"GRAFANA_PUBLIC_URL 설정됨?"}
+    M["페이지 진입"] --> CFG{"site.metricsEmbedUrl 설정됨?"}
     CFG -- "아니오" --> FB1["MetricsFallback: '지표 화면 준비 중'"]
     CFG -- "예" --> PRB["HEAD 로 사전 확인(같은 출처 프록시 경로일 때)"]
     PRB --> OK{"2xx ?"}
@@ -1129,7 +1132,7 @@ flowchart TD
     RES -- "403" --> NA["권한 없음 · 세션 재확인"]
 ```
 
-- **쓰기 잠금 스위치**: 낙관 반영 없이 응답 후 상태 반영, 변경 직후 `이유`(선택) 입력. 현재 상태는 `GET`이 카탈로그에 없다 → 페이지 로드 시 서버에서 조회할 읽기 경로가 필요하다(수정 요청).
+- **쓰기 잠금 스위치**: 낙관 반영 없이 응답 후 상태 반영, 변경 직후 `이유`(선택) 입력. 현재 상태는 `GET /api/me` 의 `Me.writeLocked` 로 읽는다(03 §4.3, 별도 읽기 경로 불필요). 응답은 `{ writeLocked, changedAt }`.
 - `ReportView` 에 **`entryVersion`** 이 있어야 숨김 요청이 `expectedVersion` 을 보낼 수 있다(03 §4.3 의 `ReportView` 가 미정의 — 수정 요청).
 - **접근성**: 표 `caption`, 행 작업은 `button` + 대상 글 발췌를 `aria-label` 에 포함. **시험**: RSC 가드(비관리자 403), 컴포넌트(409 갱신), E2E AC-006(숨김 즉시 공개 목록에서 제외).
 
@@ -1411,7 +1414,7 @@ flowchart TD
     MSG["메시지 수신"] --> V{"v 지원 · 스키마 유효?"}
     V -- "아니오" --> BAD["무시 + 경고 로그(4400 은 서버가 닫음)"]
     V -- "예" --> SEQ{"seq 가 있는 변경 메시지?"}
-    SEQ -- "아니오(welcome·hb·presence·snapshot…)" --> SYS["시스템/비순번 처리"]
+    SEQ -- "아니오(welcome·hb·presence·flow.summary·snapshot…)" --> SYS["시스템/비순번 처리<br/>(flow.summary 5m 키 덮어쓰기, presence 갱신 — SeqTracker 는 건드리지 않음)"]
     SEQ -- "예" --> ACC["SeqTracker.accept(seq)"]
     ACC --> R{"결과"}
     R -- "dup (seq ≤ last)" --> IGN["무시"]
@@ -1420,13 +1423,13 @@ flowchart TD
     T -- "entry.created" --> C["StoreBridge.mergeEntry(id 병합·정렬 삽입)"]
     T -- "entry.updated" --> UPD["id 가 목록에 있으면 갱신, 없으면 무시"]
     T -- "entry.removed" --> RM["목록에서 제거"]
+    T -- "entry.restored" --> RS["해당 글 재조회 후 id 순 정렬 삽입"]
     T -- "reaction.updated" --> RC["reactions[emoji] = count 덮어쓰기"]
-    T -- "flow.summary" --> FS["5m 키 덮어쓰기"]
     C --> LAST["last = seq"]
     UPD --> LAST
     RM --> LAST
     RC --> LAST
-    FS --> LAST
+    RS --> LAST
 ```
 
 적용 세부 규칙:
@@ -1538,12 +1541,14 @@ flowchart TD
 
 초기 JS 라우트별 ≤ 170KB(gzip) 목표(07 §9). `ws` 청크는 초기 예산에 포함하지 않는다(idle 로드).
 
-## 8. 다른 문서에 대한 수정 요청
+## 8. 다른 문서에 대한 수정 요청 (반영 완료 기록)
+
+> 아래 요청은 2026-11-04 에 정본(03·04·07·10·12)에 반영되었다. 이력으로 남긴다.
 
 | # | 대상 | 내용 |
 |---|---|---|
 | 1 | **07 §9** | "WS 연결: 방명록/흐름 화면에서만 연결, 정적 페이지는 연결 안 함" 은 04 §1·사용자 결정("사이트 최초 진입 시 public 연결")과 충돌한다. 어느 페이지로 들어와도 idle 에 연결(번들 분리)로 고쳐야 한다. WB-20 이 후자를 따랐다 |
-| 2 | **03 §4.3** | `ReportView` 미정의 — `entryVersion`(숨김 `expectedVersion` 용)과 `reasonCode` 열거(`spam` `abusive` `personal_info` `other` 제안)를 `@pf/protocol` 정본에 정의해야 한다. 또한 쓰기 잠금 상태 **조회 경로**(`GET /api/admin/write-lock`)가 없다 |
+| 2 | **03 §4.3** | `ReportView` 미정의 — `entryVersion`(숨김 `expectedVersion` 용)과 `reasonCode` 열거(`spam` `abuse` `personal_info` `other` 제안)를 `@pf/protocol` 정본에 정의해야 한다. 또한 쓰기 잠금 상태 **조회 경로**(`GET /api/admin/write-lock`)가 없다 |
 | 3 | **04 §3.2** | `flow.summary` 본문에 창(window) 정보가 없다 — 푸시는 5분 창 고정으로 정하거나 `window` 필드를 추가해야 한다(WB-11 은 5분 고정 가정). `welcome` 에 `replay.end` 이전 건수를 알려 주면 토스트 판정이 쉬워진다(선택) |
 | 4 | **10 §헤더·CSP / 12 §개인정보** | CI 배지(WB-21)가 GitHub 로의 외부 이미지 요청이다: `img-src` 에 해당 호스트 허용 또는 배지를 빌드 시 고정 이미지로 대체하고, 12 의 "외부 폰트·CDN 없음" 문구를 정합시켜야 한다. Grafana 임베드용 `frame-src`(WB-13)도 CSP 표에 필요 |
 | 5 | **카탈로그 F00 / 03** | 흐름 화면의 "보내기"(WB-10)가 방명록에 실제 글을 만든다. 데모 전용 이벤트(별도 `type`·엔드포인트)를 둘지, 현재처럼 글 작성으로 둘지 결정이 필요하다 — 두면 GB 기능과 05 카탈로그에 항목이 추가된다 |
@@ -1553,7 +1558,7 @@ flowchart TD
 | 항목 | 결정 시점 |
 |---|---|
 | 컴포넌트 시험 도구, E2E 도구(Bun 호환) | G3·08 미결 해소 시 |
-| `API_INTERNAL_URL`·`GRAFANA_PUBLIC_URL` 의 환경변수 이름과 web 스키마 반영 | 01 §8 과 맞춤 |
+| `API_INTERNAL_URL` 환경변수 이름과 web 스키마 반영 | 01 §8 과 맞춤 (Grafana·저장소 URL 은 사이트 변수 `site.metricsEmbedUrl`/`site.repoUrl`로 확정) |
 | 웹 vitals 서버 수집 여부 | 별도 ADR(M1 은 수집 안 함) |
 | 숨김 탭 연결 종료 시간(5분), `refetchOnWindowFocus` 대상 | 측정 후 |
 | 이메일 표시 방식(복사 버튼/난독화) | `contact.emailVisible` 결정 후 |

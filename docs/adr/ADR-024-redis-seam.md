@@ -41,7 +41,7 @@ M1 은 Redis 를 쓰지 않는다(ADR-022). 그런데 그 자리를 무엇이 �
 ### 도입 기준 (하나라도 충족하면 Redis 어댑터를 켠다)
 | 조건 | 측정 방법 |
 |---|---|
-| outbox→소비 지연 p95 가 목표(예: 1초)를 폴링 주기 조정으로도 못 맞춤 | 지표 `outbox_lag_seconds` |
+| outbox→소비 지연 p95 가 목표(예: 1초)를 폴링 주기 조정으로도 못 맞춤 | 지표 `pf_event_end_to_end_seconds`·`pf_outbox_oldest_age_seconds`(design/features/17) |
 | Postgres 가 폴링 부하로 쓰기 p95 를 해침 | 부하 시험(k6) 전후 비교 |
 | 다중 레플리카에서 공유 속도 제한·presence 가 필요 | k3d 레플리카 시험 |
 | Phase 3 재고 선점 착수 | ADR-010 (이 경우 Redis 는 필수) |

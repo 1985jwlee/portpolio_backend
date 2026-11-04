@@ -28,7 +28,7 @@ portpolio_backend/
 │  ├─ realtime/
 │  └─ observability/
 ├─ packages/                     # 공용 라이브러리 (모듈에 의존하지 않는다)
-│  ├─ kernel/                    # 기반 클래스·오류·Result (00 §4)
+│  ├─ kernel/                    # 기반 클래스·오류·Result (00 §4) + ports/ (RateLimiter·PresenceCounter·KeyValueCache·EventTransport, ADR-024)
 │  ├─ protocol/                  # REST·WS·이벤트 스키마와 상수 (TypeBox 정의 + JSON Schema 내보내기)
 │  ├─ db/                        # 풀·트랜잭션·마이그레이션·드리즐 구성
 │  ├─ infra/                     # 보조 포트 구현: memory/ postgres/ (redis/ 는 도입 시, ADR-024)
@@ -42,7 +42,7 @@ portpolio_backend/
 │  ├─ prometheus/  grafana/      # 설정·대시보드 프로비저닝
 │  └─ scripts/                   # pull-deploy.sh, backup.sh 등 (09, 02)
 ├─ scripts/                      # TypeScript(Bun) 저장소 도구: check-purity.ts, gen-schema.ts, seed.ts
-├─ tests/                        # 교차 모듈 시험: e2e/, load/ (k6), reconnect/ (08)
+├─ test/                         # 교차 시험: chaos/(동시성·장애), e2e/, load/ (k6) (08 §11). 재접속 시험은 apps/ws-gateway/test/
 ├─ docs/  specs/                 # 문서
 ├─ .dependency-cruiser.cjs  biome.json  tsconfig.base.json  tsconfig.json
 ├─ bunfig.toml  bun.lock  package.json  .env.example  .gitignore
@@ -63,7 +63,7 @@ modules/guestbook/
    │  ├─ query/                  # list-entries.ts, list-reports.ts …
    │  └─ event/                  # guestbook-projector.ts                              (inbox 소비자)
    ├─ adapter/
-   │  └─ postgres/               # *-repository.ts 구현, schema.ts (Drizzle 표 정의)
+   │  └─ postgres/               # *-repository.ts 구현(Drizzle 빌더), schema.ts (표 정의), raw/ (손으로 쓴 SQL — ADR-025)
    └─ index.ts                   # 공개 API: usecase 팩토리·타입만 내보낸다
 ```
 
@@ -95,12 +95,14 @@ flowchart TB
         CFG["@pf/config"]
     end
     API --> ID & GB & EV & RT & OB
-    WSG --> ID & RT & OB
-    WRK --> GB & EV & RT & OB
+    WSG --> ID & GB & EV & RT & OB
+    WRK --> ID & GB & EV & RT & OB
     WEB --> PR
     GB --> ID
     GB --> EV
     RT --> ID
+    RT --> GB
+    RT --> EV
     ID & GB & EV & RT --> KN & PR & DBP & CFG
     OB --> CFG
     DBP -.->|"./schema 만"| ID & GB & EV & RT
@@ -134,8 +136,9 @@ flowchart TB
 
 ```
 tsconfig.base.json            # 엄격 옵션 전부. 모든 패키지가 extends
-├─ packages/*/tsconfig.json   # extends base, include: src
-├─ modules/*/tsconfig.json    # extends base, include: src
+├─ packages/*/tsconfig.json   # extends base, include: src, test (golden JSON 은 packages/protocol/golden)
+├─ modules/*/tsconfig.json    # extends base, include: src, test
+├─ apps/*/tsconfig.json       # include: src, test (test/ 도 tsc -b·dependency-cruiser 검사 대상)
 ├─ apps/api|ws-gateway|worker/tsconfig.json   # extends base, types: ["bun"]
 └─ apps/web/tsconfig.json     # extends base, lib: DOM, jsx: preserve, Next 플러그인
 tsconfig.json                 # 루트: files: [], references 로 위 전부 나열 (tsc -b 용)
@@ -170,8 +173,9 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 | **B6** 조립 위치 | `adapter/**` 임포트는 `apps/*/src/compose/**` 와 같은 모듈의 `adapter` 안에서만 | usecase 가 어댑터를 직접 앎 |
 | **B7** 패키지 방향 | `packages/*` ↛ `modules/*`·`apps/*` / `modules/*` ↛ `apps/*` / `kernel` 은 아무것도 임포트 안 함 | 상향 의존 |
 | **B8** 웹 격리 | `apps/web` 은 `@pf/protocol` 외 `@pf/*` 금지 | 서버 코드 번들 유입 |
-| **B10** 보조 포트 구현 격리 | `@pf/infra` 는 `apps/*/src/compose/**` 에서만 임포트. `domain`·`service`·`usecase` ↛ `@pf/infra` | usecase 가 Redis·메모리 구현에 결합 (ADR-024) |
 | **B9** 환경 접근 | `process.env`·`Bun.env` 참조는 `packages/config` 에서만 | 설정 우회 (규칙은 `scripts/check-purity.ts` 의 문자열 검사로 보강) |
+| **B11** 쓰기는 트랜잭션 | `.insert(`·`.update(`·`.delete(`·쓰기 `execute` 는 `UnitOfWork` 가 주는 `TxContext` 에서만. `ReadDb`/풀 핸들에는 쓰기 메서드가 없다. `check-purity` 가 `adapter/postgres` 밖 사용을 문자열로 검출 | 자동 커밋 쓰기 (ADR-025) |
+| **B10** 보조 포트 구현 격리 | `@pf/infra` 는 `apps/*/src/compose/**` 에서만 임포트. `domain`·`service`·`usecase` ↛ `@pf/infra` | usecase 가 Redis·메모리 구현에 결합 (ADR-024) |
 
 시간·난수 직접 호출 금지(`Date.now`, `new Date()`, `Math.random`, `crypto.randomUUID` in `domain`·`service`)는 임포트가 아니라 호출이라 dependency-cruiser 로 못 잡는다 → **`scripts/check-purity.ts`**(대상 디렉토리 텍스트 검사)로 CI 에서 확인한다. Biome 의 해당 규칙 사용 여부는 **미확인**(구현 시 확인하고, 있으면 그쪽으로 이관).
 
@@ -179,7 +183,7 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 flowchart LR
     SRC["변경된 소스"] --> BIO["biome check<br/>포맷 · 린트"]
     BIO --> TSC["tsc -b --noEmit<br/>타입"]
-    TSC --> DC["dependency-cruiser<br/>B1~B8"]
+    TSC --> DC["dependency-cruiser<br/>B1~B8 · B10"]
     DC --> PUR["check-purity.ts<br/>B9 + 시간·난수"]
     PUR --> GEN["gen-schema.ts --check<br/>protocol 스키마 최신 여부"]
     GEN --> TST["bun test<br/>unit"]
@@ -199,16 +203,20 @@ flowchart LR
 | `lint` / `format` | `biome check` / `biome format --write` |
 | `arch` | dependency-cruiser + `scripts/check-purity.ts` |
 | `gen:schema` | `@pf/protocol` TypeBox → JSON Schema 내보내기. `--check` 는 변경이 있으면 실패 |
-| `test` | 전체 `bun test` (unit) |
+| `test` · `test:unit` | 전체 `bun test` (unit, L2). `test` 는 `test:unit` 의 별칭 |
 | `test:integration` | DB 가 필요한 시험(컨테이너 또는 compose 서비스, 08) |
-| `test:e2e` · `test:load` | 교차 시험·k6 (08) |
+| `test:chaos` | 동시성·장애 시험(`test/chaos/`, L3, 08 §5·§7) |
+| `test:e2e` · `test:load` | 교차 시험·k6 (08). `load:api` 는 API 부하(k6) 별칭 |
+| `load:api` | k6 API 부하 시나리오 실행 (08 §9) |
+| `build:fallback` | 정적 폴백 페이지 빌드(OB-08, F17) → `infra/nginx/fallback/` |
+| `worker <cmd>` | 관리 CLI 진입점: `rebuild`, `dead-requeue`, `admin write-lock on\|off`, `retention:run` (F16 §11 정본). 예: `bun run worker dead-requeue` |
 | `db:generate` / `db:generate:custom` | drizzle-kit 마이그레이션 생성 / raw SQL 마이그레이션 틀 |
 | `db:migrate` | forward-only 적용 |
 | `db:seed` | 개발 시드 (02) |
 | `compose:up` · `compose:down` | 로컬 인프라 |
 | `k3d:up` · `k3d:down` | 로컬 K8s 검증 환경 (02) |
 | `content:check` | 사이트 변수·프로필 스키마 검사. 비면 경고, `CONTENT_STRICT=1` 이면 릴리스 필수 변수가 비었을 때 실패 (12 §1.1) |
-| `check` | `lint → typecheck → arch → gen:schema --check → test` (CI 의 PR 검사와 같은 순서) |
+| `check` | `lint → typecheck → arch → gen:schema --check → test:unit` (CI 의 PR 검사와 같은 순서). `content:check` 는 릴리스 워크플로가 별도 실행 (09) |
 
 ## 7. 설정 (`packages/config`)
 
@@ -342,6 +350,12 @@ flowchart TD
 | `DATABASE_POOL_MAX` | int | `10` | 아니오 | AGW | 아니오 |
 | `METRICS_ENABLED` | bool | `true` | 아니오 | AGW | 아니오 |
 | `PUBLIC_ORIGIN` | URL (스킴+호스트) | — | **예** | AGB | 아니오 |
+| `SESSION_COOKIE_NAME` | string | `__Host-sid` | 아니오 | AG | 아니오 |
+| `COOKIE_SECURE` | bool | `true` | 아니오 | AG | 아니오 |
+| `SESSION_TTL_DAYS` | int | `7` | 아니오 | AG | 아니오 |
+
+- `SESSION_COOKIE_NAME` 은 개발(http)에서 `sid`, 운영 `__Host-sid`([10](10-security.md) §3). ws-gateway 가 `/ws/private` 업그레이드에서 쿠키를 파싱하므로 api 와 gateway 가 같이 쓴다.
+- `PUBLIC_HOST` 는 별도 변수가 아니다 — `PUBLIC_ORIGIN` 에서 유도한다(CSP `connect-src wss://…` 등). 저장소 링크·Grafana 임베드 URL 은 환경변수가 아니라 **사이트 변수**(`site.repoUrl`·`site.metricsEmbedUrl`, [12](12-content.md) §1.1)다.
 
 `LISTEN/NOTIFY` 전용 연결은 `DATABASE_URL` 로 따로 하나 더 연다(풀과 별개, G4).
 
@@ -350,9 +364,6 @@ flowchart TD
 | 이름 | 타입 | 기본값 | 필수 | 비밀 | 비고 |
 |---|---|---|---|---|---|
 | `API_PORT` | int | `3001` | 아니오 | 아니오 | |
-| `SESSION_COOKIE_NAME` | string | `__Host-sid` | 아니오 | 아니오 | 개발(http)에서는 `sid` ([10](10-security.md) §3) |
-| `COOKIE_SECURE` | bool | `true` | 아니오 | 아니오 | 개발 http 에서만 `false` |
-| `SESSION_TTL_DAYS` | int | `7` | 아니오 | 아니오 | ADR-008 |
 | `GITHUB_CLIENT_ID` | string | — | **예** | 아니오 | |
 | `GITHUB_CLIENT_SECRET` | string | — | **예** | **예** | |
 | `OAUTH_STATE_SECRET` | string(32바이트 이상) | — | **예** | **예** | OAuth 임시 쿠키(`state`·PKCE verifier) 서명 키 ([06](06-auth.md) §3, ID-05). 회전 시 진행 중 로그인만 무효 |
@@ -375,7 +386,7 @@ flowchart TD
 
 | 이름 | 타입 | 기본값 | 필수 | 비밀 | 비고 |
 |---|---|---|---|---|---|
-| `WORKER_PORT` | int | `3003` | 아니오 | 아니오 | `/metrics`·`/healthz` 전용 |
+| `WORKER_PORT` | int | `3003` | 아니오 | 아니오 | `/metrics`·`/healthz` 전용 (**`/readyz` 없음** — 라우팅 대상이 아니다, F17 §5.1) |
 | `LEASE_SECONDS` | int | `30` | 아니오 | 아니오 | ADR-023 |
 | `HANDLER_TIMEOUT_SECONDS` | int | `10` | 아니오 | 아니오 | `LEASE_SECONDS / 2` 이하여야 한다(부팅 시 검사) |
 | `REAPER_INTERVAL_SECONDS` | int | `10` | 아니오 | 아니오 | |
@@ -392,8 +403,6 @@ flowchart TD
 |---|---|---|---|---|---|
 | `WEB_PORT` | int | `3000` | 아니오 | 아니오 | |
 | `API_INTERNAL_URL` | URL | `http://api:3001` | 아니오 | 아니오 | SSR 이 api 를 부르는 내부 주소 |
-| `NEXT_PUBLIC_REPO_URL` | URL | — | 아니오 | 아니오 | 저장소 링크·배지 |
-| `NEXT_PUBLIC_GRAFANA_PUBLIC_URL` | URL | — | 아니오 | 아니오 | Public dashboards 주소 (G6) |
 | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | base64 | — | 다중 인스턴스일 때만 | **예** | 단일 인스턴스에서는 생략 가능 (tech-stack.md §5) |
 
 ### 8.6 코드 상수로 두는 것 (환경변수가 아님)

@@ -79,7 +79,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `token_hash` | bytea | UNIQUE NOT NULL. 쿠키 토큰의 해시 — 평문 저장 금지 |
 | `user_id` | uuid | NULL = 익명. 같은 스키마라 FK 허용 |
 | `created_at`, `last_seen_at` | timestamptz | |
-| `expires_at` | timestamptz | NOT NULL, 생성 후 7일 |
+| `expires_at` | timestamptz | NOT NULL. **마지막 활동 후 7일(슬라이딩)** — `last_seen_at` 갱신(1시간에 한 번)과 함께 `now + 7d` 로 연장. 로그아웃·회전은 행을 지우지 않고 `now` 로 즉시 만료시킨다(design/06) |
 
 ### 4-2. `guestbook` (쓰기)
 **`entry`** — 방명록 글(정본)
@@ -164,6 +164,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `seq` | bigint 단조 증가(전역) |
 | `aggregate_type`, `aggregate_id` | 대상 |
 | `type`, `payload` | 이벤트 종류, jsonb(스키마 정본은 `packages/protocol`) |
+| `schema_version`, `occurred_at`, `aggregate_version` | 봉투 메타(05 §1): 페이로드 스키마 버전, 사건 시각, 그 시점 집합체 `version`. 소비자의 Upcaster 판정·`version` 반영에 쓴다 |
 | `trace_id`, `owner_key` | 흐름 추적, 상세 열람 권한(`owner_key` = 행위자 키 `session:<id>` / `user:<id>`) |
 | `status` | `new` / `processing` / `published` / `dead` |
 | `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at` | 선점·재시도(§2-1). `next_attempt_at` 기본값 `now()`(생성 즉시 선점 가능) |
@@ -193,6 +194,8 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `consumer` | 소비자 이름 |
 | `message_id` | uuid. outbox 이벤트 id. **PK (`consumer`, `message_id`)** |
 | `source`, `type` | 발신 모듈/외부, 종류 |
+| `schema_version`, `occurred_at`, `aggregate_type`, `aggregate_version` | 봉투 메타를 그대로 복사(outbox 와 같은 값). Upcaster 판정과 프로젝터의 `version` 반영에 쓴다 |
+| `trace_id`, `owner_key` | 봉투에서 복사. `trace_step`(received/processed) 기록과 `author_actor_key` 등 행위자 반영에 쓴다 |
 | `seq` | 발신 쪽 순번(읽기 모델 순서 검사) |
 | `aggregate_id` | uuid. 집합체별 선두 규칙(재시도 중인 앞 이벤트가 같은 집합체의 뒤 이벤트를 막음)에 쓰며 `(consumer, aggregate_id, seq)` 부분 인덱스(`status IN ('received','processing')`)를 둔다 |
 | `payload` | jsonb |
@@ -201,7 +204,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `last_error` | |
 | `received_at`, `processed_at` | |
 
-수신(`ReceiveMessage`)은 `INSERT … 충돌 시 무시`로 저장만 한다. 처리는 `received → processing`(선점) → 효과 적용 + `processed`(**같은 트랜잭션**, 토큰 일치 조건).
+outbox 행과 inbox 행은 **봉투(05 §1)의 모든 필드를 컬럼으로 갖는다**(`payload` 에는 종류별 본문만). 수신(`ReceiveMessage`)은 `INSERT … 충돌 시 무시`로 저장만 한다. 처리는 `received → processing`(선점) → 효과 적용 + `processed`(**같은 트랜잭션**, 토큰 일치 조건).
 
 ## 5. M1 읽기 모델 (프로젝션)
 
@@ -236,7 +239,8 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `report_id` PK, `entry_id` | |
 | `entry_excerpt` | 본문 앞부분(길이 제한) |
 | `reason_code`, `status`, `created_at` | `note` 는 두지 않는다(이벤트에 없음). 관리자는 필요 시 쓰기 모델 조회 |
-| `last_seq` | |
+| `resolution` | `dismissed` / `entry_hidden` / NULL(미처리). `report.resolved` 로 채움 |
+| `last_seq` | 키 단위 가드(`last_seq < $seq`) |
 
 **`my_reaction`** — 행위자별 눌림 표시(`myReactions`)
 
@@ -258,7 +262,17 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `snapshot_loaded` | boolean. 스냅샷 적재 전/후 이중 적용 판단 |
 | `updated_at` | |
 
-**`entry_view_next`** — 재구성 중에만 존재하는 임시 그림자 테이블. `entry_view` 와 같은 모양이며 교체 후 보관 시간(제안 1시간)을 두고 삭제한다.
+**재구성 원천** — 프로젝션마다 다시 채우는 방법이 다르다(ADR-023 §6).
+
+| 읽기 모델 | 재구성 원천 | 방식 |
+|---|---|---|
+| `entry_view` | 쓰기 모델 `entry`·`reaction` 스냅샷 + `fence_seq` 이후 이벤트 | 그림자 테이블 + 교체 |
+| `my_reaction` | 쓰기 모델 `reaction` 스냅샷 + 이후 이벤트 | 같은 재구성 잡이 함께(`entry_view` 와 한 쌍) |
+| `report_queue` | 쓰기 모델 `report` 스냅샷 + 이후 이벤트 | 자체 재구성(`rebuild report-queue`) |
+| `flow_counter` | `trace_step` **재집계** | 이벤트 재생이 아니다. `trace_step` 보관(7일) 범위만 복구 가능 |
+| `change_log` | 재구성하지 않는다 | 이력이므로 비우면 클라이언트가 스냅샷 경로로 복구 |
+
+**`entry_view_next`** — 재구성 중에만 존재하는 임시 그림자 테이블. `entry_view` 와 같은 모양이며 교체 때 기존 `entry_view` 는 `entry_view_old` 로 이름이 바뀌어 보관 시간(제안 1시간) 뒤 삭제된다(F12 §9).
 
 ### 5-2. `events_read`
 **`flow_counter`** — 전체 방문자 익명 요약(FR-041). `trace_step` 을 **주기 집계**해서 채운다(이벤트 구동이 아닌 **배치 프로젝션**).
@@ -336,7 +350,7 @@ flowchart LR
 | 질의 | 인덱스 |
 |---|---|
 | 방명록 목록(보이는 글, 최신순, 커서) | `guestbook_read.entry_view (entry_id DESC) WHERE status = 'visible'` 부분 인덱스 |
-| 관리자 신고 큐 | `guestbook_read.report_queue (status, created_at)` |
+| 관리자 신고 큐(커서 = `report_id DESC`) | `guestbook_read.report_queue (report_id DESC) WHERE status = 'open'` 부분 인덱스 + `(status, report_id DESC)` |
 | 세션 조회(요청마다) | `identity.session (token_hash)` 유일 |
 | 만료 세션 정리 | `identity.session (expires_at)` |
 | 디스패처가 읽을 이벤트 | `events.outbox_event (seq) WHERE status = 'new'` 부분 인덱스(`next_attempt_at` 조건 포함 여부는 구현 시) |
@@ -359,17 +373,20 @@ flowchart LR
 | `session` | 만료(7일) 후 삭제 | 정리 작업 |
 | `entry.author_session_id` | 세션 삭제 시 NULL | 같은 작업이 익명화 |
 | `entry_view.author_actor_key` (`session:`) | 세션 삭제 시 NULL | **읽기 모델 직접 쓰기 예외 ①** — 이벤트 없이 정리 작업이 `AnonymizeSessionData` 로 쓴다(재구성해도 `entry.author_session_id` 가 NULL 이라 같은 결과) |
-| `entry` (`deleted`) | 보관(묘비). 물리 삭제 기준은 EV-10 에서 정함 | 미결 |
+| `entry` (`deleted`) | 보관(묘비). **M1 에서는 물리 삭제 없음** | 후속 결정 |
+| `entry_view` (`deleted`)·`report_queue` (`resolved`) | **M1 에서는 물리 삭제 없음**(행은 비운 채 남음). 삭제 기준은 후속 | 후속 결정 |
 | `reaction.actor_key` (`session:`) | 세션 삭제 시 행마다 무작위 값으로 교체 | 집계는 유지, 행위자 식별은 불가 |
 | `outbox_event`(`published`), `inbox_message`(`processed`), `trace_step`, `flow_counter` | 7일 | 정리 작업 |
 | `request_key` | 24시간 | 정리 작업 |
 | `my_reaction` (`session:` 행위자) | 세션 삭제 시 함께 | **읽기 모델 직접 쓰기 예외 ①** — 정리 작업이 이벤트 없이 삭제 |
 | `outbox_event`·`inbox_message` (`dead`) | 30일, 테이블당 1만 건 상한 | ADR-023 |
-| `realtime_read.change_log` | 1시간 또는 채널당 1만 행 중 먼저 닿는 쪽 | 정리 작업(ADR-023) |
+| `realtime_read.change_log` | 1시간 또는 채널당 1만 행 중 먼저 닿는 쪽 | realtime 이 소유한 `ChangeLogRule`(ADR-023) |
 
-정리 작업은 **한 번에 큰 삭제를 하지 않는다**(배치 크기 제한).
+정리 작업은 **한 번에 큰 삭제를 하지 않는다**(배치 크기 제한). **테이블을 소유한 모듈이 자기 `RetentionRule` 을 등록**하고(예: guestbook·identity `request_key`, 각 모듈 `inbox_message`, realtime `change_log`), worker 조립부가 `RetentionRunner` 에 주입해 실행한다 — events 가 남의 테이블을 직접 `DELETE` 하지 않는다(F13 §3.9).
 
 **읽기 모델·쓰기 모델 경계의 예외(모두 명시)**: ① 위 익명화 두 건(`entry_view.author_actor_key`, `my_reaction`)은 이벤트 없이 직접 쓴다 ② 재구성 잡은 `entry_view_next` 를 채우고 교체한다 ③ `LoadEntryForConflict`(409 응답용)는 쓰기 스키마 `guestbook.entry` 를 읽는다. 그 외 모든 읽기 모델 갱신은 inbox 경유 이벤트다.
+
+**모듈 사이 읽기는 테이블이 아니라 공개 usecase 포트로 한다**(예외 아님): realtime 의 스냅샷은 `guestbook.ReadPublicEntries`(guestbook 의 읽기 모델 조회)와 `events.FlowSummaryReader`·`events.TraceReader`(events 의 읽기·추적 조회)를 호출하고, worker 의 세션 정리 잡은 `identity` 공개 usecase 와 `guestbook.AnonymizeSessionData` 를 호출한다. 남의 테이블에 직접 `SELECT`/`DELETE` 하는 곳은 위 ①~③ 뿐이다.
 
 ## 10. 일관성 점검
 
@@ -400,5 +417,5 @@ ADR-023 이 규칙과 초기값을 정했다. 남은 것은 측정 후 조정뿐
 |---|---|
 | 임대 길이·백오프·배치 크기 조정 | 처리 시간 측정 후 |
 | 재시도 시각은 `next_attempt_at` 으로 확정(`available_at` 는 쓰지 않는다) | — |
-| `deleted` 행·`resolved` 신고 물리 삭제 기준, `entry_view_next` 보관 시간(제안 1시간) | EV-10 / 재구성 구현 시 |
+| `deleted` 행·`resolved` 신고 물리 삭제(M1 은 하지 않음), `entry_view_old` 보관 시간(제안 1시간) | 후속 / 재구성 구현 시 |
 | `write_lock` 변경 이력 테이블 필요 여부(현재는 감사 로그) | 운영 중 |

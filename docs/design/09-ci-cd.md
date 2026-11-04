@@ -69,7 +69,7 @@ flowchart TD
 | `unit` | `bun test` (DB 없음, L2) | |
 | `integration` | PostgreSQL 18 서비스 컨테이너로 `test:integration` (outbox/inbox 동시성, 08) | |
 | `migration reproduce` | 빈 DB 에서 마이그레이션 전부 적용 + 스키마 대조 (G10) | |
-| `audit` | `bun audit` — 사용 가능 여부는 구현 시 확인(**미확인**). 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
+| `audit` | `bun audit --audit-level=high --prod` — Bun 1.4.4 에서 존재·동작 실측 확인. 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
 | `web build` | Next 빌드가 Bun 에서 성공 (G3 지속 확인) | |
 | `config check` | 운영 설정·스크립트 정적 검사: `nginx -t`(공식 nginx 이미지로 설정 검증), `promtool check config/rules`, Grafana 대시보드 JSON 문법 lint, `docker compose config`(각 오버라이드 조합), `shellcheck`(`infra/scripts/*.sh`), k8s 매니페스트 검증(`kubeconform` 등) — **도구명은 모두 미검증**, 도입 시 확인 | 머지 불가 |
 | `docker build smoke` | 이미지가 빌드되고 `--help`/설정 검증이 동작 | |
@@ -160,7 +160,7 @@ sequenceDiagram
             H->>REG: 새 이미지 pull
             H->>C: 마이그레이션 실행 (일회성 컨테이너)
             H->>C: worker → api → ws-gateway → web 순 교체
-            C-->>H: /readyz 통과?
+            C-->>H: 헬스 통과? (worker 는 /healthz, 나머지는 /readyz)
             alt 통과
                 H->>H: 새 다이제스트를 현재로 기록
             else 실패
@@ -176,7 +176,7 @@ sequenceDiagram
 | 확인 주기 | 5분 간격 폴링(systemd timer 또는 cron) | **제안** — 가져오는 주기·트리거는 tech-stack.md §7 에서 미결. 웹훅은 집 PC 가 수신해야 하므로 제외 |
 | 교체 순서 | worker(소비자) → api → ws-gateway → web. ws-gateway 교체 시 단절이 생기며 클라이언트가 재접속·복구 (ADR-014: Compose 는 "짧은 단절 후 복구") | 확정(ADR-014) |
 | 마이그레이션 | 교체 전 일회성 컨테이너로 `db:migrate`. 실패하면 교체하지 않는다 | 확정 |
-| 헬스 게이트 | 서비스별 `/readyz` 통과 후 다음 서비스 | 확정 |
+| 헬스 게이트 | 서비스별 헬스 통과 후 다음 서비스 — **worker 는 `/healthz`**(readyz 없음, F17 §5.1), api·ws-gateway·web 은 `/readyz` | 확정 |
 | 롤백 | 직전 다이제스트로 되돌림. 마이그레이션은 되돌리지 않는다(앞으로 호환 규칙으로 흡수, §4) | 확정 |
 | 스크립트 위치 | `infra/scripts/pull-deploy.sh` (구현 시 작성) | 미작성 |
 
@@ -194,7 +194,7 @@ sequenceDiagram
 | 항목 | 결정 시점 |
 |---|---|
 | GHCR 소유자 이름, 공개 저장소 arm 러너 라벨 | 저장소 공개 시 |
-| `bun audit` 사용 가능 여부와 실패 기준 | 구현 단계 0 |
+| `bun audit` 실패 기준(`--audit-level=high --prod` 제안) 확정 | 구현 단계 0 |
 | 배포 확인 주기(5분 제안)와 `stable` 승격 자동/수동 | 첫 라이브 배포 전 |
 | `pf-proxy` 이미지 필요 여부 | 관문 G7 |
 | 야간 `e2e` 범위 | [08](08-test-strategy.md) 확정 후 |

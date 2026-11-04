@@ -390,39 +390,43 @@ classDiagram
     InfraError <|-- PermanentError
 
     class OAuthStateInvalidError {
-        +code identity.oauth_state_invalid
+        +code oauth_state_invalid
         +httpStatus 400
     }
     class OAuthStateExpiredError {
-        +code identity.oauth_state_expired
+        +code oauth_state_expired
         +httpStatus 400
     }
     class InvalidDisplayNameError {
-        +code identity.invalid_display_name
+        +code invalid_display_name
         +httpStatus 400
     }
     class LoginRequiredError {
-        +code identity.login_required
+        +code login_required
         +httpStatus 401
     }
-    class GithubUnavailableError {
-        +code identity.github_unavailable
+    class GithubUpstreamError {
+        <<00 §4.3>>
         +httpStatus 502
+    }
+    class GithubUnavailableError {
+        +code github_unavailable
         +retryable true
     }
     class GithubRejectedError {
-        +code identity.github_rejected
-        +httpStatus 502
+        +code github_rejected
+        +retryable false
     }
     ValidationError <|-- OAuthStateInvalidError
     ValidationError <|-- OAuthStateExpiredError
     ValidationError <|-- InvalidDisplayNameError
     UnauthenticatedError <|-- LoginRequiredError
-    TransientError <|-- GithubUnavailableError
-    PermanentError <|-- GithubRejectedError
+    InfraError <|-- GithubUpstreamError
+    GithubUpstreamError <|-- GithubUnavailableError
+    GithubUpstreamError <|-- GithubRejectedError
 ```
 
-- `GithubUnavailableError`·`GithubRejectedError` 는 00 §4.3 표의 `TransientError`=503 과 달리 **502** 를 쓴다(상류 응답 실패라는 06 §3.2 순서도의 의미를 유지). 표에 상류 오류 행을 추가해야 한다(§16 수정 요청).
+- `GithubUnavailableError`·`GithubRejectedError` 는 00 §4.3 의 `GithubUpstreamError`(502) 하위 클래스다. `TransientError`=503 과 달리 **502** 를 쓴다(상류 응답 실패라는 06 §3.2 순서도의 의미를 유지). 와이어 코드에는 모듈 접두사를 붙이지 않는다(00 §5).
 
 ---
 
@@ -741,7 +745,7 @@ flowchart TD
 | 목적 | 현재 행위자 정보를 돌려준다. 익명 세션은 ID-01 이 먼저 발급한다 |
 | 트리거 | `GET /api/me` |
 | 사전 조건 | `SessionGuard` 가 `Actor` 를 만든 상태(없으면 ID-01 후 진행) |
-| 사후 조건 | `{ kind, userId?, displayName, isAdmin, locale? }` (03 §4.3) |
+| 사후 조건 | `MeView = { kind, userId?, displayName, isAdmin, locale? }`. 응답 `Me`(03 §4.3)의 `writeLocked` 는 **라우트 조립부**가 `guestbook.GetWriteLockState`(F11 GB-11)를 호출해 덧붙인다 — identity 는 guestbook 테이블을 읽지 않는다 |
 | 접근 테이블 | 가드가 읽은 `Actor` 를 쓰므로 **추가 조회 없음**(표시 이름은 `Actor`/`UserAccount` 에 이미 있음) |
 
 ```mermaid
@@ -751,10 +755,10 @@ classDiagram
     }
     class MeView {
         +kind string
-        +userId UserId
+        +userId UserId?
         +displayName string
         +isAdmin bool
-        +locale string
+        +locale string?
     }
     GetMe --> MeView
     GetMe ..> AnonymousNamePolicy
@@ -1015,10 +1019,10 @@ flowchart TD
 
 | 오류 | 클래스 | HTTP | 코드 |
 |---|---|---|---|
-| 쿠키 없음/서명 불일치/`state` 불일치 | `OAuthStateInvalidError` | 400 | `identity.oauth_state_invalid` |
-| 쿠키 만료(10분 초과) | `OAuthStateExpiredError` | 400 | `identity.oauth_state_expired` |
-| GitHub 일시 오류·시간 초과 | `GithubUnavailableError` | 502 | `identity.github_unavailable` |
-| GitHub 가 코드를 거절 | `GithubRejectedError` | 502 | `identity.github_rejected` |
+| 쿠키 없음/서명 불일치/`state` 불일치 | `OAuthStateInvalidError` | 400 | `oauth_state_invalid` |
+| 쿠키 만료(10분 초과) | `OAuthStateExpiredError` | 400 | `oauth_state_expired` |
+| GitHub 일시 오류·시간 초과 | `GithubUnavailableError` | 502 | `github_unavailable` |
+| GitHub 가 코드를 거절 | `GithubRejectedError` | 502 | `github_rejected` |
 | DB 일시 장애 | `TransientError` | 503 | `unavailable` |
 
 사용자 거부(`error=access_denied`)는 오류가 아니라 정상 분기(리다이렉트 + 안내)다.
@@ -1157,8 +1161,8 @@ flowchart TD
 
 | 오류 | 클래스 | HTTP | 코드 |
 |---|---|---|---|
-| 비로그인 | `LoginRequiredError` | 401 | `identity.login_required` |
-| 이름 규칙 위반 | `InvalidDisplayNameError` | 400 | `identity.invalid_display_name` |
+| 비로그인 | `LoginRequiredError` | 401 | `login_required` |
+| 이름 규칙 위반 | `InvalidDisplayNameError` | 400 | `invalid_display_name` |
 | 속도 제한 | `RateLimitedError` | 429 | `rate_limited` |
 
 지표: `identity_profile_update_total{result}`. 시험: 단위 L2(이름 규칙 경계 1/2/20/21자, NFC 결합 문자, 제어문자), 통합 L3(같은 키 재요청이 같은 응답, 이미 쓴 글 이름 불변), 계약(요청·응답 스키마).
@@ -1186,10 +1190,8 @@ classDiagram
         #allows(actor, resource) bool
     }
     class RequireLogin
-    class RequireOwner
     class RequireAdmin
     AuthorizationGuard <|-- RequireLogin
-    AuthorizationGuard <|-- RequireOwner
     AuthorizationGuard <|-- RequireAdmin
     RequireAdmin ..> Actor
     AdminPolicy ..> GithubId
@@ -1235,20 +1237,21 @@ flowchart TD
 | 목적 | 만료된 세션을 지우되, 그 세션이 남긴 글·반응의 **작성자 연결을 먼저 끊는다**(AC-011, ADR-008·023) |
 | 트리거 | worker 주기 잡 `purge-sessions` (주기·배치 크기는 설정, 제안: 10분 / 500 — 미확인) |
 | 사전 조건 | `expires_at <= now` 인 세션이 존재 |
-| 사후 조건 | 해당 세션 행 삭제, `guestbook.entry.author_session_id = NULL`, 해당 세션의 `reaction.actor_key` 무작위 값으로 교체, `my_reaction` 해당 행 삭제 |
-| 접근 테이블 | `identity.session` R/D (identity 가 수행) · `guestbook.entry`·`guestbook.reaction`·`guestbook_read.my_reaction` W (**guestbook 의 공개 usecase 가 수행**) |
+| 사후 조건 | 해당 세션 행 삭제, `guestbook.entry.author_session_id = NULL`, 해당 세션의 `reaction.actor_key` 무작위 값으로 교체, `guestbook_read.entry_view.author_actor_key = NULL`, `my_reaction` 해당 행 삭제 |
+| 접근 테이블 | `identity.session` R/D (identity 가 수행) · `guestbook.entry`·`guestbook.reaction` W, `guestbook_read.entry_view`·`my_reaction` W (**guestbook 의 공개 usecase `AnonymizeSessionData` 가 수행**, 읽기 모델 직접 쓰기 예외 — database-schema §9) |
+| 소유·등록 | 잡 `PurgeExpiredSessions` 는 **identity 가 소유**하고 worker 조립부(`apps/worker/src/compose`)가 등록한다. events 의 `RetentionRunner` 규칙이 아니다(F13 §3.9) |
 
 **모듈 경계 처리**: identity 는 guestbook 을 임포트하지 못하고(순환·B4), guestbook 은 이미 identity 의 `ResolveSession` 을 쓴다. 그래서 오케스트레이션을 `apps/worker/src/jobs/purge-sessions.ts` 가 맡는다. 앱 계층은 두 모듈의 공개 API 를 모두 부를 수 있다. 필요한 공개 usecase:
 
 | 모듈 | usecase | 설명 |
 |---|---|---|
 | identity | `ListExpiredSessionIds(limit)` (조회) | 만료 세션 id 배치 |
-| guestbook | `AnonymizeSessionData(sessionIds)` (명령, **F11 에서 상세**) | 아래 3단계를 한 트랜잭션에서 수행 |
+| guestbook | `AnonymizeSessionData(sessionIds)` (명령, **F11 §16.1**) | 아래 ①②는 쓰기 모델 한 트랜잭션, ③④는 읽기 모델 별도 트랜잭션 |
 | identity | `DeleteSessions(ids)` (명령) | 행 삭제 |
 
 ```mermaid
 classDiagram
-    class PurgeSessionsJob {
+    class PurgeExpiredSessions {
         <<worker>>
         +runOnce() PurgeReport
     }
@@ -1267,17 +1270,17 @@ classDiagram
         +tryAcquire(key) bool
         +release(key) void
     }
-    PurgeSessionsJob --> PurgeReport
-    PurgeSessionsJob ..> ListExpiredSessionIds
-    PurgeSessionsJob ..> AnonymizeSessionData
-    PurgeSessionsJob ..> DeleteSessions
-    PurgeSessionsJob ..> AdvisoryLeader
-    PurgeSessionsJob ..> Clock
+    PurgeExpiredSessions --> PurgeReport
+    PurgeExpiredSessions ..> ListExpiredSessionIds
+    PurgeExpiredSessions ..> AnonymizeSessionData
+    PurgeExpiredSessions ..> DeleteSessions
+    PurgeExpiredSessions ..> AdvisoryLeader
+    PurgeExpiredSessions ..> Clock
 ```
 
 ```mermaid
 sequenceDiagram
-    participant J as PurgeSessionsJob (worker)
+    participant J as PurgeExpiredSessions (worker)
     participant L as AdvisoryLeader
     participant I1 as identity.ListExpiredSessionIds
     participant GB as guestbook.AnonymizeSessionData
@@ -1296,7 +1299,7 @@ sequenceDiagram
                 J->>L: release
             else 있음
                 J->>GB: execute(sessionIds)
-                Note over GB,DB: 한 트랜잭션: ① entry.author_session_id NULL ② reaction.actor_key 무작위 교체 ③ my_reaction 삭제
+                Note over GB,DB: 쓰기 모델 tx: ① entry.author_session_id NULL ② reaction.actor_key 무작위 교체 / 읽기 모델 tx: ③ entry_view.author_actor_key NULL ④ my_reaction 삭제
                 GB-->>J: 각 건수
                 J->>I2: execute(sessionIds)
                 I2->>DB: DELETE FROM session WHERE id = ANY AND expires_at <= now
@@ -1314,7 +1317,7 @@ flowchart TD
     B -- "예" --> C["만료 세션 id 배치 조회"]
     C --> D{"한 건 이상?"}
     D -- "아니오" --> R["락 해제 · 종료"]
-    D -- "예" --> E["guestbook.AnonymizeSessionData (한 트랜잭션)"]
+    D -- "예" --> E["guestbook.AnonymizeSessionData (쓰기 모델 tx → 읽기 모델 tx)"]
     E --> F{"성공?"}
     F -- "아니오" --> G["삭제하지 않음 · 경고 · 다음 주기에 재시도 (멱등)"]
     F -- "예" --> H["identity.DeleteSessions (expires_at 재확인)"]
@@ -1323,27 +1326,28 @@ flowchart TD
     I -- "아니오" --> R
 ```
 
-**익명화 순서와 이유** (`AnonymizeSessionData`, 한 트랜잭션)
+**익명화 순서와 이유** (`AnonymizeSessionData`: ①② 쓰기 모델 트랜잭션, ③④ 읽기 모델 트랜잭션 — 스키마가 다른 두 영역이라 분리, 전부 멱등)
 
 | 순서 | 대상 | 변경 | 이유 |
 |---|---|---|---|
 | ① | `guestbook.entry` | `author_session_id = NULL WHERE author_session_id = ANY(ids)` | 글은 보관하되 작성 세션과의 연결을 끊는다(개인정보 최소, ADR-008) |
 | ② | `guestbook.reaction` | `actor_key = 'purged:' \|\| 새 uuid` 를 **행마다** 부여 `WHERE actor_key = 'session:' \|\| id` | 집계(개수)는 유지하되 행위자 식별을 불가능하게 한다. 행마다 다른 값이라 유일 키 `(entry_id, actor_key, emoji)` 충돌이 없다. `purged:` 접두 형식은 **제안**(database-schema 는 "무작위 값"만 정의) |
-| ③ | `guestbook_read.my_reaction` | `DELETE WHERE actor_key = 'session:' \|\| id` | 읽기 모델의 눌림 표시는 세션과 함께 사라진다(만료된 세션의 `myReactions` 를 볼 사람이 없다) |
+| ③ | `guestbook_read.entry_view` | `author_actor_key = NULL WHERE author_actor_key = 'session:' \|\| id` | 읽기 모델의 `isMine` 근거를 지운다(재구성해도 ①로 같은 결과) |
+| ④ | `guestbook_read.my_reaction` | `DELETE WHERE actor_key = 'session:' \|\| id` | 읽기 모델의 눌림 표시는 세션과 함께 사라진다(만료된 세션의 `myReactions` 를 볼 사람이 없다) |
 | 마지막 | `identity.session` | 삭제(별도 usecase, 앞 단계 성공 후) | 앞 단계가 끝나기 전에 지우면 다음 주기에 익명화할 대상을 잃는다 |
 
-- **순서 불변식**: ①~③ 이 커밋되기 전에 세션 행을 지우지 않는다. 중간에 죽으면 세션 행이 남아 다음 주기에 같은 id 를 다시 처리한다. 각 단계가 멱등(이미 NULL·이미 교체된 값은 조건에 안 맞음)이라 재실행이 안전하다.
-- `my_reaction` 삭제(③)는 읽기 모델을 이벤트가 아닌 **직접 쓰는 유일한 예외**다. 보관 정책 때문이며, `last_seq` 규칙과 충돌하지 않는다(삭제만 한다). 이 예외를 database-schema §5-1 과 F12 에 명시해야 한다(§16).
+- **순서 불변식**: ①~④ 가 커밋되기 전에 세션 행을 지우지 않는다. 중간에 죽으면 세션 행이 남아 다음 주기에 같은 id 를 다시 처리한다. 각 단계가 멱등(이미 NULL·이미 교체된 값은 조건에 안 맞음)이라 재실행이 안전하다.
+- `entry_view.author_actor_key` NULL(③)과 `my_reaction` 삭제(④)는 읽기 모델을 이벤트가 아닌 **직접 쓰는 예외**다(database-schema §9 예외 ①). 보관 정책 때문이며, `last_seq` 규칙과 충돌하지 않는다(삭제만 한다). 이 예외를 database-schema §5-1 과 F12 에 명시해야 한다(§16).
 - 사이트의 사용자가 로그인 회전으로 만료시킨 익명 세션도 같은 경로로 정리된다(§3.3).
 - **동시성**: 어드바이저리 락(ADR-021 "싱글톤은 락")으로 한 워커만 수행한다. 락을 놓쳐 두 워커가 겹쳐도 단계가 멱등이고 삭제 조건에 `expires_at <= now` 를 다시 걸어 활성 세션을 지우지 않는다.
 
 | 오류 | 처리 |
 |---|---|
-| 익명화 실패(DB 오류) | 세션 삭제 건너뜀, 다음 주기 재시도, 지표 `identity_purge_total{result="error"}` |
+| 익명화 실패(DB 오류) | 세션 삭제 건너뜀, 다음 주기 재시도, 지표 `pf_job_last_success_timestamp_seconds{job="purge_sessions"}` 정체(F17 §경보) |
 | 배치 반복 폭주 | 한 주기에 최대 반복 수 제한(설정, 미확인) |
 
-지표: `identity_purge_sessions_total`, `identity_anonymized_rows_total{table="entry|reaction|my_reaction"}`, `identity_purge_duration_seconds`. 로그: 건수만(세션 id 목록 미기록).
-시험: 통합 L3(만료 세션 → ① ② ③ 후 삭제, 활성 세션은 보존, AC-011), 장애 시험(익명화 후 삭제 전에 프로세스 중단 → 재실행으로 최종 상태 동일), 동시 두 잡 인스턴스(락 + 멱등), 프라이버시(삭제 후 `reaction.actor_key` 로 원래 세션을 역추적할 수 없음 — 08 §8).
+지표(F17 이름 규약): `pf_job_duration_seconds{job="purge_sessions"}`, `pf_job_last_success_timestamp_seconds{job="purge_sessions"}`. 처리 건수용 `pf_anonymized_rows_total{table}`(`entry`·`reaction`·`entry_view`·`my_reaction`)는 F17 카탈로그에 **추가 요청**. 로그: 건수만(세션 id 목록 미기록).
+시험: 통합 L3(만료 세션 → ①~④ 후 삭제, 활성 세션은 보존, AC-011), 장애 시험(익명화 후 삭제 전에 프로세스 중단 → 재실행으로 최종 상태 동일), 동시 두 잡 인스턴스(락 + 멱등), 프라이버시(삭제 후 `reaction.actor_key` 로 원래 세션을 역추적할 수 없음 — 08 §8).
 
 ---
 
@@ -1387,10 +1391,10 @@ flowchart TD
 | `GetMe.locale` 의 출처·저장 여부 | 07/12 확인 |
 | 정리 잡 주기·배치 크기·최대 반복 수 | 측정 후 |
 | GitHub PKCE 지원 여부와 `scope` 없는 요청의 응답 필드 | 구현 초기(G 관문 아님, 교체 가능) |
-| `timingSafeEqual` 의 Bun 동작 | G4/G5 스파이크에서 함께 |
+| ~~`timingSafeEqual` 의 Bun 동작~~ | **확인됨(2026-11-04 실측)**: Bun 1.4.4 에서 동작하며 **길이가 다른 버퍼는 예외**(`ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH`)를 던진다 → 비교 전에 길이를 확인하거나 양쪽을 해시한 뒤 비교한다. uuid v7 은 `Bun.randomUUIDv7()` 내장 |
 | `purged:` 접두 형식 확정 | F11 `AnonymizeSessionData` 설계 시 |
 
-**수정 요청 (다른 문서)**
+**수정 요청 (다른 문서)** — 아래는 작성 시점의 이력이다. 반영 완료(2026-11-04)이며 충돌 시 정본 문서가 우선한다.
 1. 01 환경변수 표에 `OAUTH_STATE_SECRET`(비밀, api 필수) 추가 — ID-05 쿠키 서명 키.
 2. 06 §2·§8 의 "폐기 = 행 삭제"를 "즉시 만료 처리 후 ID-10 이 익명화·삭제"로 정정(§3.3 의 이유).
 3. 00 §4.3 오류 표에 상류(GitHub) 오류 행 추가: `UpstreamError`(502, `github_unavailable`/`github_rejected`).

@@ -53,7 +53,7 @@ flowchart LR
 
 - 순서: **S0-1·S0-2 먼저**(설계를 바꿀 수 있는 크기), 나머지는 병렬.
 - 소크(S0-2)는 오래 걸리므로 **먼저 띄워 두고** S1 을 진행한다. 결과는 S4 시작 전에 필요하다.
-- G6·G8·G9·G11·G12 는 해당 단계(S7·S8)에서 처리한다.
+- G9(선택)는 **S1-6**(CI 시험 DB 환경 결정)에서, G6 은 S7-3, G8 은 S8-5, G11 은 S8-3, G12 는 S8-4 에서 처리한다.
 
 ## 4. 작업 목록
 
@@ -66,10 +66,13 @@ flowchart LR
 | S1-2 | `packages/kernel`: `Result`, `AppError` 계층, `AggregateRoot`, `DomainEvent`, 포트 인터페이스 | S1-1 | 오류 계층·`Result` 단위 시험(L2), 오류→HTTP 매핑 표 시험 |
 | S1-3 | `packages/config`: 환경변수 스키마·검증·`_FILE` 지원 | S1-1 | 필수 누락 시 기동 실패 시험, 비밀값이 로그에 안 나옴 |
 | S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만 |
-| S1-5 | `.dependency-cruiser.cjs` B1~B9 규칙, `check-purity` | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
-| S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강 |
+| S1-5 | `.dependency-cruiser.cjs` **B1~B10** 규칙(B10 = `@pf/infra` 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
+| S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
 | S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 | ADR-024 |
-| S1-7 | 로컬 compose(02): postgres, 개발 모드 기동 | S1-4 | `bun run dev` 로 api·worker 기동, `/readyz` 성공 |
+| S1-7 | 로컬 compose(02): postgres, 개발 모드 기동 + **조립 루트·생명주기 골격**(기동 순서·종료 순서, `ShutdownCoordinator`) + 시드/CLI 프레임(`db:seed`, `worker <cmd>`) | S1-4 | `bun run dev` 로 api·worker 기동, api `/readyz` 성공, SIGTERM 시 종료 순서대로 정리 |
+| S1-9 | `packages/protocol`: TypeBox 스키마(REST·WS·이벤트)·상수(`ENTRY_BODY_MAX_CHARS` 등)·`gen:schema`(JSON Schema 내보내기)·골든 JSON(`packages/protocol/golden/`) 골격 | S1-1 | `gen:schema --check` 통과, 골든 왕복 시험(L2), 별도 `@sinclair/typebox` 0.34 사용(`typebox` 1.x 금지) |
+| S1-10 | `packages/testkit`: `FakeClock`·`FakeIdGenerator`·`TestDb`·`FaultInjector`(`failAt`/`delayAt`/`Gate`)·하니스(Unit/Module/Chaos/Api/Gateway) | S1-4 | 하니스로 빈 시험이 돌고, 주입 지점 상수 목록이 F16 §13.6 과 일치 |
+| S1-11 | 관측 기반: 구조화 로그·`trace_id` 전파·마스킹, `/healthz`(전 앱)·`/readyz`(api·ws-gateway·web; **worker 는 `/healthz` 만**) | S1-7 | 로그에 IP·본문·토큰 없음(시험), DB 중단 시 api readyz 503·healthz 200 |
 
 ### S2 — identity
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -78,7 +81,7 @@ flowchart LR
 | S2-2 | `GET /api/me` (익명 세션 발급), 쿠키 속성 | S2-1 | 쿠키 없음→발급, 있음→유지, 속성 일치 시험 | FR-010 |
 | S2-3 | GitHub OAuth(PKCE+state), 콜백 검증, 세션 회전 | S2-2 | 콜백 검증 순서도(06 §3.2)의 모든 분기 시험, `returnTo` 오픈 리다이렉트 차단 | FR-011 |
 | S2-4 | 관리자 허용목록 판정, `RequireAdmin` | S2-3 | 숫자 ID 허용목록 시험 | FR-012 |
-| S2-5 | 가드 체인(Origin·Session·RateLimit·Schema·Authorization) | S2-2 | 02 §7.1 순서도 분기별 시험 | FR-024 일부 |
+| S2-5 | 가드 체인(Origin·Session·RateLimit·Schema·Authorization) | S2-2 | 03 §7.1 순서도 분기별 시험 | FR-024 일부 |
 
 ### S3 — 첫 수직 조각 (가장 중요)
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -96,9 +99,9 @@ flowchart LR
 ### S4 — 실시간
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
-| S4-1 | `realtime-broadcaster`: `change_log` 기록 + `NOTIFY` | S3-5 | 채널 seq 연속·유일, 이벤트 재전달에도 중복 행 없음 | FR-050 |
+| S4-1 | `realtime-broadcaster`: `change_log` 기록 + `NOTIFY` | S3-5 | 채널 seq 연속·유일(채널 카운터 행), 이벤트 재전달에도 중복 행 없음 | FR-050 |
 | S4-2 | ws-gateway 골격: **`/ws/public`**(Origin 검사, `hello`/`welcome`) | S4-1, S0-2 | 04 §7.1 시퀀스 통합 시험 | FR-050 |
-| S4-3 | 재개: replay / snapshot 분기, `change_log` 보관 정리 | S4-2 | 건너뜀·이력 부족·처음 접속 3경로 시험 | FR-051 |
+| S4-3 | 재개: replay / snapshot 분기, `change_log` 보관 정리(realtime 이 등록하는 `RetentionRule`) | S4-2 | 건너뜀·이력 부족·처음 접속 3경로 시험 (**AC-008** 서버 쪽) | FR-051, AC-008 |
 | S4-4 | 송신 큐·`4408`·`bye` 우아한 종료 | S4-2 | 느린 소비자 격리(다른 연결 무영향), SIGTERM→`bye`→`1001` | FR-051, ADR-014 |
 | S4-5 | 공개 채널 변환(`ownerKey`·`userId` 제거) | S4-2 | **AC-009** 구조 시험: 공개 메시지 스키마에 식별자 필드 없음 | FR-041 |
 | S4-6 | **`/ws/private`**: 세션 쿠키 필수(익명 포함), 세션 캐시, `PrivateRouter`, `flow.step` 전송(세션 소유자만), 세션당 연결 수 제한(`4409`), 회전 시 `4401` | S4-2, S3-7 | 타 세션이 받지 못함. 쿠키 없으면 업그레이드 401. 익명 세션도 자기 흐름 수신. 로그인 후 이전 세션 연결이 닫힘 | FR-040 |
@@ -107,10 +110,10 @@ flowchart LR
 ### S5 — 웹 UI
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
-| S5-1 | Next 셸, `next-intl`(ko/en), 레이아웃, 다크/라이트, 디자인 토큰 | S0-3, S1 | 두 로케일 전환·유지, 누락 키 검사 통과 | FR-004 |
-| S5-2 | 자기소개·아키텍처·저장소 링크/배지 페이지(정적) | S5-1 | 정적 빌드 산출, 콘텐츠 슬롯(12) | FR-001~003 |
+| S5-1 | Next 셸, `next-intl`(ko/en), 레이아웃, 다크/라이트, 디자인 토큰, **CSP(요청별 nonce, `proxy.ts`)** | S0-3, S1 | 두 로케일 전환·유지, 누락 키 검사 통과, CSP 위반 없음(10 §2) | FR-004 |
+| S5-2 | 자기소개·아키텍처·저장소 링크/배지·**개인정보 안내(`/privacy`)** 페이지(정적) + **`content:check`**(사이트 변수 스키마, 릴리스는 `CONTENT_STRICT=1`) | S5-1 | 정적 빌드 산출, 콘텐츠 슬롯(12), 변수 비면 경고·릴리스에서 실패 | FR-001~003, FR-080 |
 | S5-3 | 방명록 목록·작성 폼, 낙관적 갱신, 오류 표시 | S3-6, S5-1 | 작성→즉시 표시→WS 병합 시 중복 없음 | FR-020 |
-| S5-4 | WS 클라이언트(`ConnectionManager`: public 즉시·private 은 세션 확인 후, 연결별 독립 재접속, `SeqTracker`, `StoreBridge`) | S4-3, S5-3 | 연결 끊김→복구 시 누락 없음(통합 E2E) | FR-050, FR-051 |
+| S5-4 | WS 클라이언트(`ConnectionManager`: public 즉시·private 은 세션 확인 후, 연결별 독립 재접속, `SeqTracker`, `StoreBridge`) | S4-3, S5-3 | 연결 끊김→복구 시 누락 없음(통합 E2E, **AC-008**) | FR-050, FR-051, AC-008 |
 | S5-5 | 흐름 시각화(내 흐름 상세 + 익명 요약) | S4-6, S4-7, S5-4 | 작성 후 단계가 순서대로 애니메이션, 접근성 대체 텍스트 | FR-040, FR-041 |
 | S5-6 | 접근성·반응형 점검 | S5-5 | axe 자동 검사 위반 0(AA), 키보드만으로 작성 가능 | — |
 
@@ -120,9 +123,10 @@ flowchart LR
 | S6-1 | 반응 PUT/DELETE, 유일 키 중복 심판, `reaction.changed(count)`, `my_reaction` | S3 | 같은 반응 동시 2회 → 1건. 총개수 덮어쓰기 | FR-021 |
 | S6-2 | 수정/삭제(로그인+본인), `version` 조건 갱신, 409 + 최신 뷰 | S2-3, S3 | **AC-005**, **AC-016**(동시 수정 한 건만), **AC-004**(익명 403) | FR-022, FR-034 |
 | S6-3 | 신고·관리자 숨김/해제·`report_queue`·조치 이력 | S2-4, S3 | **AC-006**: 숨김 즉시 공개 목록에서 제외, 이력 남음 | FR-023 |
-| S6-4 | 속도 제한(세션) + nginx `limit_req` 설정 | S2-5, S0-6 | **AC-007**: 초과 시 429 + `Retry-After` | FR-024 |
+| S6-4 | 속도 제한(세션) + nginx `limit_req` 설정 + **쓰기 잠금**(`SetWriteLock`·`WriteLockPolicy`, `POST /api/admin/write-lock`, `worker admin write-lock on\|off`) | S2-5, S0-6 | **AC-007**: 초과 시 429 + `Retry-After`. 잠금 중 쓰기는 503 `write_locked` + `Retry-After`, 읽기·WS 정상 | FR-024, ADR-008 |
 | S6-5 | 읽기 모델 재구성(`rebuild`, 그림자 교체) | S3-5 | **AC-017**: 재구성 중 쓰기가 들어와도 최종 결과가 정본과 일치 | ADR-023 |
-| S6-6 | 보관 정리(세션·이벤트·`request_key`·`change_log`·`dead`)·익명화 | S3 | **AC-011**: 7일 경과 데이터 삭제, 글 보존, 작성자 링크 익명화 | FR-080 |
+| S6-6 | 보관 정리(모듈별 `RetentionRule` 등록: 세션·이벤트·`request_key`·`change_log`·`dead`)·익명화(`AnonymizeSessionData`) | S3 | **AC-011**: 7일 경과 데이터 삭제, 글 보존, 작성자 링크 익명화 | FR-080 |
+| S6-7 | `dead` 재투입 CLI(`worker dead-requeue`) | S3-4 | `dead → new` 전이, 시도 횟수 초기화, 사유 기록 | ADR-023 |
 
 ### S7 — 관측
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -135,12 +139,12 @@ flowchart LR
 ### S8 — 운영 경화
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
-| S8-1 | 라이브 compose + nginx(realip·정규화·헤더·CSP) + cloudflared | S0-1, S0-6 | 외부에서 HTTPS·WSS 동작, 주소 헤더 위조 무시 시험 | AC-014 |
-| S8-2 | 정적 폴백 1단계(nginx) | S5-2, S8-1 | 앱 컨테이너 중지 시 소개·아키텍처 페이지 제공, 데모 영역 '점검 중' | FR-070, **AC-010** |
+| S8-1 | 라이브 compose + nginx(realip·정규화·**정적 보안 헤더**; CSP 는 web 이 설정 — S5-1) + cloudflared + 쓰기 잠금 운영 런북(OB-13) | S0-1, S0-6 | 외부에서 HTTPS·WSS 동작, 주소 헤더 위조 무시 시험 | AC-014 일부 |
+| S8-2 | 정적 폴백 1단계(nginx, `build:fallback` 산출) | S5-2, S8-1 | 앱 컨테이너 중지 시 소개·아키텍처 페이지 제공, 데모 영역 '점검 중' | FR-070, **AC-010** |
 | S8-3 | Cloudflare 정적 미러 | S8-2 | **G11**: 호스트 다운에도 정적 페이지 응답 | FR-070 |
 | S8-4 | 백업(`pg_dump` 일/주) + 복구 시험 + 외부 보관 | S8-1 | **G12**: 빈 DB 복원 후 무결성 검사 통과, 절차 문서화 | ADR-023 |
-| S8-5 | k3d + Gateway API + Envoy Gateway 매니페스트 | S8-1 | **G8**: `/api`·`/ws`·`/` 라우팅, 롤링 배포 중 재접속 복구 | AC-014 |
-| S8-6 | 이미지 빌드·GHCR·pull 배포 | S1-6, S8-1 | 태그 푸시 → 호스트가 새 이미지로 교체(09) | — |
+| S8-5 | k3d + Gateway API + Envoy Gateway 매니페스트 | S8-1 | **G8**: `/api`·`/ws`·`/` 라우팅, 롤링 배포 중 재접속 복구 (ADR-002 검증, AC-014 가 아님) | ADR-002 |
+| S8-6 | 이미지 빌드·GHCR·pull 배포 + 릴리스 게이트(`CONTENT_STRICT=1 content:check`) | S1-6, S8-1 | 태그 푸시 → 호스트가 새 이미지로 교체(09), worker 는 `/healthz`·나머지는 `/readyz` 게이트 | — |
 
 ### S9 — 인수
 | ID | 내용 | 완료 기준 |
@@ -148,7 +152,7 @@ flowchart LR
 | S9-1 | AC-001~017 전수 실행 | 매트릭스(08)의 모든 행이 초록 또는 사유 기록 |
 | S9-2 | 성능(**AC-013**) | 터널 경유 API p95 300ms, 첫 화면 LCP 2.5s, 동시 50. 측정 환경·반복·결과를 기록 |
 | S9-3 | 소크·재접속·롤링 | WS 장시간 안정, 배포 중 끊김 후 자동 복구 |
-| S9-4 | 이중 호스팅(**AC-014**) | 집 PC(Compose)와 k3d 에서 AC-001·008·010 통과 |
+| S9-4 | 이중 호스팅(**AC-014**) | 집 PC(Compose)와 Oracle 호스트에서 AC-001·008·010 통과 (Oracle 가입 불가면 사유 기록, spec AC-014) |
 | S9-5 | 문서 정합 | ADR 상태·tech-stack 버전·README 로드맵 갱신 |
 
 ## 5. 의존 그래프 (핵심 경로)
@@ -207,7 +211,7 @@ sequenceDiagram
 | **C0** | S0 종료 | G1·G2 통과(또는 대안 결정). ADR-022 갱신 |
 | **C1** | S3 종료 | `curl` 로 글 작성 → 목록에 보임, 이벤트가 inbox 를 거쳐 처리됨, AC-001(서버)·002·003·015·017 |
 | **C2** | S5 종료 | 브라우저에서 작성 → 실시간 반영 → 흐름 시각화. 연결 끊김 복구 |
-| **C3** | S7 종료 | 지표 대시보드 임베드. 모든 기능 AC 초록 |
+| **C3** | S7 종료 | 지표 대시보드 임베드. **S1~S7 에서 다루는 AC**(AC-001~009·011~013·015~017) 초록. AC-010·014 는 S8 이후 |
 | **C4** | S9 종료 | 인수 전체, 이중 호스팅, 성능 기록. M1 완료 선언 |
 
 ## 8. 위험과 대응

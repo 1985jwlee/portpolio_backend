@@ -22,7 +22,8 @@
 | `seq` | 단조 증가 순번(전역). 읽기 모델의 순서 검사와 대상별 순서에 사용 |
 | `aggregate_type`, `aggregate_id` | 어떤 대상의 이벤트인가 |
 | `type`, `payload` | 이벤트 종류와 내용(스키마 정본은 `packages/protocol`) |
-| `trace_id`, `owner_key` | 흐름 추적 묶음과 소유자(시각화) |
+| `schema_version`, `occurred_at`, `aggregate_version` | 봉투 메타(소비자의 Upcaster 판정·`version` 반영) |
+| `trace_id`, `owner_key` | 흐름 추적 묶음과 소유자(시각화). `owner_key` = 내부 행위자 키 |
 | `status` | `new` / `processing` / `published` / `dead` |
 | `claim_token`, `claimed_by`, `lease_until` | 선점 정보(ADR-021) |
 | `attempts`, `next_attempt_at`, `last_error` | 재시도 |

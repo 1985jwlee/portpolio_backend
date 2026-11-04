@@ -82,7 +82,19 @@ Go(coder/websocket)·C#(.NET 10 Kestrel 순수 WebSocket)·Bun(Elysia)로 같은
 
 관문 중 **G1·G2 가 설계를 바꿀 수 있는 크기**다(G1 실패 → 실시간 방식, G2 실패 → ws-gateway 언어). 나머지는 도구 교체로 흡수된다.
 
-### 로컬 환경
+### 관문 로컬 실측 결과 (2026-11-04)
+
+WSL2, Bun 1.4.4, Docker(postgres:18.6, nginx 1.30/1.31)에서 실행했다. 실서버(Tunnel·Oracle)에서의 재시험은 S0 에서 한다.
+
+| 관문 | 결과 | 설계 영향 |
+|---|---|---|
+| G4 DB 드라이버 | **Bun.sql 통과·권장.** Bun.sql·postgres.js 4.0.0·pg 모두 바인딩·트랜잭션·`SKIP LOCKED` 1000행×8워커(중복 0)·늦은 완료 0행 거절·advisory 리더 선출 통과. LISTEN 자동 재구독은 Bun.sql 만 서버 재시작까지 복구, postgres.js 4.0.0 은 재시작 후 복구 못함(3.4.7 은 복구) | 드라이버 = Bun.sql. SQLSTATE 는 `errno`. NOTIFY 유실 보정(change_log 재조회) 필수 |
+| G7 nginx | ①② 통과. 공식 이미지 4종 모두 realip 포함, 신뢰 대역 밖 헤더 무시, 위조 헤더 정규화, WS 101, `limit_req` 429, 업스트림 다운 시 정적 폴백 서빙. ③ TLS 자동화 미확인(이미지에 acme 모듈 존재) | 직접 빌드 불필요. 내부 경로 차단은 대소문자 무시 정규식(`location ~*`) |
+| G10 Drizzle | 통과. `generate --custom` 으로 부분 인덱스·CHECK·함수·트리거 적용, 빈 DB 재현·멱등, 두 마이그레이터 동작 | 운영 규칙 6개(tech-stack §11.1): push 금지 등 |
+| (G2 보조) Bun/Elysia | `await server.stop()` 은 WS 가 열려 있으면 교착 → `stop()` 을 await 없이 호출하고 `bye`+`close(1001)` 후 타임아웃 대기. 업그레이드 사전 검사·`ws.send` 반환값(-1/0)·두 경로 분리는 Elysia 와 Bun.serve 모두 동작. 라우트 옵션 `backpressureLimit` 의 **차단 동작은 미검증**(앞선 측정에서는 무시) | 앱 레벨 큐 상한 유지 |
+| 기타 | `timingSafeEqual` 은 길이가 다르면 예외 → 해시 후 비교. `Bun.randomUUIDv7()` 내장(시간 정렬 확인). prom-client 는 Bun 에서 GC 지표 샘플 없음, `eventloop_lag_seconds` 0. 별도 `@sinclair/typebox` 를 Elysia 에 사용 가능(typebox 1.x 는 peer 범위 밖), 브라우저는 `Value.Check` 만(약 13.9KB gzip) | F16·F17 반영 |
+
+## 로컬 환경
 로컬에 `psql`, `redis`, `k3d`, `kubectl`, `k6` 이 없다. 모두 Docker 컨테이너 또는 설치로 준비한다(Docker 29.8 은 있음). Bun 은 1.4.4 로 맞췄다(로컬 확인 완료).
 
 ## 대안과 기각 이유

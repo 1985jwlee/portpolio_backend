@@ -226,14 +226,15 @@ stateDiagram-v2
 
 | WS 메시지 | 동작 |
 |---|---|
-| `snapshot` | `['entries']` 첫 페이지를 **통째로 교체**하고 `SeqTracker.last = head`. 이어서 오는 `seq` 만 적용 |
+| `snapshot` | `['entries']` 첫 페이지를 **통째로 교체**하고 `SeqTracker.last = head`. 이어서 오는 `seq` 만 적용. **개인 필드**(`myReactions`/`isMine`/`canEdit`)는 스냅샷에 없으므로 기존 캐시의 **같은 `id` 에서 이어받는다**(없으면 기본값, 다음 `GET /api/entries` 로 보강) |
 | `entry.created` | `id` 가 이미 있으면 **병합(교체)**: 서버 필드로 덮되 `myReactions`/`isMine`/`canEdit` 은 기존 값 유지. 없으면 목록 맨 앞에 삽입 |
-| `entry.updated` | 같은 `id` 의 본문·`updatedAt`·`version` 갱신. 사용자가 그 글을 편집 중이면 충돌 안내(§7.4) |
-| `entry.removed` | 목록에서 제거(애니메이션 후). 내가 편집 중이면 안내 후 편집 종료 |
+| `entry.updated` | 같은 `id` 의 본문·`updatedAt`·`version` 갱신(부분 갱신). 사용자가 그 글을 편집 중이면 **입력은 보존**하고 충돌 안내만(§7.4) |
+| `entry.restored` | 숨김이 해제된 글. 본문이 메시지에 없으므로 **해당 글을 재조회**(`GET /api/entries` 의 해당 id 가 포함될 때까지 또는 단건 조회)해 `id` 순(uuid v7) 위치에 정렬 삽입 |
+| `entry.removed` | 목록에서 제거(애니메이션 후). 내가 편집 중이면 **안내 후 편집 종료**(삭제된 글은 저장해도 404) |
 | `reaction.updated` | `reactions[emoji] = count` **덮어쓰기**(중복·역전에 안전). `myReactions` 는 건드리지 않는다 |
-| `flow.summary` | 키 `['flow','summary', window]` 덮어쓰기 |
+| `flow.summary` | 키 `['flow','summary', window]` 덮어쓰기. **순번 없는 휘발성 메시지**라 `SeqTracker` 를 갱신하지 않는다(`presence` 도 같음) |
 | `flow.step` | 해당 `traceId` 트랙에 단계 추가(없는 트랙이면 만들지 않고 무시 — 내 쓰기에서만 시작) |
-| `presence` | `['presence']` 갱신 |
+| `presence` | `['presence']` 갱신(순번 없음) |
 | `seq` 건너뜀 | 적용하지 않고 `SocketClient` 에 재연결 요청(`resume` 으로 복구) |
 
 개인 필드는 서버가 보내지 않으므로(04 §3.2) 클라이언트가 **자기 쓰기 응답**에서 채운다: 반응 `PUT` 응답의 `mine`, 글 `POST` 응답의 `isMine`/`canEdit`.
@@ -243,12 +244,14 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     A["SocketClient 상태"] --> L{"live ?"}
-    L -- "예" --> G{"최근 hb 25s 이내?"}
+    L -- "예" --> G{"최근 hb 50s 이내? (주기 25s 의 2배)"}
     G -- "예" --> OK["● 연결됨 (배지만, 배너 없음)"]
     G -- "아니오" --> S1["◐ 불안정 (status 배너)"]
     L -- "아니오" --> B{"상태"}
     B -- "connecting/handshaking" --> S2["◐ 연결 중…"]
     B -- "backoff" --> S3["⟳ 재연결 대기 n초 · 지금 시도 버튼"]
+    B -- "idle (숨김 탭 5분)" --> S6["○ 일시 중지 · 탭 복귀 시 자동 재연결"]
+    B -- "stopped (4409)" --> S7["다른 탭에서 열려 있습니다 · 이 탭은 실시간 중지"]
     B -- "stopped (4400)" --> S4["✕ 실시간 비활성 · 새로고침 안내 (alert)"]
     S3 --> N{"navigator.onLine ?"}
     N -- "false" --> S5["오프라인 안내로 문구 교체"]
@@ -279,7 +282,9 @@ flowchart TD
     C -- "version_conflict" --> V["충돌 안내 + 최신 뷰 적용"]
     C -- "rate_limited" --> R["토스트 + Retry-After 카운트다운, 버튼 잠금"]
     C -- "unauthenticated" --> U["/api/me 재조회 → 여전히 아니면 로그인 안내"]
-    C -- "forbidden" --> X["권한 없음 안내 (기능 숨김 유지)"]
+    C -- "forbidden / origin_mismatch" --> X["권한 없음 안내 (기능 숨김 유지)"]
+    C -- "write_locked" --> WL["점검 안내 + 작성 UI 비활성 (Me.writeLocked, Retry-After 60s)"]
+    C -- "github_unavailable / github_rejected / oauth_state_*" --> OA["로그인 실패 안내 + 재시도 (익명 사용은 계속)"]
     C -- "unavailable / 네트워크" --> T["재시도 가능 토스트 + 같은 Idempotency-Key"]
     C -- "internal / 알 수 없음" --> I["일반 오류 + traceId 표시(문의용)"]
     C -- "request_in_progress" --> W["1초 후 같은 키로 자동 재시도 (최대 3회)"]

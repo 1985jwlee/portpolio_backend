@@ -66,7 +66,7 @@ sequenceDiagram
 |---|---|---|
 | `guestbook-projector` | guestbook | 글·반응 이벤트로 읽기 모델 갱신 |
 | `realtime-broadcaster` | realtime | 변경을 `change_log` 에 기록하고 접속자에게 브로드캐스트 |
-| `flow-tracer` | events | 흐름 단계 기록(필요 시) |
+| (inbox 소비자 아님) | events | 흐름 단계 기록은 소비자가 아니라 `OutboxWriter.append`·디스패처·러너의 내부 훅(`TraceRecorder`)이 한다 — design/05 §2.1 |
 
 ### 외부 입력
 Phase 5 의 PG 웹훅은 `source` 가 외부인 메시지로 같은 inbox 에 저장한다. **웹훅 본문의 서명 검증은 수신 usecase 의 첫 단계**이고, 서명이 틀리면 저장하지 않는다. 외부 메시지 id 가 유일 키가 된다.

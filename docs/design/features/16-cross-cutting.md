@@ -485,7 +485,7 @@ classDiagram
 | 순서 | 가드 | 입력 | 출력(성공) | 실패 오류 | 비고 |
 |---|---|---|---|---|---|
 | 10 | `OriginGuard` | `Origin`(없으면 `Referer`), `PUBLIC_ORIGIN` | 통과 | `ForbiddenError(origin_mismatch)` | 변경 메서드(POST·PUT·PATCH·DELETE)만. DB 조회 전에 교차 사이트를 걸러낸다 |
-| 20 | `SessionGuard` | 쿠키 | `ctx.actor` (익명/로그인) | `UnauthenticatedError` | 모드 3종: `required`(private·관리), `optional`(공개 조회·쓰기: 없으면 익명 세션 발급), `issue`(`GET /api/me`) |
+| 20 | `SessionGuard` | 쿠키 | `ctx.actor` (익명/로그인) | `UnauthenticatedError` | 모드 3종 — `required`: 세션이 없으면 401(쓰기 라우트·private·관리; 쓰기 전에 클라이언트가 `GET /api/me` 로 세션을 받아 둔다), `optional`: 세션이 없으면 `AnonymousActor`(세션 없음, 발급 안 함)로 취급(공개 조회), `issue`: 세션이 없거나 무효면 **익명 세션을 발급**(`GET /api/me` **한 곳**만, 06 §2·F10 ID-01) |
 | 30 | `RateLimitGuard` | `ctx.actor.actorKey`, 라우트 규칙 | 통과 + `RateLimit-*` 헤더 값 | `RateLimitedError(retryAfter)` | 읽기 라우트는 규칙 없음. 규칙 수치는 설정(A-011) |
 | 40 | `SchemaGuard` | 본문·쿼리·경로, 라우트 스키마 | 검증된 입력 | `ValidationError(fields)` | Elysia 스키마 검증 결과를 `AppError` 로 변환 |
 | 50 | `AuthorizationGuard` | `ctx.actor` | 통과 | `UnauthenticatedError` / `ForbiddenError` | 라우트가 `RequireLogin` 또는 `RequireAdmin` 선언 |
@@ -564,8 +564,10 @@ flowchart TD
     O -- "예" --> SE{"세션 쿠키 유효?"}
     SE -- "아니오" --> MD{"모드"}
     MD -- "required" --> E2["401 unauthenticated"]
-    MD -- "optional 또는 issue" --> IS["익명 세션 발급"]
+    MD -- "optional" --> AN["세션 없는 익명 행위자 (발급 안 함)"]
+    MD -- "issue (GET /api/me)" --> IS["익명 세션 발급"]
     SE -- "예" --> RL
+    AN --> RL
     IS --> RL{"라우트에 속도 규칙?"}
     RL -- "예" --> HIT{"한도 이내?"}
     RL -- "아니오" --> SC
@@ -579,13 +581,13 @@ flowchart TD
 
 ### 4.6 오류·지표·로그
 - 오류: §6 표. 가드 실패는 **usecase 호출 전**이라 트랜잭션·outbox 부작용이 없다.
-- 지표: `guard_rejections_total{guard,reason}`(reason 은 코드 열거값), `rate_limit_decisions_total{rule,decision}`. 레이블에 행위자·IP 금지(ADR-007).
+- 지표: `pf_guard_rejections_total{app,guard,reason}`(reason 은 코드 열거값), `pf_rate_limit_decisions_total{app,rule,decision}`. 레이블에 행위자·IP 금지(ADR-007).
 - 로그: 거절은 `warn`, 필드 `trace_id`·`guard`·`code`. 쿠키·Origin 값은 기록하지 않는다(Origin 불일치는 불일치 사실만).
 
 ### 4.7 시험(08 연결)
 - 가드 단위: 가드별 통과/거절 경계(Origin 없음+Referer 있음, 세션 만료 직전, 한도 정확히 N 번째).
 - 체인 순서: 두 가드가 동시에 실패할 입력에서 **앞 순서 오류가 반환**되는지.
-- 통합(L3): 02 §7.1 순서도의 모든 분기 / AC-007(429 + `Retry-After`).
+- 통합(L3): 03 §7.1 순서도의 모든 분기 / AC-007(429 + `Retry-After`).
 - 구조: 교차 사이트 요청이 세션 조회 포트를 호출하지 않음(가짜 포트 호출 횟수 0).
 
 ---
@@ -713,7 +715,7 @@ flowchart TD
 
 ### 5.7 오류·지표·로그
 - 오류: `IdempotencyKeyReuseError`(422), `RequestInProgressError`(409), `ValidationError`(키 형식).
-- 지표: `idempotency_total{outcome}`(`claimed`·`replayed`·`reuse`·`in_progress`), `idempotency_wait_seconds`. 키·행위자 값은 레이블에 쓰지 않는다.
+- 지표: `pf_idempotency_total{app,outcome}`(`claimed`·`replayed`·`reuse`·`in_progress`), `pf_idempotency_wait_seconds`. 키·행위자 값은 레이블에 쓰지 않는다.
 - 로그: 재생·충돌만 `info`/`warn`, 키 값은 마지막 4자만(`…ab12`).
 
 ### 5.8 시험
@@ -745,6 +747,10 @@ flowchart TD
 | 멱등 | `IdempotencyKeyReuseError` | 422 | `idempotency_key_reuse` | — | — | warn |
 | 도메인 | `RateLimitedError` | 429 | `rate_limited` | `Retry-After`, `RateLimit-*` | `retryAfterSeconds` | warn |
 | 도메인 | `WriteLockedError` | 503 | `write_locked` | `Retry-After: 60` | — | warn |
+| 인프라 | `GithubUpstreamError` (GitHub 토큰 교환·프로필 실패) | 502 | `github_unavailable` | — | — | warn |
+| 도메인 | `GithubUpstreamError` (GitHub 가 코드를 거절) | 502 | `github_rejected` | — | — | warn |
+| 도메인 | `ValidationError` (OAuth `state` 불일치) | 400 | `oauth_state_invalid` | — | — | warn |
+| 도메인 | `ValidationError` (OAuth 임시 쿠키 만료) | 400 | `oauth_state_expired` | — | — | info |
 | 인프라 | `TransientError` | 503 | `unavailable` | `Retry-After` | — | warn |
 | 인프라 | `LeaseLostError` (HTTP 경로에서는 발생 안 함) | 503 | `unavailable` | — | — | error |
 | 인프라 | `PermanentError`, 예상 밖 예외 | 500 | `internal` | — | — (일반 문구) | error + 스택 |
@@ -757,7 +763,7 @@ flowchart TD
 
 - 응답 본문 형식: `{ error: { code, message, traceId, details? } }`, 헤더 `X-Trace-Id`.
 - `message` 는 `Accept-Language`(ko/en, 기본 en)로 `MessageCatalog` 에서 고른다. `internal`/`unavailable` 은 **일반 문구**이고 내부 정보·스택·SQL 을 담지 않는다.
-- `WriteLockedError`(긴급 쓰기 잠금, GB-11)는 00 §4.3 표에 없는 추가 항목이다(§17 수정 요청).
+- **와이어 코드는 모듈 접두사를 뗀다**: 모듈 안의 오류 코드 `guestbook.write_locked`·`identity.github_unavailable` 등은 응답 `error.code` 에서 `write_locked`·`github_unavailable` 이 된다(03 §2, 클라이언트는 `code` 로만 분기). 매핑 표는 와이어 코드를 적는다.
 
 ### 6.3 클래스
 §3.2 `ErrorMapper`, `MessageCatalog`. 매핑은 `AppError.httpStatus`/`code` 를 그대로 쓰고, 프레임워크 오류만 변환 함수로 `AppError` 를 만든다.
@@ -803,7 +809,7 @@ flowchart TD
 ```
 
 ### 6.6 지표·로그·시험
-- 지표: `http_requests_total{route,method,status}` 가 오류도 센다. `app_errors_total{code}`.
+- 지표: `pf_http_requests_total{app,method,route,status_class}` 가 오류도 센다. `pf_errors_total{app,code}`.
 - 로그: 5xx 만 스택 포함(`error`), 4xx 는 코드만. 본문·쿠키·토큰은 기록하지 않는다.
 - 시험: **표의 모든 행**을 데이터 주도 시험으로(입력 오류 → 상태·코드·헤더). 5xx 본문에 스택·SQL 문자열이 없음. `Accept-Language` ko/en 문구 전환.
 
@@ -896,13 +902,25 @@ flowchart TD
 ### 8.1 목적·트리거
 - 목적: 연결 관리, **트랜잭션 경계의 단일 구현**, 순방향 마이그레이션 적용·확인.
 - 트리거: 앱 기동(풀·확인), 모든 command/event usecase(UoW), 배포(마이그레이션 실행).
-- 드라이버는 **미확인(G4)** 이다. `DbPool`/`TxContext` 는 드라이버 중립 인터페이스이고, G4 통과한 후보가 어댑터가 된다.
+- 드라이버는 **Bun.sql**(G4 로컬 실측 통과, tech-stack §11.1)이다. `DbPool`/`TxContext` 는 드라이버 중립 인터페이스로 두고 Bun.sql 어댑터를 구현한다. **SQLSTATE 는 `err.code` 가 아니라 `errno`(Drizzle 로 감싸면 `cause.errno`)** 이므로 중복 키(23505) 판별은 어댑터 한 곳의 `isUniqueViolation(err)` 로 감싼다.
+- 마이그레이션 운영 규칙(push 금지, 적용 파일 수정 금지, CONCURRENTLY 불가, 저널 순서)은 tech-stack §11.1 에 있다.
+
+### 8.1.1 쿼리 수준 (ADR-025)
+
+| 수준 | 방식 | 트랜잭션 |
+|---|---|---|
+| T0 | Drizzle 빌더 | 호출자의 `tx` |
+| T1 | 같은 `tx` 의 `sql` 템플릿 (`adapter/postgres/raw/`) | 호출자의 `tx` 그대로 |
+| T2 | 별도 연결 (LISTEN, 리더 락, 배치) | 트랜잭션 밖 |
+
+**명령·이벤트 usecase 의 트랜잭션 안에서는 T0·T1 만** 쓴다. `UnitOfWork` 는 `TxContext` 에 T0 클라이언트와 T1 실행기를 함께 노출하고 T2 연결은 노출하지 않는다.
 
 ### 8.2 UoW 사용 규약
 
 | 규약 | 내용 | 강제 수단 |
 |---|---|---|
-| 여는 곳 | **command/event usecase 만** `uow.run` 을 부른다. query usecase 는 읽기 전용 연결(tx 없음 또는 `READ ONLY`) | 경계 규칙 B3(읽기·쓰기 포트 분리) + 코드 리뷰 |
+| **모든 쓰기는 tx** | INSERT·UPDATE·DELETE 는 한 문장이어도 `uow.run` 안에서만 실행한다(잡·reaper·정리·집계·세션 갱신·`trace_step`·시드 포함). `DbPool` 은 읽기 전용 `ReadDb` 만 노출하고 쓰기 메서드는 `TxContext` 에만 있다. 대량 삭제·집계는 배치마다 짧은 tx. 근거 ADR-025 | 타입(`ReadDb` 에 쓰기 메서드 없음) + `check-purity` + 08 구조 시험 |
+| 여는 곳 | **command/event usecase 와 잡 usecase 만** `uow.run` 을 부른다. query usecase 는 읽기 전용 연결(tx 없음 또는 `READ ONLY`) | 경계 규칙 B3(읽기·쓰기 포트 분리) + 코드 리뷰 |
 | 중첩 금지 | `run` 안에서 `run` 을 부르면 `PermanentError`(프로그래밍 오류). 하위 작업은 `savepoint` | `PostgresUnitOfWork` 가 진행 중 tx 를 추적 |
 | **tx 안 외부 호출 금지** | HTTP·파일·메시지 전송 등을 tx 안에서 하지 않는다. tx 안에서 `await` 하는 것은 `tx.query` 와 순수 계산만 | `TxContext` 에는 외부 클라이언트가 없고, 외부 호출은 usecase 가 **tx 앞/뒤**에서 한다(예: GitHub 호출은 로그인 usecase 에서 tx 이전). 시험은 `faults.hit` 지점으로 순서 확인(08) |
 | 격리 수준 | `READ COMMITTED` 기본(ADR-021). 직렬화 격리를 쓰지 않는다 | `TxOptions` 기본값 |
@@ -985,7 +1003,7 @@ flowchart TD
 
 ### 8.7 오류·지표·로그
 - 오류: `TransientError`(연결 불가·타임아웃 → 503), `PermanentError`(SQL 오류), `MigrationBehindError`.
-- 지표: `db_pool_in_use`, `db_pool_waiting`, `tx_duration_seconds{usecase,outcome}`, `tx_retries_total{reason}`, `migration_applied_version`(info), `listener_reconnects_total`.
+- 지표: `pf_db_pool_connections{app,state}`, `pf_db_tx_duration_seconds{app,usecase,outcome}`, `pf_db_tx_retries_total{app,reason}`, `pf_migration_version{app}`, `pf_notify_reconnects_total{app}`.
 - 로그: 느린 tx(>1초)는 `warn` + usecase 이름. SQL 파라미터 값은 기록하지 않는다.
 
 ### 8.8 시험
@@ -1022,7 +1040,7 @@ flowchart TD
 | 4 어댑터 | repo·outbox·inbox·idempotency, `MemoryRateLimiter`, `MemoryKeyValueCache` | `change_log`·`session`·`trace_step` 읽기 어댑터, `MemoryPresenceCounter`, 세션 캐시 | repo·outbox·inbox, `PostgresEventTransport`, retention 규칙들 | API 클라이언트(fetch) |
 | 5 모듈 | identity·guestbook·events(조회)·realtime(조회)·observability | realtime·identity(`ResolveSession`)·observability | guestbook(projector)·events·realtime(broadcaster)·identity(정리)·observability | — |
 | 6 진입 등록 | Elysia 라우트 + 가드 + `/healthz`·`/readyz`·`/metrics` | `/ws/public`·`/ws/private` + 헬스·지표 | `JobScheduler`(디스패처·러너·reaper·집계·정리) + `/healthz`·`/metrics` | Next 서버 |
-| 7 readyz | DB 핑 OK | DB 핑 + 리스너 연결 OK | DB 핑 + 리스너 + 스케줄러 가동 | `/healthz` |
+| 7 헬스 | `/healthz`·`/readyz`: DB 핑 OK · 마이그레이션 OK · `draining` 아님 | `/healthz`·`/readyz`: DB 핑 + **리스너 연결 OK** · `draining` 아님 | **`/healthz` 만(readyz 없음)**: DB 핑 + 잡 하트비트 `3×주기` 이내. 라우팅 대상이 아니다(F17 §5.1) | `/healthz`·`/readyz`: 프로세스 응답 · `draining` 아님 |
 
 ### 9.4 기동 시퀀스 (api 기준, 나머지는 6단계 내용만 다르다)
 
@@ -1069,7 +1087,7 @@ sequenceDiagram
 flowchart TD
     S["SIGTERM 또는 SIGINT"] --> A["ShutdownCoordinator.trigger"]
     A --> B["ReadinessGate.setReady(false)"]
-    B --> C["신규 수락 중단: HTTP listen 닫기 또는 업그레이드 거부"]
+    B --> C["신규 수락 중단: server.stop() 을 await 없이 호출 또는 업그레이드 거부"]
     C --> D["진행 중 요청과 처리 완료 대기 (grace 안)"]
     D --> E{"grace 내 완료?"}
     E -- "예" --> F
@@ -1083,6 +1101,7 @@ flowchart TD
     L -- "예" --> M["강제 종료 exit 1"]
 ```
 
+- **Bun 실측 주의**: `await server.stop()` 은 열린 WebSocket 이 있으면 끝나지 않는다. 그래서 위 C 단계는 `stop()` 을 **await 없이** 호출하고, H 단계에서 소켓에 `bye`+`close(1001)` 를 보낸 뒤 `grace` 안에서 `stop()` 의 완료를 기다린다. 타임아웃 후 `stop(true)` 강제 종료는 미확인(G2).
 - `grace` 기본 25초(Compose `stop_grace_period` 30초, k8s `terminationGracePeriodSeconds` 30초보다 짧게). ws-gateway 는 `bye.reconnectAfterMs` 에 **지터**를 넣어 재접속 쏠림을 피한다(design/04 §7.3).
 - **임대 반납(worker)**: 이 프로세스가 보유한 `processing` 행을 `claim_token` 일치 조건으로 `new`/`received` 로 되돌리고 `lease_until = now`. 반납하지 못해도 reaper 가 임대 만료 후 회수한다(ADR-021) — 반납은 지연을 줄이는 최적화다.
 - 컴포넌트는 `phase` 순으로 시작하고 **역순으로 정지**한다: `config(0) → dbPool(10) → listener(20) → modules(30) → jobs/http/ws(40) → readiness(50)`.
@@ -1096,7 +1115,7 @@ flowchart TD
 
 ### 9.8 오류·지표·로그
 - 종료 코드: `0` 정상, `78` 설정, `69` DB 불가(`EX_UNAVAILABLE`), `1` 마이그레이션 뒤처짐·강제 종료, `70` 내부 오류.
-- 지표: `app_ready`(0/1), `app_info`, `shutdown_duration_seconds`, `shutdown_forced_total`.
+- 지표: `pf_app_ready{app}`(0/1), `pf_build_info{app,version,commit}`, `pf_shutdown_duration_seconds{app}`, `pf_shutdown_forced_total{app}`.
 - 로그: 단계마다 `info`(`phase=start|stop`, `component`, 소요). 오류는 코드와 컴포넌트 이름.
 
 ### 9.9 시험
@@ -1152,9 +1171,9 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["앱 조립(ports.ts)"] --> B{"설정 PORT_BACKEND"}
-    B -- "memory (M1 기본)" --> M["Memory 어댑터 생성"]
-    B -- "redis (도입 후)" --> C{"Redis 연결 가능?"}
+    A["앱 조립(ports.ts)"] --> B{"어댑터 선택 (M1 은 코드 상수 memory/Postgres — 설정 변수 없음)"}
+    B -- "M1" --> M["Memory 어댑터 생성"]
+    B -- "redis (도입 후, 설정 변수 신설)" --> C{"Redis 연결 가능?"}
     C -- "예" --> R["Redis 어댑터 생성"]
     C -- "아니오" --> D{"포트 종류"}
     D -- "RateLimiter 또는 Cache" --> M2["fail-open: 메모리 폴백 + 경보"]
@@ -1168,7 +1187,7 @@ M1 에서는 `redis` 분기가 구현되지 않는다(분기 자리만 문서화
 
 ### 10.6 오류·지표·로그·시험
 - 오류: 어댑터 내부 실패는 `TransientError`(속도 제한은 **fail-open** — 허용으로 처리하고 경보).
-- 지표: `rate_limit_decisions_total{rule,decision}`, `kv_cache_ops_total{op,result}`, `presence_connections`, `rate_limit_buckets`(게이지, 누수 감지).
+- 지표: `pf_rate_limit_decisions_total{app,rule,decision}`, `pf_kv_cache_ops_total{app,op,result}`, `pf_presence_connections{app}`, `pf_rate_limit_buckets{app}`(게이지, 누수 감지).
 - 시험: **계약 스위트** 필수 항목 — 한도 정확성(N 번째 허용, N+1 번째 거절), 시간 경과 후 보충(`FakeClock`), 키 격리, TTL 만료, 용량 상한 축출, `leave` 없이 사라진 연결 처리. 메모리·Postgres 어댑터가 같은 스위트를 통과(S1-8).
 
 ---
@@ -1312,7 +1331,8 @@ packages/protocol/
 │  ├─ registry.ts  # ProtocolRegistry
 │  └─ upcasters/   # 이벤트 버전 업캐스터
 ├─ schema/         # 내보낸 JSON Schema (커밋됨)
-└─ test/golden/    # 이벤트·메시지 골든 JSON
+├─ golden/         # 이벤트·메시지 골든 JSON (한 경로, 08 §10)
+└─ test/
 ```
 
 ### 12.3 파이프라인
@@ -1338,9 +1358,11 @@ flowchart LR
 
 | 항목 | 상태 | 대응 |
 |---|---|---|
-| Elysia 가 내장하는 TypeBox 버전과 `@pf/protocol` 의 TypeBox 호환 | **미확인** | 두 버전을 같은 범위로 고정하고 S1 에서 라우트에 protocol 스키마를 그대로 넣어 확인. 어긋나면 Elysia 의 `t` 를 protocol 이 재수출 |
+| Elysia 가 내장하는 TypeBox 버전과 `@pf/protocol` 의 TypeBox 호환 | **확인됨(실측, Bun 1.4.4)**: 별도 설치한 `@sinclair/typebox` 0.34.x 를 Elysia 1.4.30 라우트 body/response 에 그대로 사용 가능(Elysia 의존 범위 `>=0.34 <1`). `typebox` 1.x 는 범위 밖이라 쓰지 않는다. 아래 "대응"은 어긋날 때만 | 두 버전을 같은 범위로 고정하고 S1 에서 라우트에 protocol 스키마를 그대로 넣어 확인. 어긋나면 Elysia 의 `t` 를 protocol 이 재수출 |
 | TypeBox → OpenAPI 생성 도구(Elysia 플러그인 vs 변환) | **미확인**(03 §10) | 필요해질 때 선정. 계약 정본은 JSON Schema 로 충분 |
 | JSON Schema → Go 구조체 생성기가 `oneOf` 를 지원하는지 | **미확인**(ADR-022) | G2 실패 시에만 문제. 이벤트·메시지 유니온을 `t` 판별자로 평평하게 유지해 생성기 의존을 줄인다 |
+| 판별 유니온 스키마에 `discriminator` 옵션을 넣으면 최상위에 비표준 `discriminator` 키가 붙는다 | 실측 | **넣지 않는다** — 각 분기의 `t: const` 가 판별한다. 유니온 검증 오류는 `Expected union value` 하나뿐이므로 필드 단위 오류가 필요하면 `t` 로 분기를 먼저 골라 해당 스키마로 검사 |
+| 브라우저 검증기 | 실측 | `Value.Check` 만 사용(최소 번들 약 13.9KB gzip). `TypeCompiler` 는 22KB 이고 `new Function` 사용으로 CSP 위험(미확인)이라 서버 전용 |
 | `format: 'uuid'`·`date-time` 검증기 등록 | 구현 시 | `FormatRegistry` 에 등록(서버·테스트 공통) |
 
 ### 12.5 클래스
@@ -1404,32 +1426,36 @@ flowchart TD
 | `FakeIdGenerator` | 순서가 있는 uuid(v7 형식 유지, 단조 증가) |
 | `TestDb` | 시험마다 격리된 스키마/DB 생성·마이그레이션·정리. Testcontainers 는 G9 미확인 → compose `postgres` 대안 병기 |
 | `WorkerHarness` | 여러 워커를 같은 DB 에 띄우고 한 단계씩 진행(선점 경쟁·임대 만료) |
-| `FaultInjector` | `faults.hit('<지점>')` 훅에 대기·실패·지연을 주입(`sleep` 없이 순서 강제) |
+| `FaultInjector` | `faults.hit('<지점>')` 훅에 `failAt`/`delayAt`(→`Gate`)로 실패·지연을 주입(`sleep` 없이 순서 강제). API 는 [08](../08-test-strategy.md) §3.1 정본 |
 | `FakeRateLimiter`·`FakePresenceCounter`·`InMemoryEventTransport` | 포트 대역 |
 | `GoldenFiles` | 골든 JSON 읽기·대조 |
 | `PortContractSuite` | CM-07 어댑터 공용 계약 스위트 |
-| `AppHarness` | 앱 루트를 가짜 포트로 띄워 HTTP/WS 호출(통합) |
+| `ApiHarness` | api 조립 루트를 가짜 포트로 띄워 HTTP 호출(통합; 08 의 `ApiHarness`). `GatewayHarness` 는 ws-gateway 를 띄워 `FakeSocket` 으로 호출 |
 
 ### 13.3 클래스
 
 ```mermaid
 classDiagram
-    class Harness {
+    class TestHarness {
         <<abstract>>
         +setup() void
         +teardown() void
     }
+    class UnitHarness
+    class ModuleHarness
+    class ChaosHarness
     class DbHarness {
         +db TestDb
         +clock FakeClock
         +ids FakeIdGenerator
     }
     class WorkerHarness {
+        <<helper>>
         +spawn(n) Worker[]
         +step(worker) void
         +runUntilIdle() void
     }
-    class AppHarness {
+    class ApiHarness {
         +api ApiRoot
         +request(req) Response
     }
@@ -1437,18 +1463,22 @@ classDiagram
         +connectPublic() FakeSocket
         +connectPrivate(cookie) FakeSocket
     }
-    Harness <|-- DbHarness
-    DbHarness <|-- WorkerHarness
-    DbHarness <|-- AppHarness
-    AppHarness <|-- GatewayHarness
+    TestHarness <|-- UnitHarness
+    TestHarness <|-- DbHarness
+    DbHarness <|-- ModuleHarness
+    DbHarness <|-- ChaosHarness
+    DbHarness <|-- ApiHarness
+    DbHarness <|-- GatewayHarness
+    ChaosHarness ..> WorkerHarness
     class FaultInjector {
         +hit(point) void
-        +block(point) Gate
-        +failOnce(point, error) void
+        +failAt(point, nth) void
+        +delayAt(point) Gate
+        +clear() void
     }
     class Gate {
+        +reached Promise
         +release() void
-        +waitReached() void
     }
     FaultInjector ..> Gate
     DbHarness ..> FaultInjector
@@ -1466,16 +1496,16 @@ classDiagram
 ```mermaid
 sequenceDiagram
     participant T as 시험
-    participant H as WorkerHarness
+    participant H as ChaosHarness (WorkerHarness 사용)
     participant F as FaultInjector
     participant W1 as 워커 1
     participant W2 as 워커 2
     participant D as TestDb
     T->>H: spawn(2) + 이벤트 1건 준비
-    T->>F: block(after-claim) 설정
+    T->>F: delayAt(events.outbox_dispatcher.after_claim) 설정
     T->>W1: step() 선점 시도
     W1->>D: 조건부 UPDATE 성공
-    W1->>F: hit(after-claim) 대기
+    W1->>F: hit(events.outbox_dispatcher.after_claim) 대기
     T->>W2: step() 선점 시도
     W2->>D: 조건부 UPDATE 0행
     T->>T: 단언: 한 주체만 processing
@@ -1498,12 +1528,12 @@ flowchart TD
     T --> I["통합 (L3)"]
     S --> I
     I --> D{"앱/소켓 필요?"}
-    D -- "예" --> AH["AppHarness · GatewayHarness"]
+    D -- "예" --> AH["ApiHarness · GatewayHarness"]
     D -- "아니오" --> DH["DbHarness"]
 ```
 
 ### 13.6 코드에 요구하는 것
-- 장애 주입 지점 훅 `faults.hit('<이름>')` 를 usecase·디스패처 주요 지점에 둔다(프로덕션에서는 no-op). 호출 이름은 상수 목록으로 관리한다.
+- 장애 주입 지점 훅 `faults.hit('<이름>')` 를 usecase·디스패처 주요 지점에 둔다(프로덕션에서는 no-op). 호출 이름은 **`<모듈>.<usecase 또는 컴포넌트>.<지점>` 소문자 snake_case** 규칙의 상수 목록(`packages/testkit`)으로 관리한다(예: `events.outbox_writer.before_append`, `events.outbox_dispatcher.after_claim`, `events.message_runner.before_complete`, `guestbook.edit_entry.before_save`, `guestbook.idempotency.after_reserve`, `guestbook.<usecase>.after_load`). 08 §5 의 시나리오와 같은 이름이다.
 - `Clock`·`IdGenerator` 는 항상 포트로 받는다(§14). SQL 에서 `now()` 를 쓰지 않고 `tx.now` 를 바인딩한다(§8.2).
 - `testkit` 은 `packages/*` 규칙(B7)을 따르되 `modules/*` 를 임포트하지 않는다(모듈 시험은 각 모듈의 `test/` 에서 testkit 을 사용).
 
@@ -1523,9 +1553,10 @@ flowchart TD
 | 항목 | 규약 |
 |---|---|
 | `Clock.now()` | `Instant`(밀리초 정밀 UTC). usecase 진입 시 한 번 호출해 `tx.now` 로 고정하고, 같은 usecase 안의 모든 시각이 같은 값 |
-| `IdGenerator.next()` | **uuid v7**(앱 생성, ADR-017). 시간 정렬 가능. 같은 밀리초 내 단조성 보장(카운터 비트) |
+| `IdGenerator.next()` | **uuid v7**(앱 생성, ADR-017). 구현은 `Bun.randomUUIDv7()` 내장(실측: 시간 정렬 가능, 같은 밀리초 2000개도 생성 순서 = 문자열 순서). 별도 라이브러리 불필요 |
 | 금지 | `domain`/`service` 에서 `Date.now`, `new Date()`, `Math.random`, `crypto.randomUUID` 호출(`scripts/check-purity.ts` 문자열 검사) |
 | 허용 위치 | `SystemClock`, `UuidV7Generator` 구현 파일만 |
+| 상수 시간 비교 | `crypto.timingSafeEqual` 은 **길이가 다른 버퍼에 예외를 던진다**(Bun 1.4.4 실측). 비교 전에 양쪽을 해시(SHA-256)해 같은 길이로 만든 뒤 비교하거나 길이를 먼저 검사한다(토큰·HMAC 비교 공통 유틸 `safeEqual`) |
 | 토큰 난수 | 세션 토큰은 별도 `TokenGenerator` 포트(CSPRNG 32바이트, F10). `IdGenerator` 와 섞지 않는다 |
 | DB 시간 | `now()` 대신 바인딩된 `tx.now`. 단, 정리 잡의 "N일 전" 계산은 `Clock` 에서 계산한 컷오프를 파라미터로 넘긴다 |
 
@@ -1573,23 +1604,23 @@ flowchart TD
 
 ---
 
-## 15. 지표 · 로그 요약 (이 문서가 정의하는 이름)
+## 15. 지표 · 로그 요약 (이름·레이블의 정본은 [F17](17-ops-observability.md) §4.1)
 
 | 이름 | 종류 | 레이블 | 위치 |
 |---|---|---|---|
-| `http_requests_total` | counter | `route`, `method`, `status` | CM-03 |
-| `http_request_duration_seconds` | histogram | `route`, `method` | 공통 미들웨어(OB-01) |
-| `guard_rejections_total` | counter | `guard`, `reason` | CM-01 |
-| `rate_limit_decisions_total` | counter | `rule`, `decision` | CM-01·07 |
-| `idempotency_total` | counter | `outcome` | CM-02 |
-| `app_errors_total` | counter | `code` | CM-03 |
-| `tx_duration_seconds` | histogram | `usecase`, `outcome` | CM-05 |
-| `tx_retries_total` | counter | `reason` | CM-05 |
-| `db_pool_in_use` · `db_pool_waiting` | gauge | — | CM-05 |
-| `listener_reconnects_total` | counter | — | CM-05 |
-| `app_ready` · `app_info` | gauge | `app`, `version`, `env` | CM-06 |
-| `shutdown_duration_seconds` · `shutdown_forced_total` | histogram · counter | — | CM-06 |
-| `kv_cache_ops_total` · `presence_connections` · `rate_limit_buckets` | counter · gauge · gauge | `op`, `result` | CM-07 |
+| `pf_http_requests_total` | counter | `app`, `method`, `route`, `status_class` | CM-03 |
+| `pf_http_request_duration_seconds` | histogram | `app`, `method`, `route`, `status_class` | 공통 미들웨어(OB-01) |
+| `pf_guard_rejections_total` | counter | `app`, `guard`, `reason` | CM-01 |
+| `pf_rate_limit_decisions_total` | counter | `app`, `rule`, `decision` | CM-01·07 |
+| `pf_idempotency_total` | counter | `app`, `outcome` | CM-02 |
+| `pf_errors_total` | counter | `app`, `code` | CM-03 |
+| `pf_db_tx_duration_seconds` | histogram | `app`, `usecase`, `outcome` | CM-05 |
+| `pf_db_tx_retries_total` | counter | `app`, `reason` | CM-05 |
+| `pf_db_pool_connections` | gauge | `app`, `state` | CM-05 |
+| `pf_notify_reconnects_total` · `pf_migration_version` | counter · gauge | `app` | CM-05 |
+| `pf_app_ready` · `pf_build_info` | gauge | `app`, `version`, `commit` | CM-06 |
+| `pf_shutdown_duration_seconds` · `pf_shutdown_forced_total` | histogram · counter | `app` | CM-06 |
+| `pf_kv_cache_ops_total` · `pf_presence_connections` · `pf_rate_limit_buckets` | counter · gauge · gauge | `app`, `op`, `result` | CM-07 |
 
 **레이블 규칙**: 식별자(행위자·세션·글 id·IP)·자유 텍스트 금지. 값은 열거형 또는 라우트 템플릿(ADR-007). 로그 공통 필드: `trace_id`, `module`, `usecase`, `app`; IP·본문·토큰·쿠키 값은 기록하지 않는다.
 
@@ -1613,13 +1644,12 @@ flowchart TD
 
 ---
 
-## 17. 미결과 다른 문서와의 정합 요청
+## 17. 미결과 다른 문서와의 정합 요청 (반영 완료 기록)
 
-| 항목 | 내용 | 대상 |
-|---|---|---|
-| 가드 순서 | 이 문서는 **Origin(10) → Session(20) → RateLimit(30) → Schema(40) → Authorization(50)**. 03 §8.2 는 `Session(10) → Origin(20)…` 로 적혀 있음 | design/03 §7.1·§8.2 수정 |
-| 소유자 검사 위치 | 이 문서·design/10 은 `OwnerPolicy` 를 usecase 내부 도메인 서비스로 둠. 03 §8.2 에는 `RequireOwner` 가드가 있음 | design/03 §8.2 에서 `RequireOwner` 제거 |
-| 오류 클래스 추가 | `RequestInProgressError`(409), `IdempotencyKeyReuseError`(422), `WriteLockedError`(503), `ConfigError`, `MigrationBehindError`. 00 §4.3 표에 없음 | design/00 §4.3 |
-| `request_key.status` | 이 설계에서 커밋 시점에 항상 `done`(`in_progress` 는 후속용) | database-schema.md 설명 보강(선택) |
-| `write_lock` 테이블 | GB-10/11 이 요구. F00 §10 에 있음 | database-schema.md |
-| 미확인 | DB 드라이버(G4), Elysia 내장 TypeBox 호환, TypeBox→OpenAPI, 브라우저 검증기, Testcontainers(G9), Next on Bun 종료 처리(G3) | 각 관문 |
+> 가드 순서(Origin→Session→RateLimit→Schema→Authorization), `RequireOwner` 제거(소유 판정은 usecase 안 `OwnerPolicy`), 00 §4.3 오류 클래스 추가, `write_lock` 테이블, `request_key.status` 설명은 2026-11-04 에 03·00·database-schema 에 반영되었다. 충돌 시 정본이 우선한다.
+
+| 항목 | 상태 |
+|---|---|
+| DB 드라이버(G4), Next on Bun 종료 처리(G3), Testcontainers(G9) | 각 관문(G4 는 로컬 실측 진행) |
+| TypeBox→OpenAPI 도구 | 미확인(03 §10) |
+| `typebox` 1.x 전환 | Elysia 가 peer 범위를 넓힐 때 재검토 |

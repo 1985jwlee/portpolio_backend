@@ -11,12 +11,12 @@
 | # | 결정 | 근거 |
 |---|---|---|
 | D1 | **seq 는 채널 카운터 행**(`UPDATE … RETURNING`)으로 부여한다. 트랜잭션이 끝날 때까지 행 잠금이 유지되므로 **seq 순서 = 커밋 순서**다 | §3.2 |
-| D2 | `realtime-broadcaster` 소비자는 **동시에 하나의 러너만** 돈다(소비자별 어드바이저리 락). 이벤트 순서(outbox `seq`) = `change_log` 순서 | §3.2, RT-01 |
+| D2 | `realtime-broadcaster` 는 소비자 락 없이 러너 여러 개가 돌 수 있다. **같은 집합체(글)의 이벤트 순서는 F13 의 집합체 선두 규칙이 보장**하고, 서로 다른 집합체 사이의 `change_log` 순서는 뒤바뀌어도 된다(클라이언트는 `entryId` 단위로 적용, `seq` 는 구멍 없는 채널 순번일 뿐) | §3.2, RT-01 |
 | D3 | 휘발성 메시지(`presence`, `flow.summary`)는 **`seq` 가 없고 `change_log` 에도 쓰지 않는다**. 재개 시 최신값을 한 번 보낸다 | RT-09, RT-14 |
 | D4 | ws-gateway 는 **`SocketRuntime` 인터페이스** 뒤에서 동작한다. Elysia 는 HTTP(`/healthz`·`/readyz`·`/metrics`)와 업그레이드 사전 검사에만 쓰고, WS 송수신·큐는 앱 코드가 관리한다. G2 에서 `ElysiaRuntime` 과 `BunServeRuntime` 중 하나를 확정한다 | §3.1, ADR-022 |
 | D5 | private 의 `flow.step` 신호는 **NOTIFY + `trace_step.id` 커서 읽기 + 1초 폴링 보완** | §3.3 |
 | D6 | 같은 `(entryId, emoji)` 의 대기 중 `reaction.updated` 는 합치되, 건너뛴 `seq` 를 남은 메시지의 **`sk`(skipped) 배열**로 알린다(04 수정 요청) | §3.4, RT-06 |
-| D7 | 공개 메시지는 **순수 함수 `PublicMessageMapper`**(DB 접근 없음)가 만든다. 그래서 `entry.updated` 는 부분 갱신(`entryId`, `body`, `updatedAt`), 숨김 해제는 `entry.restored`(04 수정 요청) | RT-01, RT-16 |
+| D7 | 공개 메시지는 **순수 함수 `PublicMessageMapper`**(DB 접근 없음)가 만든다. 그래서 `entry.updated` 는 부분 갱신(`entryId`, `body`, `updatedAt`, `version`), 숨김 해제는 `entry.restored`(04 수정 요청) | RT-01, RT-16 |
 | D8 | 같은 메시지는 **전체 구독자에게 한 번만 직렬화**해 같은 문자열을 보낸다 | §3.5 |
 | D9 | 세션 검증 캐시 30초 + **연결별 30초 재검증**으로 회전·폐기 시 `4401` | RT-13 |
 | D10 | 한 세션의 private 연결 상한 3 → 초과 시 가장 오래된 연결을 `4409`. 전역 상한(`WS_MAX_CONNECTIONS`)은 **미정** | RT-15 |
@@ -32,7 +32,7 @@ flowchart LR
         BC["RealtimeBroadcaster"]
         MAP["PublicMessageMapper<br/>순수 함수"]
         CLW["ChangeLogWriter"]
-        TRM["ChangeLogTrimmer<br/>60초 주기"]
+        TRM["ChangeLogRetentionRule<br/>(RetentionRunner 가 60초 주기로 실행)"]
         FSP["flow_counter 집계<br/>EV-09"]
     end
     subgraph pg["postgres"]
@@ -104,10 +104,10 @@ flowchart LR
 | 프로세스 | realtime 책임 | 쓰는 DB 객체 |
 |---|---|---|
 | `apps/worker` | broadcaster(소비자), 변경 이력 기록·정리 | `realtime.inbox_message` W, `channel_seq` W, `change_log` W/D |
-| `apps/ws-gateway` | 소켓·허브·재개·스냅샷·private 라우팅 | `change_log` R, `entry_view`·`flow_counter` R(스냅샷), `trace_step` R, `session` R(`ResolveSession` 경유) |
+| `apps/ws-gateway` | 소켓·허브·재개·스냅샷·private 라우팅 | `change_log` R, `entry_view`·`flow_counter` R(스냅샷), `trace_step` R(**events 공개 포트 `TraceReader`** 경유 — 테이블 직접 SQL 아님), `session` R(`ResolveSession` 경유) |
 | `apps/api` | 관여하지 않음(세션 발급만 `/api/me`) | — |
 
-ws-gateway 는 **쓰기 모델을 직접 쓰지 않는다.** 읽기 모델(`*_read`)과 세션 조회만 한다. `entry_view` 는 `guestbook` 모듈의 공개 조회 포트(`guestbook` index 의 `ReadPublicEntries`)로 읽고, SQL 을 realtime 모듈이 직접 짜지 않는다(모듈 경계, design/01 B4).
+ws-gateway 는 **쓰기 모델을 직접 쓰지 않는다.** 읽기 모델(`*_read`)과 세션 조회만 한다. `entry_view` 는 `guestbook` 모듈의 공개 조회 포트(`guestbook` index 의 `ReadPublicEntries`, F12 에 등록)로, `flow_counter` 는 `events` 모듈의 공개 포트 `FlowSummaryReader` 로, `trace_step` 은 `events` 의 공개 포트 `TraceReader`(`after(cursor,limit)`)로 읽고, SQL 을 realtime 모듈이 직접 짜지 않는다(모듈 경계, design/01 B4).
 
 ## 2. 통합 클래스 다이어그램
 
@@ -148,7 +148,7 @@ classDiagram
         +minSeq(channel) int64
         +head(channel) int64
     }
-    class ChangeLogTrimmer {
+    class ChangeLogRetentionRule {
         +runOnce() int
         -maxAge Duration
         -maxRows int
@@ -170,7 +170,7 @@ classDiagram
     PublicMessageMapper ..> PublicChange
     ChangeLogWriter --> ChannelSeqRepository
     ChangeLogWriter ..> ChangeRow
-    ChangeLogTrimmer --> ChangeLogReader
+    ChangeLogRetentionRule --> ChangeLogReader
     ChangeLogReader ..> ChangeRow
 ```
 
@@ -462,7 +462,7 @@ interface SocketRuntime {
 
 채택안의 비용: 같은 채널의 쓰기가 직렬화된다. broadcaster 처리량은 글·반응 변경 빈도(초당 한 자릿수~수십)라 문제없다. 대신 **트랜잭션을 짧게** 유지한다(매핑·삽입·NOTIFY 만, 외부 호출 없음).
 
-D2: 소비자 러너를 여러 개 돌려도 카운터 행 잠금 때문에 안전하지만, **이벤트 순서(outbox `seq`)와 `change_log` 순서가 달라질 수 있다**(러너 A 가 이벤트 5, 러너 B 가 이벤트 4 를 처리하면 4 가 늦게 기록). 같은 글의 `posted → edited → hidden` 순서가 뒤집히면 안 되므로 `realtime-broadcaster` 소비자는 **소비자 이름으로 어드바이저리 락**을 잡아 한 번에 하나의 러너만 선점·처리한다(배치 안에서도 outbox `seq` 오름차순).
+D2: 러너를 여러 개 돌려도 카운터 행 잠금 때문에 `seq` 는 안전하다. 이벤트 순서(outbox `seq`)와 `change_log` 순서는 **다른 집합체 사이에서는** 달라질 수 있지만(러너 A 가 이벤트 5, 러너 B 가 이벤트 4 를 처리하면 4 가 늦게 기록), 같은 글의 `posted → edited → hidden` 순서는 [F13](13-events-pipeline.md) 의 **집합체 선두 규칙**(앞 이벤트가 `processed` 가 아니면 같은 집합체의 뒤 이벤트를 선점하지 않는다)이 지킨다. 그래서 소비자 이름 어드바이저리 락은 두지 않는다 — 처리량과 복잡도 모두 이득이 없다.
 
 ```sql
 -- realtime_read.channel_seq (채널당 1행, 마이그레이션에서 'public' 행 미리 삽입)
@@ -482,9 +482,9 @@ RETURNING last_seq;           -- 이 행 잠금이 트랜잭션 커밋까지 유
 | NOTIFY 만 | 거의 0 | 낮음 | 단순 | 신호 유실(연결 끊김) 시 단계가 영영 안 옴 |
 | **NOTIFY + 커서 읽기 + 1초 폴링 보완** | 거의 0, 유실 시 ≤1초 | 낮음 | public 과 같은 `WakeSignal` 재사용 | **채택** |
 
-- 읽기 쿼리: `SELECT … FROM events.trace_step WHERE id > $cursor ORDER BY id LIMIT 500` 을 전체에 대해 **한 번**만 하고, 메모리에서 `PrivateRouter` 에 등록된 `owner_key` 만 골라 전달한다. 연결별 쿼리는 없다.
+- 읽기 쿼리(events 의 공개 포트 `TraceReader.after(cursor, limit)` 가 실행하는 SQL): `SELECT … FROM events.trace_step WHERE id > $cursor ORDER BY id LIMIT 500` 을 전체에 대해 **한 번**만 하고, 메모리에서 `PrivateRouter` 에 등록된 `owner_key` 만 골라 전달한다. 연결별 쿼리는 없다.
 - 커밋 순서 문제: `trace_step.id`(identity)는 커밋 순서와 다를 수 있어 **건너뜀이 가능**하다. 대응: 매 읽기에서 `id > cursor - 200` 으로 겹쳐 읽고, `PrivateRouter` 의 연결별 최근 `(traceId, step)` 집합으로 중복을 제거한다. 클라이언트도 `(traceId, step)` 으로 중복 제거한다(04 §5).
-- 필요한 스키마: `trace_step.id bigint identity` (현재 컬럼 목록에 없음 → §7 요청). `NOTIFY trace_changed` 페이로드는 `sha256(ownerKey)` 앞 8자(내부 라우팅 힌트)이며 비워도 동작한다(깨우기 신호).
+- 필요한 스키마: `trace_step.id bigint identity` (database-schema §4-3 에 반영됨). `NOTIFY trace_changed` 페이로드는 `sha256(ownerKey)` 앞 8자(내부 라우팅 힌트)이며 비워도 동작한다(깨우기 신호).
 
 ### 3.4 합치기와 `sk` (D6)
 
@@ -534,7 +534,7 @@ for (const conn of subscribers) conn.queue.offer({ frame, bytes, coalesceKey, se
 |---|---|
 | 목적 | 도메인 이벤트를 **공개 변경**으로 바꿔 순번을 붙이고 이력에 남긴다 |
 | 트리거 | `realtime.inbox_message` 의 `entry.*`·`reaction.changed` (소비자 `realtime-broadcaster`) |
-| 사전 조건 | inbox 선점 성공(`claim_token`), 이 소비자의 어드바이저리 락 보유(D2) |
+| 사전 조건 | inbox 선점 성공(`claim_token`), 집합체 선두 규칙 통과(F13 §3.3, D2) |
 | 사후 조건 | 매핑 대상이면 `change_log` 에 1행 + `NOTIFY`, inbox `processed` — **한 트랜잭션** |
 | 접근 테이블 | `inbox_message` W, `channel_seq` W, `change_log` W |
 | 이벤트→메시지 | `entry.posted→entry.created`, `entry.edited→entry.updated`, `entry.deleted→entry.removed(deleted)`, `entry.hidden→entry.removed(hidden)`, `entry.unhidden→entry.restored`, `reaction.changed→reaction.updated`, `report.*` 는 구독하지 않음 |
@@ -618,7 +618,7 @@ flowchart TD
 | DB 일시 오류 | `TransientError` → 재시도(ADR-023 백오프) |
 | `LeaseLostError` | 롤백, 다른 러너가 이어서 처리 |
 
-지표/로그: `realtime_broadcast_total{type}`, `realtime_broadcast_lag_seconds`(이벤트 `occurredAt` → 기록 시각), 로그 `module=realtime usecase=broadcast event_type, change_seq`(본문·식별자 없음).
+지표/로그: `pf_realtime_broadcast_total{type}`, `pf_realtime_broadcast_lag_seconds`(이벤트 `occurredAt` → 기록 시각), 로그 `module=realtime usecase=broadcast event_type, change_seq`(본문·식별자 없음).
 시험: AC-008 전제(순번 연속), AC-003 형태(같은 이벤트 재전달 시 `change_log` 중복 없음), 동시 러너 2개에서도 이벤트 순서 유지(08 §5 동시성).
 
 ### RT-02. change_log 순번 부여와 정리
@@ -626,7 +626,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 목적 | 채널별 단조 `seq` 부여(D1), 이력 보관 제한(1시간·채널당 1만 행) |
-| 트리거 | RT-01(쓰기), `ChangeLogTrimmer` 60초 주기(삭제) |
+| 트리거 | RT-01(쓰기), `RetentionRunner`(F13 EV-10)가 실행하는 realtime 소유 `ChangeLogRetentionRule`, 60초 주기(삭제) |
 | 사전 조건 | `channel_seq` 에 채널 행이 있음(마이그레이션이 `public` 삽입) |
 | 사후 조건 | 쓰기: 연속·구멍 없는 seq / 정리: `minSeq` 증가 |
 | 접근 테이블 | `channel_seq` W, `change_log` W/D |
@@ -641,7 +641,7 @@ classDiagram
         +next(tx, channel) int64
     }
     class PostgresChannelSeqRepository
-    class ChangeLogTrimmer {
+    class ChangeLogRetentionRule {
         +runOnce() int
     }
     class RetentionRule {
@@ -656,7 +656,7 @@ classDiagram
     ChannelSeqRepository <|.. PostgresChannelSeqRepository
     ChangeLogWriter --> ChannelSeqRepository
     RetentionRule <|.. ChangeLogRetentionRule
-    ChangeLogTrimmer --> ChangeLogRetentionRule
+    ChangeLogRetentionRule --> ChangeLogRetentionRule
 ```
 
 ```mermaid
@@ -664,7 +664,7 @@ sequenceDiagram
     participant W as ChangeLogWriter
     participant S as channel_seq
     participant L as change_log
-    participant T as ChangeLogTrimmer
+    participant T as ChangeLogRetentionRule
     W->>S: UPDATE last_seq + 1 RETURNING (행 잠금 시작)
     S-->>W: 1043
     W->>L: INSERT (public, 1043, type, payload, event_id)
@@ -688,7 +688,7 @@ flowchart TD
     F --> Z
 ```
 
-오류: 트리머 실패는 다음 주기에 재시도(삭제는 멱등). 지표: `realtime_changelog_head{channel}`, `realtime_changelog_min_seq{channel}`, `realtime_changelog_rows{channel}`, `retention_deleted_total{table}`.
+오류: 트리머 실패는 다음 주기에 재시도(삭제는 멱등). 지표: `pf_changelog_head{channel}`, `pf_changelog_min_seq{channel}`, `pf_changelog_rows{channel}`, `retention_deleted_total{table}`.
 시험: 쓰기 롤백 시 seq 재사용(구멍 없음), 동시 쓰기 100건의 seq 가 연속·유일, 정리 후 `minSeq` 가 보관 규칙과 일치.
 
 ### RT-03. public 소켓 (업그레이드·hello·welcome·live)
@@ -791,7 +791,7 @@ flowchart TD
 | `4400` | hello 없음·형식 오류·바이너리·버전 불일치 |
 | `4429` | 클라이언트 메시지 초당 10건 초과 |
 
-지표/로그: `ws_connections{channel="public"}` 게이지, `ws_open_total`, `ws_close_total{channel,code}`, 로그 `connId`(무작위, 세션과 무관), **IP 기록 없음**.
+지표/로그: `pf_ws_connections{channel="public"}` 게이지, `pf_ws_connects_total`, `pf_ws_disconnects_total{channel,code}`, 로그 `connId`(무작위, 세션과 무관), **IP 기록 없음**.
 시험: 04 §7.1 시퀀스 통합 시험, hello 지연·형식 오류 종료 코드, Origin 거절(08 §6).
 
 ### RT-04. 재개 (replay / snapshot 판단)
@@ -891,7 +891,7 @@ flowchart TD
 ```
 
 핵심 불변식: **구독(버퍼링)을 먼저 시작하고 나서 재생을 읽는다.** 반대 순서면 그 사이 변경이 사라진다. 버퍼의 중복(seq ≤ 재생 끝)은 버린다.
-지표: `ws_resume_total{mode="replay|snapshot", reason}`, `ws_replay_messages` 히스토그램. 시험: AC-008 — 건너뜀·이력 부족·처음 접속 3경로, 재생 중 정리, `resume > head`.
+지표: `pf_ws_resume_total{mode="replay|snapshot", reason}`, `pf_ws_replay_messages` 히스토그램. 시험: AC-008 — 건너뜀·이력 부족·처음 접속 3경로, 재생 중 정리, `resume > head`.
 
 ### RT-05. 스냅샷 구성
 
@@ -968,7 +968,7 @@ flowchart TD
     H --> I
 ```
 
-지표: `ws_snapshot_build_seconds`, `ws_snapshot_bytes`. 시험: 스냅샷 직후 `head+1` 부터 이어짐(중복·누락 없음), 스냅샷에 개인 필드(`isMine` 등) 없음(AC-009).
+지표: `pf_ws_snapshot_build_seconds`, `pf_ws_snapshot_bytes`. 시험: 스냅샷 직후 `head+1` 부터 이어짐(중복·누락 없음), 스냅샷에 개인 필드(`isMine` 등) 없음(AC-009).
 
 ### RT-06. 팬아웃·송신 큐·합치기·4408
 
@@ -1081,7 +1081,7 @@ flowchart TD
 | `4408` | 느린 소비자 — 클라이언트 즉시 재접속 + `resume` |
 | `4500` | 전송 반복 실패 |
 
-지표: `ws_send_queue_length` 히스토그램, `ws_send_queue_bytes`, `ws_queue_overflow_total`, `ws_coalesced_total`, `ws_messages_sent_total{channel,type}`, `ws_fanout_seconds`(읽기→모든 큐 적재).
+지표: `pf_ws_send_queue_length` 히스토그램, `pf_ws_send_queue_bytes`, `pf_ws_queue_overflow_total`, `pf_ws_coalesced_total`, `pf_ws_messages_sent_total{channel,type}`, `pf_ws_fanout_seconds`(읽기→모든 큐 적재).
 시험(08 §6): 느린 소비자 격리(다른 연결 p99 영향 없음), **앱 큐가 4408 을 내림**(Elysia 옵션 무시 회귀 방지), 합치기 후 클라이언트 `SeqTracker` 가 gap 으로 오인하지 않음, 팬아웃 직렬화 1회 검증(스파이).
 
 ### RT-07. private 소켓
@@ -1178,7 +1178,7 @@ flowchart TD
 | `4401` | 연결 도중 세션 폐기·회전 감지(RT-13) |
 | `4409` | 세션당 연결 수 초과로 밀려남 |
 
-지표: `ws_connections{channel="private"}`, `ws_session_cache_total{result="hit|miss|negative"}`. 로그: `connId`, `actorKind` — 세션 ID·토큰·`ownerKey` 원문 기록 금지.
+지표: `pf_ws_connections{channel="private"}`, `pf_ws_session_cache_total{result="hit|miss|negative"}`. 로그: `connId`, `actorKind` — 세션 ID·토큰·`ownerKey` 원문 기록 금지.
 시험(08 §6.x): 쿠키 없이 401, 익명 세션 수신, 서로 다른 세션 분리, 4번째 연결 → 가장 오래된 `4409`.
 
 ### RT-08. private 라우팅 (`flow.step`)
@@ -1266,7 +1266,7 @@ flowchart TD
 ```
 
 개인정보: `detail` 에는 본문이 없다(database-schema §4-3). `flow.step` 에 `ownerKey`·세션·IP 를 싣지 않는다. 전달은 **서버에서 소유자 필터링**한다(클라이언트 필터링 금지, AC-009).
-지표: `realtime_flow_step_delivered_total`, `realtime_trace_watch_lag_seconds`. 시험: 타 세션이 받지 못함, 겹침 읽기에서 중복 없음, 커밋 순서 뒤집힘(id 건너뜀) 시나리오에서 단계 누락 없음.
+지표: `pf_flow_step_delivered_total`, `pf_trace_watch_lag_seconds`. 시험: 타 세션이 받지 못함, 겹침 읽기에서 중복 없음, 커밋 순서 뒤집힘(id 건너뜀) 시나리오에서 단계 누락 없음.
 
 ### RT-09. 접속자 수
 
@@ -1438,7 +1438,7 @@ sequenceDiagram
     alt 유예 시간 초과
         G->>R: 남은 연결 강제 종료
     end
-    G->>R: stop
+    G->>R: stop (await 없이 호출했던 stop 의 완료 대기, 타임아웃 포함)
     G-->>O: 종료 코드 0
 ```
 
@@ -1454,14 +1454,14 @@ flowchart TD
     H --> G
 ```
 
-지표: `ws_shutdown_connections`(종료 시점 연결 수), `ws_shutdown_forced_total`. 시험(08 §6): SIGTERM → `bye` → `1001` → 클라이언트가 새 인스턴스로 `resume`, 강제 종료 경로, 유예 시간 주입.
+**실측 주의(Bun 1.4.4)**: `await server.stop()` 은 열린 WebSocket 이 있으면 **영원히 끝나지 않는다**. 종료 순서는 ① `stop()` 을 **await 없이** 호출(신규 수락 중단) → ② 각 소켓에 `bye` 후 `close(1001)` → ③ 유예 시간(타임아웃) 안에 모두 닫히기를 기다린 뒤 `stop()` 의 완료를 기다림. 타임아웃 후 `stop(true)` 강제 종료 경로는 미확인(G2). 지표: `pf_ws_shutdown_connections`(종료 시점 연결 수), `pf_ws_shutdown_forced_total`. 시험(08 §6): SIGTERM → `bye` → `1001` → 클라이언트가 새 인스턴스로 `resume`, 강제 종료 경로, 유예 시간 주입.
 
 ### RT-12. 깨우기 신호 수신 (LISTEN + 폴링)
 
 | 항목 | 내용 |
 |---|---|
 | 목적 | 변경 직후 지연 없이 읽되, **신호 유실에도 1초 안에 따라잡게** 한다 |
-| 구성 | 전용 LISTEN 연결 1개(G4 에서 드라이버 확인) — `realtime_changed`, `trace_changed` 구독. 1초 폴링 타이머 |
+| 구성 | 전용 LISTEN 연결 1개(Bun.sql — G4 실측에서 연결 종료·서버 재시작 모두 자동 재구독 확인) — `realtime_changed`, `trace_changed` 구독. 1초 폴링 타이머 |
 | 동작 | 신호/타이머 → `onWake()` → 단일 비행: 읽는 중이면 `dirty` 표시, 끝나면 한 번 더 |
 | 재연결 | LISTEN 연결이 끊기면 백오프 재연결 후 **즉시 한 번 읽는다**(그 사이 신호 유실 보상) |
 | 읽기 범위 | `seq > lastRead` 를 500건씩 반복. NOTIFY 페이로드의 seq 는 힌트일 뿐 신뢰하지 않는다 |
@@ -1528,7 +1528,7 @@ flowchart TD
     E -- "아니오" --> Z["대기"]
 ```
 
-지표: `realtime_wake_total{source="notify|poll"}`, `realtime_listen_reconnect_total`. 시험: NOTIFY 를 막아도 1초 안에 전달(AC-008 보조), 연결 끊김 후 보상 읽기, 단일 비행(동시 두 읽기 없음).
+지표: `pf_ws_wake_total{source="notify|poll"}`, `pf_notify_reconnects_total`. 시험: NOTIFY 를 막아도 1초 안에 전달(AC-008 보조), 연결 끊김 후 보상 읽기, 단일 비행(동시 두 읽기 없음).
 
 ### RT-13. 세션 검증 캐시와 재검증
 
@@ -1606,7 +1606,7 @@ flowchart TD
 ```
 
 참고: 세션 `last_seen_at` 갱신(ID-03)은 소켓 업그레이드로 인한 쓰기 폭주를 막기 위해 **gateway 가 하지 않는다**(`ResolveSession` 에 `touch=false` 옵션).
-지표: `ws_session_cache_total{result}`, `ws_session_revalidate_closed_total`. 시험: 로그인 후 이전 익명 세션의 private 이 30초 이내 `4401`, 캐시 적중 시 DB 호출 없음, 음성 캐시 5초.
+지표: `pf_ws_session_cache_total{result}`, `pf_ws_session_revalidate_closed_total`. 시험: 로그인 후 이전 익명 세션의 private 이 30초 이내 `4401`, 캐시 적중 시 DB 호출 없음, 음성 캐시 5초.
 
 ### RT-14. 흐름 요약 주기 푸시
 
@@ -1675,7 +1675,7 @@ flowchart TD
     F --> G["허브가 한 번 직렬화해 전송"]
 ```
 
-프라이버시: 메시지에는 `at`·`step`·`count` 만 있다. 스키마가 `additionalProperties:false` 라 식별자 필드가 들어갈 수 없다(AC-009). 지표: `realtime_flow_summary_push_total`. 시험: 값 불변이면 푸시 없음, 스냅샷의 `flow` 와 동일 형식.
+프라이버시: 메시지에는 `at`·`step`·`count` 만 있다. 스키마가 `additionalProperties:false` 라 식별자 필드가 들어갈 수 없다(AC-009). 지표: `pf_flow_summary_push_total`. 시험: 값 불변이면 푸시 없음, 스냅샷의 `flow` 와 동일 형식.
 
 ### RT-15. 연결 수 제한
 
@@ -1740,7 +1740,7 @@ flowchart TD
     E -- "아니오" --> OK
 ```
 
-주의: 탭이 둘이어도 public 은 탭마다 하나씩 열린다(상한 없음, 전역/nginx 에 의존). 지표: `ws_limit_rejected_total{reason}`, `ws_evicted_total`. 시험: 세션당 4번째 연결, 전역 상한 503, 해제 후 카운트 복원.
+주의: 탭이 둘이어도 public 은 탭마다 하나씩 열린다(상한 없음, 전역/nginx 에 의존). 지표: `pf_ws_limit_rejected_total{reason}`, `pf_ws_evicted_total`. 시험: 세션당 4번째 연결, 전역 상한 503, 해제 후 카운트 복원.
 
 ### RT-16. 공개 변환 (식별자 제거)
 
@@ -1836,27 +1836,27 @@ flowchart TD
 
 | 지표 | 종류 | 레이블 |
 |---|---|---|
-| `ws_connections` | 게이지 | `channel` |
-| `ws_open_total` / `ws_close_total` | 카운터 | `channel`, `code` |
-| `ws_messages_sent_total` | 카운터 | `channel`, `type` |
-| `ws_send_queue_length` / `ws_send_queue_bytes` | 히스토그램 | — |
-| `ws_queue_overflow_total` | 카운터 | — |
-| `ws_coalesced_total` | 카운터 | — |
-| `ws_fanout_seconds` | 히스토그램 | — |
-| `ws_resume_total` | 카운터 | `mode`, `reason` |
-| `ws_snapshot_build_seconds` / `ws_snapshot_bytes` | 히스토그램 | — |
-| `ws_session_cache_total` | 카운터 | `result` |
-| `ws_session_revalidate_closed_total` | 카운터 | — |
-| `ws_presence` | 게이지 | — |
-| `ws_limit_rejected_total` / `ws_evicted_total` | 카운터 | `reason` |
-| `ws_shutdown_connections` / `ws_shutdown_forced_total` | 게이지/카운터 | — |
-| `realtime_broadcast_total` | 카운터 | `type` |
-| `realtime_broadcast_lag_seconds` | 히스토그램 | — |
-| `realtime_changelog_head` / `_min_seq` / `_rows` | 게이지 | `channel` |
-| `realtime_wake_total` | 카운터 | `source` |
-| `realtime_listen_reconnect_total` | 카운터 | — |
-| `realtime_flow_step_delivered_total` | 카운터 | — |
-| `realtime_trace_watch_lag_seconds` | 히스토그램 | — |
+| `pf_ws_connections` | 게이지 | `channel` |
+| `pf_ws_connects_total` / `pf_ws_disconnects_total` | 카운터 | `channel`, `code` |
+| `pf_ws_messages_sent_total` | 카운터 | `channel`, `type` |
+| `pf_ws_send_queue_length` / `pf_ws_send_queue_bytes` | 히스토그램 | — |
+| `pf_ws_queue_overflow_total` | 카운터 | `channel` |
+| `pf_ws_coalesced_total` | 카운터 | — |
+| `pf_ws_fanout_seconds` | 히스토그램 | — |
+| `pf_ws_resume_total` | 카운터 | `mode`, `reason` |
+| `pf_ws_snapshot_build_seconds` / `pf_ws_snapshot_bytes` | 히스토그램 | — |
+| `pf_ws_session_cache_total` | 카운터 | `result`(`hit`,`miss`,`negative`) |
+| `pf_ws_session_revalidate_closed_total` | 카운터 | — |
+| `pf_presence_connections` | 게이지 | — |
+| `pf_ws_limit_rejected_total` / `pf_ws_evicted_total` | 카운터 | `reason` |
+| `pf_ws_shutdown_connections` / `pf_ws_shutdown_forced_total` | 게이지/카운터 | — |
+| `pf_realtime_broadcast_total` | 카운터 | `type` |
+| `pf_realtime_broadcast_lag_seconds` | 히스토그램 | — |
+| `pf_changelog_head` / `_min_seq` / `_rows` | 게이지 | `channel` |
+| `pf_ws_wake_total` | 카운터 | `source` |
+| `pf_notify_reconnects_total` | 카운터 | — |
+| `pf_flow_step_delivered_total` | 카운터 | — |
+| `pf_trace_watch_lag_seconds` | 히스토그램 | — |
 
 로그 공통 필드: `module=realtime`, `connId`(연결마다 새로 만든 무작위 uuid), `channel`, `code`. **IP·세션 ID·토큰·`ownerKey`·본문은 기록하지 않는다.**
 
@@ -1879,7 +1879,7 @@ flowchart TD
 | 대상 | 요청 | 사유 |
 |---|---|---|
 | database-schema §5-3 | `realtime_read.channel_seq (channel pk, last_seq bigint)` 신설 | D1 |
-| database-schema §5-3 | `change_log.event_id uuid` + 유일 `(channel, event_id)` | 재처리 시 중복 방지 |
+| database-schema §5-3 | `change_log.event_id uuid` + **`UNIQUE (event_id)`** 단독 (한 이벤트는 한 채널에만 나간다; database-schema §5-3 정본) | 재처리 시 중복 방지 |
 | database-schema §4-3 | `events.trace_step.id bigint identity` (+ 인덱스) | 커서 읽기(D5) |
 | 04 §2 | 봉투에 선택 필드 `sk: int64[]` | D6 합치기 |
 | 04 §3.2·§9.2 | `Presence`·`FlowSummary` 를 `VolatileMessage`(순번 없음)로, `entry.updated` 를 부분 갱신 `{entryId, body, updatedAt, version}` 으로, `entry.restored {entryId}` 추가 | D3, D7 |

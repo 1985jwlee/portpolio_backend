@@ -110,14 +110,14 @@ modules/<name>/
 | `identity` | `identity` | — | — | `db`, `config` |
 | `guestbook` | `guestbook` | `guestbook_read` | `guestbook-projector` | `identity` 공개 usecase(세션 확인), `events` 공개 포트(outbox 기록) |
 | `events` | `events` | `events_read` | — (주기 집계) | `db`, `protocol` |
-| `realtime` | `realtime`(inbox) | `realtime_read` | `realtime-broadcaster` | `identity` 공개 usecase, `protocol` |
+| `realtime` | `realtime`(inbox) | `realtime_read` | `realtime-broadcaster` | `identity` 공개 usecase(`ResolveSession`), `guestbook` 공개 포트(`ReadPublicEntries`, 스냅샷), `events` 공개 포트(`FlowSummaryReader`·`TraceReader`), `protocol` |
 | `observability` | — | — | — | `config` |
 
-순환 의존 금지. 위반은 CI 의 임포트 경계 검사로 실패시킨다(ADR-001).
+`worker` 엔트리포인트는 정리 잡을 위해 `identity` 공개 usecase(`ListExpiredSessionIds`·`DeleteSessions`)도 조립한다(모듈 간 호출은 항상 상대 모듈의 공개 `index` 로만). 순환 의존 금지. 위반은 CI 의 임포트 경계 검사로 실패시킨다(ADR-001).
 
 ## 5. 요청 경로 (M1 초안)
 
-REST 와 WebSocket 계약의 **정본은 `packages/protocol`** 이다. 아래는 종류의 지도다.
+REST 와 WebSocket 계약의 **정본은 `packages/protocol`** 이고 문서로는 [design/03](../design/03-api-contract.md)·[04](../design/04-ws-protocol.md) 가 상세다. 아래 표는 그 **파생 지도**(종류만)다.
 
 ### REST — 명령 (`usecase/command`)
 | 경로 | 인증 | 하는 일 |
@@ -128,7 +128,9 @@ REST 와 WebSocket 계약의 **정본은 `packages/protocol`** 이다. 아래는
 | `POST /api/entries/{id}/reports` | 익명 허용 | `ReportEntry` |
 | `POST /api/admin/entries/{id}/hide` · `unhide` | **허용목록 관리자** | `HideEntry`: 버전 조건 갱신 + 조치 이력 + outbox |
 | `POST /api/admin/reports/{id}/resolve` | 관리자 | `ResolveReport`: `open → resolved` 조건부 갱신 |
-| `GET /api/auth/github` · `/callback`, `POST /api/auth/logout` | — | 로그인 흐름 |
+| `GET /api/auth/github` · `/callback`, `POST /api/auth/logout`(`Idempotency-Key` 면제) | — | 로그인 흐름 |
+| `POST /api/admin/write-lock` | 관리자 | `SetWriteLock`: 긴급 쓰기 잠금 |
+| `PUT /api/me/profile` | 로그인 | `UpdateProfile` |
 
 **모든 쓰기 요청은 클라이언트가 만든 요청 식별자를 받는다.** 같은 식별자의 재요청은 같은 결과를 돌려준다(ADR-014, 연결이 끊긴 사이 재시도 안전).
 
@@ -136,8 +138,9 @@ REST 와 WebSocket 계약의 **정본은 `packages/protocol`** 이다. 아래는
 | 경로 | 인증 | 읽는 곳 |
 |---|---|---|
 | `GET /api/entries` | 익명 허용 | `guestbook_read.entry_view` (커서) |
-| `GET /api/me` | 로그인 | 세션 확인(명령 쪽 보조 조회, 예외) |
+| `GET /api/me` | 익명 허용(**익명 세션 발급**) | 세션 확인(명령 쪽 보조 조회, 예외) |
 | `GET /api/admin/reports` | 관리자 | `guestbook_read.report_queue` |
+| `GET /api/flow/summary` · `/api/flow/trace/{id}` | 익명 허용 / 행위자 본인 | `events_read.flow_counter` / `events.trace_step`(공개 포트 `GetTrace`) |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | **내부 전용** | probe·지표. 프록시에서 외부 차단 |
 
 ### WebSocket
@@ -192,7 +195,7 @@ sequenceDiagram
 | inbox 처리 | PK 로 중복 수신 차단, 항목 선점 + 토큰 완료 | 중복은 무시, 선점 실패는 건너뜀 |
 | 임대 만료 | 회수 작업이 `processing` 을 기대 상태로 되돌림 | 늦게 온 이전 주체의 완료는 0행으로 거절 |
 | 글 수정·숨김 | `version` 조건 갱신 | 409 + 최신 상태 |
-| 반응 추가 | 유일 키 | 중복은 409 |
+| 반응 추가 | 유일 키 | 중복은 무시(`200` 멱등, 이벤트 없음) |
 | 신고 처리 | `open → resolved` 조건부 갱신 | 한 명만 성공 |
 | 읽기 모델 갱신 | 행의 `last_seq` 비교 | 오래된 이벤트 무시 |
 | 외부 호출(후속 Phase) | 선점 트랜잭션과 완료 트랜잭션 사이에 호출, 호출 동안 행 잠금 없음 | |

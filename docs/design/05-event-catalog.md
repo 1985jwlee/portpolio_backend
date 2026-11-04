@@ -20,6 +20,7 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 | `payload` | object | 종류별 본문 (§2) |
 
 - 봉투에 **IP·토큰·원본 쿠키 값이 들어가지 않는다.**
+- 봉투의 모든 필드는 outbox·inbox 행의 **컬럼으로 저장**된다(`schema_version`, `occurred_at`, `aggregate_type/id/version`, `trace_id`, `owner_key`; `payload` 는 본문만 — database-schema §4-3·§4-5). 소비자는 inbox 행만으로 Upcaster 판정과 `version`·행위자 반영을 할 수 있다.
 - `ownerKey` 는 **내부 행위자 키와 같은 값**(`session:<id>` / `user:<id>`)이다. 별도 해시·변환 계층을 두지 않는다(형식이 둘이면 매핑 계층이 필요해진다). 이 값은 서버 내부(DB·워커·gateway 내부)에서만 돌고 **공개 변환에서 항상 삭제**된다(AC-009). 세션 ID 는 DB 의 uuid 이지 쿠키 토큰이 아니다.
 
 ## 2. 이벤트 종류 (M1)
@@ -30,7 +31,7 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 | `entry.edited` | guestbook | `EditEntry` | `entryId`, **`body`(전체)**, `updatedAt` |
 | `entry.deleted` | guestbook | `DeleteEntry` | `entryId` |
 | `entry.hidden` | guestbook | `HideEntry` | `entryId`, `actionId` |
-| `entry.unhidden` | guestbook | `HideEntry`(해제) | `entryId`, `actionId` — **공개 변환에서 `entry.restored`(04)가 된다** |
+| `entry.unhidden` | guestbook | `UnhideEntry` | `entryId`, `actionId` — **공개 변환에서 `entry.restored`(04)가 된다** |
 | `reaction.changed` | guestbook | `AddReaction`/`RemoveReaction` | `entryId`, `emoji`, `op`(`added`\|`removed`), **`count`**(변경 후 이 이모지의 총개수) |
 | `report.filed` | guestbook | `ReportEntry` | `reportId`, `entryId`, `reasonCode`, `excerpt`(앞 80자, **관리자 큐 전용**) — 신고자 `note` 는 싣지 않는다(`guestbook.report.note` 에만 둔다) |
 | `report.resolved` | guestbook | `ResolveReport` | `reportId`, `resolution`(`dismissed`\|`entry_hidden`) |
@@ -44,7 +45,7 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 
 | 소비자 | 소유 모듈 | 구독 `type` | 효과 |
 |---|---|---|---|
-| `guestbook-projector` | guestbook | `entry.*`, `reaction.changed`, `report.*` | `entry_view`·`report_queue` 갱신 (`last_seq` 검사) |
+| `guestbook-projector` | guestbook | `entry.*`, `reaction.changed`, `report.*` | `entry_view`·`my_reaction`·`report_queue` 갱신 (필드별 순번 검사; `entry.deleted` 는 본문·반응을 비움) |
 | `realtime-broadcaster` | realtime | `entry.*`, `reaction.changed` | `change_log` 기록(채널 seq 부여) → 공개 메시지 생성 |
 | `trace-recorder` (디스패처 내부) | events | 전부 | `trace_step`(`dispatched`/`received`/`processed`…) 기록 — 이벤트가 아닌 단계 기록 |
 
@@ -199,9 +200,9 @@ flowchart TD
     C -- "최신보다 높음" --> F1["PermanentError → dead<br/>(배포 순서 오류)"]
     C -- "낮음" --> UP["Upcaster 체인으로 최신화"]
     C -- "같음" --> D
-    UP --> D{"읽기 모델 행 last_seq ≥ envelope.seq ?"}
-    D -- "예 (오래된 이벤트)" --> S2["효과 없이 processed"]
-    D -- "아니오" --> E["읽기 모델 갱신 + last_seq 갱신"]
+    UP --> D{"읽기 모델 해당 필드 순번 ≥ envelope.seq ?"}
+    D -- "예 (오래된 이벤트)" --> S2["그 필드는 효과 없이 processed"]
+    D -- "아니오" --> E["읽기 모델 갱신 + 해당 필드 순번 갱신"]
     E --> G{"claim_token 일치?"}
     G -- "예" --> OK["processed (같은 tx)"]
     G -- "아니오 (LeaseLost)" --> R["tx 롤백, 결과 폐기"]
@@ -216,7 +217,7 @@ stateDiagram-v2
     new --> processing : 선점(CAS)
     processing --> published : 완료(토큰 일치)
     processing --> new : 임대 만료 회수 / 일시 오류 (next_attempt_at)
-    processing --> dead : max_attempts 초과 / 영구 오류
+    processing --> dead : 8회째 실패(attempts ≥ max_attempts) / 영구 오류
     published --> [*] : 7일 후 삭제
     dead --> new : 관리 스크립트 재투입
     dead --> [*] : 30일 후 삭제

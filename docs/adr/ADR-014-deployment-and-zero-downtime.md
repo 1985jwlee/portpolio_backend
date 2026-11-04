@@ -27,8 +27,8 @@ sequenceDiagram
     G-->>C: 변경 메시지 seq 41, 42, 43
     Note over C,G: 배포로 ws-gateway 재시작 (종료 예고를 보낼 수 있으면 보낸다)
     C->>C: 연결 끊김 감지, 백오프 + 무작위 지연 후 재접속
-    C->>G: 재접속 + 세션 토큰 + 마지막 수신 seq 43
-    G->>D: 세션 확인, seq 43 이후 이력 조회
+    C->>G: 재접속(세션 쿠키 자동 첨부) + hello { resume: 43 }
+    G->>D: seq 43 이후 이력 조회 (public 은 세션 불필요, private 연결은 별도로 세션 확인)
     alt 이력이 남아 있음
         D-->>G: seq 44, 45
         G-->>C: 놓친 변경 재전송 44, 45

@@ -384,7 +384,7 @@ classDiagram
 | 상태 | `status`, `status_seq` | `entry.posted`(초기), `entry.hidden`, `entry.unhidden`, `entry.deleted` | `status_seq < $seq` |
 | 반응 | `reactions`(jsonb 개수), `reaction_seq`(jsonb 이모지별 순번) | `reaction.changed` | `COALESCE((reaction_seq ->> $emoji)::bigint, 0) < $seq` |
 
-- **왜 행 하나의 `last_seq` 로는 안 되는가.** `database-schema.md` 는 행마다 `last_seq` 하나를 둔다. 그러면 병렬 워커가 `entry.hidden`(seq 11)을 먼저 처리한 뒤 `entry.edited`(seq 10)가 오면 10 < 11 이라 **본문 수정이 영영 버려진다**(다른 필드인데도). 반응도 같다. 부분별 순번이면 서로 방해하지 않는다.
+- **왜 행 하나의 `last_seq` 로는 안 되는가.** (초기 설계는 행마다 `last_seq` 하나였고, 현재 `database-schema.md` §5-1 은 필드별 순번을 정의한다.) 행 하나의 순번만 쓰면 병렬 워커가 `entry.hidden`(seq 11)을 먼저 처리한 뒤 `entry.edited`(seq 10)가 오면 10 < 11 이라 **본문 수정이 영영 버려진다**(다른 필드인데도). 반응도 같다. 부분별 순번이면 서로 방해하지 않는다.
 - `last_seq` 컬럼은 남긴다: 진단용(`GREATEST` 로 유지)이며 가드에는 쓰지 않는다.
 - 보조 테이블(`my_reaction`, `report_queue`)은 키 단위 가드: `my_reaction.last_seq`(키 = `entry_id, actor_key, emoji`), `report_queue.last_seq`(키 = `report_id`).
 
@@ -409,16 +409,34 @@ classDiagram
 
 ### 3.4 프로젝터 한 건의 트랜잭션 형태
 
+러너(F13 T5)가 만든 트랜잭션 안에서 **완료 갱신을 먼저** 하고 핸들러가 이어서 돈다(임대를 잃었으면 효과 적용 전에 0행으로 알고 롤백, 갱신한 inbox 행의 잠금이 커밋까지 유지되어 reaper 와 경쟁하지 않는다).
+
 ```
 BEGIN
-  SELECT status FROM projection_state WHERE name = 'entry_view' FOR SHARE      -- 이중 적용 여부 + 재구성과의 직렬화
-  (inbox 선점은 MessageRunner 가 이미 함 — F13)
-  핸들러 SQL 들 (TargetSet 각 테이블)
-  inbox: UPDATE … SET status='processed' WHERE claim_token = $t               -- 같은 tx, 토큰 불일치 시 0행 → 롤백
+  UPDATE inbox_message SET status='processed', processed_at=now()
+   WHERE consumer=… AND message_id=… AND claim_token=$t                          -- ① 완료 갱신 먼저 (0행이면 LeaseLost → 롤백, 효과 미반영)
+  SELECT status FROM projection_state WHERE name='entry_view' FOR SHARE         -- ② 이중 적용 여부 + 재구성과의 직렬화
+  핸들러 SQL 들 (TargetSet 각 테이블)                                            -- ③ 읽기 모델 갱신
 COMMIT
 ```
 
 `FOR SHARE` 는 같은 줄에 대한 다른 `FOR SHARE` 와 충돌하지 않아 프로젝터끼리 막지 않는다. 재구성만 `FOR UPDATE`/`UPDATE` 로 모든 프로젝터를 잠시 기다리게 한다.
+
+`MISSING`·오류가 나면 트랜잭션 전체가 롤백되어 ① 의 완료 표시도 되돌려진다(러너가 별도 트랜잭션 T6 으로 재시도를 예약).
+
+### 3.5 락 순서와 재구성(RENAME)과의 교착 분석
+
+| 주체 | 락 취득 순서 |
+|---|---|
+| 프로젝터(T5) | ① 자기 `inbox_message` 행(UPDATE) → ② `projection_state` 행(`FOR SHARE`) → ③ `entry_view`·`entry_view_next` 행들(UPDATE/INSERT) |
+| 재구성 선점 | `projection_state` 행(`UPDATE`) — 진행 중인 `FOR SHARE` 보유 tx 가 끝날 때까지 대기, 즉시 커밋 |
+| 재구성 스냅샷 | 일반 `SELECT`(락 없음, REPEATABLE READ) + `entry_view_next` 에 `INSERT`(이 테이블은 아직 아무도 읽지 않음) |
+| 재구성 백로그 확인 | 일반 `SELECT count`(락 없음) — **`inbox_message` 행 잠금을 잡지 않는다** |
+| 재구성 교체(§9.3-6) | ① `projection_state` 행(`FOR UPDATE`) → ② `entry_view`·`entry_view_next` 에 `ACCESS EXCLUSIVE`(RENAME) |
+
+- **교착이 없는 이유**: 전체 락 순서가 `inbox 행 → projection_state → entry_view` 한 방향이다. 재구성은 inbox 행을 잡지 않고, 프로젝터는 `projection_state` 를 잡은 **뒤에만** `entry_view` 를 만진다. 따라서 재구성이 `projection_state` 의 `FOR UPDATE` 를 얻은 시점에 `entry_view` 락을 쥔 프로젝터는 없다(`FOR SHARE` 를 쥔 프로젝터는 모두 끝난 뒤에야 `FOR UPDATE` 가 허가된다). 이후 새 프로젝터는 `projection_state` 에서 대기하므로 `entry_view` 에 접근하지 못한다.
+- **남는 대기 둘**: ⓐ RENAME 의 `ACCESS EXCLUSIVE` 는 진행 중인 `GET /api/entries` 읽기(`ACCESS SHARE`)가 끝날 때까지 기다리고, 그 사이 새 읽기는 그 뒤에 줄을 선다 → 교체 트랜잭션에 `SET LOCAL lock_timeout = '2s'`(제안)를 걸고, 초과하면 롤백 후 재시도(§9.5)해 읽기가 오래 막히지 않게 한다. ⓑ 교체 중(수 ms) 프로젝터는 ② 에서 대기하며 **자기 inbox 행 잠금과 임대를 쥐고 있다** — 임대 30초(ADR-023)에 비해 무시할 수 있는 시간이다.
+- 임대를 잃은 늦은 러너가 ① 에서 0행을 받으면 ② 로 가지 않고 롤백하므로, 늦은 러너가 재구성 후의 테이블에 쓰는 일은 없다.
 
 ---
 
@@ -437,7 +455,7 @@ COMMIT
 
 ### 4.2 이벤트별 SQL 의미
 
-`$seq` = 봉투 `seq`, `$v` = 봉투 `aggregate.version`. 아래는 대상 테이블 하나에 대한 문장이며 `TargetSet` 만큼 반복한다.
+`$seq` = 봉투 `seq`, `$v` = 봉투 `aggregate.version`(inbox 행의 `aggregate_version` 컬럼), `$actor` = 봉투 `ownerKey`(inbox 행의 `owner_key` 컬럼). 봉투 메타가 inbox 컬럼으로 저장되므로(database-schema §4-5) 핸들러는 inbox 행만으로 이 값들을 얻는다. 아래는 대상 테이블 하나에 대한 문장이며 `TargetSet` 만큼 반복한다.
 
 **`entry.posted` — 행 생성(멱등)**
 
@@ -451,7 +469,7 @@ VALUES ($id, $name, $body, 'visible', $kind, $actor,
 ON CONFLICT (entry_id) DO NOTHING;
 ```
 - 행이 이미 있으면(재전달, 또는 재구성 스냅샷이 먼저 만든 경우) **아무것도 안 한다.** 다른 필드는 자기 이벤트가 갱신한다. `rowcount = 0` 이면 `STALE`.
-- `author_actor_key` 는 봉투 `ownerKey`(내부 형식 `session:<id>` / `user:<id>`, §10 수정 요청 참조)에서 온다. 공개로는 나가지 않는다.
+- `author_actor_key` 는 봉투 `ownerKey`(내부 형식 `session:<id>` / `user:<id>`, §11 이력 참조)에서 온다. 공개로는 나가지 않는다.
 
 **`entry.edited` — 내용 갱신**
 
@@ -459,19 +477,30 @@ ON CONFLICT (entry_id) DO NOTHING;
 UPDATE guestbook_read.entry_view
    SET body = $body, updated_at = $at, version = GREATEST(version, $v),
        content_seq = $seq, last_seq = GREATEST(last_seq, $seq)
- WHERE entry_id = $id AND content_seq < $seq;
+ WHERE entry_id = $id AND content_seq < $seq AND status <> 'deleted';
 ```
-`rowcount = 1` → `APPLIED`. `0` → 행 존재 확인(`exists`): 있으면 `STALE`, 없으면 `MISSING`.
+`rowcount = 1` → `APPLIED`. `0` → 행 존재 확인(`exists`): 있으면 `STALE`(오래된 이벤트이거나 **이미 삭제된 글** — 늦게 온 `edited` 가 본문을 되살리지 못한다), 없으면 `MISSING`.
 
-**`entry.hidden` / `entry.unhidden` / `entry.deleted` — 상태 갱신**
+**`entry.hidden` / `entry.unhidden` — 상태 갱신**
 
 ```sql
 UPDATE guestbook_read.entry_view
    SET status = $newStatus, version = GREATEST(version, $v),
        status_seq = $seq, last_seq = GREATEST(last_seq, $seq)
+ WHERE entry_id = $id AND status_seq < $seq AND status <> 'deleted';
+```
+`$newStatus` 는 `hidden` / `visible`. 삭제된 글은 숨김·해제 이벤트로 되살아나지 않는다. 판정은 편집과 같다(0행이면 존재 여부로 `STALE`/`MISSING`).
+
+**`entry.deleted` — 본문·반응을 비우고 묘비로 남김**
+
+```sql
+UPDATE guestbook_read.entry_view
+   SET status = 'deleted', body = '', reactions = '{}'::jsonb,
+       version = GREATEST(version, $v),
+       status_seq = $seq, last_seq = GREATEST(last_seq, $seq)
  WHERE entry_id = $id AND status_seq < $seq;
 ```
-`$newStatus` 는 `hidden` / `visible` / `deleted`. 판정은 편집과 같다(0행이면 존재 여부로 `STALE`/`MISSING`).
+개인정보 최소화(ADR-008): 읽기 모델에서도 본문이 남지 않는다. 가드는 `status_seq` 하나이며, 이후 도착하는 `entry.edited`(위 `status <> 'deleted'`)·`reaction.changed`(§5.2)는 이 행에 효과를 내지 못한다. `reaction_seq`·`content_seq` 는 그대로 둔다(묘비가 가드 역할만 한다).
 
 ### 4.3 목록에 미치는 영향
 
@@ -480,7 +509,7 @@ UPDATE guestbook_read.entry_view
 | `visible` | 보임 | `entry.created`/`entry.updated` | — |
 | `hidden` | 안 보임 (작성자 본인에게도) | `entry.removed(reason: hidden)` | 발췌(`entry_excerpt`) 유지 |
 | `deleted` | 안 보임 | `entry.removed(reason: deleted)` | 유지(조치 이력용) |
-| 숨김 해제 | 다시 보임 (`status_seq` 가 더 큰 `unhidden` 이 이김) | `entry.created`(재등장) | — |
+| 숨김 해제 | 다시 보임 (`status_seq` 가 더 큰 `unhidden` 이 이김) | **`entry.restored {entryId}`**(04 §3.2 — 클라이언트가 해당 글을 재조회해 되살림) | — |
 
 - `deleted` 는 **행을 지우지 않고** 상태로 둔다. 지우면 늦게 도착한 오래된 `entry.edited`/`unhidden` 이 `MISSING` 으로 오인되거나, 행 재생성 경로가 생겨 되살아날 위험이 있다. 물리 삭제는 보관 정리(§8)가 한다.
 - 목록 쿼리의 부분 인덱스는 `status = 'visible'` 만 담아, `hidden`/`deleted` 가 쌓여도 목록 성능이 변하지 않는다.
@@ -538,7 +567,7 @@ flowchart TD
     X -- "아니오" --> MI["MISSING → 재시도"]
     AP --> OK["inbox processed (같은 tx)"]
     ST --> OK
-    MI --> RT["TransientError → 백오프, 8회 초과 시 dead"]
+    MI --> RT["TransientError → 백오프, 8회째 실패 시 dead"]
 ```
 
 ### 4.6 오류·지표·로그·시험
@@ -546,7 +575,7 @@ flowchart TD
 | 구분 | 내용 |
 |---|---|
 | 오류 | `MISSING` → `TransientError`(재시도, ADR-023 백오프 1s×2 상한 5분, 최대 8회 → `dead`). 스키마 불일치·알 수 없는 상위 버전 → `PermanentError`. 토큰 불일치(`LeaseLost`) → 롤백·결과 폐기 |
-| 지표 | `guestbook_projection_events_total{type, outcome}` (`outcome` = applied / stale / missing / error — 식별자 레이블 없음), `guestbook_projection_apply_seconds{type}` 히스토그램 |
+| 지표 | F17 카탈로그 이름: `pf_event_process_duration_seconds{consumer,type,outcome}`(`outcome` = ok / stale / error / dead), `pf_projection_stale_ignored_total{projection}`, `pf_projection_lag_seconds{projection}`. `missing` 건수 전용 지표는 F17 에 **추가 요청**(`pf_retry_total{kind,type}` 로 대체 가능) — 식별자 레이블 없음 |
 | 로그 | `module=guestbook usecase=GuestbookProjector type outcome trace_id event_id seq` — **본문·표시 이름 금지** |
 | 시험 | **AC-017**: 같은 이벤트 집합을 임의 순열로 처리해도 최종 `entry_view` 가 순서대로 처리한 결과와 같다(속성 기반, `MISSING` 재시도 포함). **AC-003**: 각 이벤트를 2회 연속 처리해도 행 동일. 단위: SQL 가드 경계(`content_seq == $seq`). 통합(L3): 워커 2개가 같은 inbox 를 경쟁해도 일치 |
 
@@ -577,11 +606,12 @@ UPDATE guestbook_read.entry_view
        reaction_seq = jsonb_set(reaction_seq, ARRAY[$emoji], to_jsonb($seq::bigint), true),
        last_seq = GREATEST(last_seq, $seq)
  WHERE entry_id = $id
+   AND status <> 'deleted'
    AND COALESCE((reaction_seq ->> $emoji)::bigint, 0) < $seq;
 ```
 - `count = 0` 이면 키를 제거(`{"👍": 0}` 를 남기지 않는다).
 - 이모지 A 의 오래된 이벤트가 이모지 B 의 순번에 영향받지 않는다.
-- 0행이면 글 행 존재 여부로 `STALE`/`MISSING` 판정(§4.4 와 동일).
+- 0행이면 글 행 존재 여부로 `STALE`/`MISSING` 판정(§4.4 와 동일). 삭제된 글(`status='deleted'`)은 `STALE` 이다.
 
 **행위자별 눌림** (`op` 로 `present` 설정, 묘비 유지):
 
@@ -642,7 +672,7 @@ flowchart TD
 | 구분 | 내용 |
 |---|---|
 | 오류 | 글 행 없음 → `MISSING`. `ownerKey` 누락 → `PermanentError`(발행 버그) |
-| 지표 | `guestbook_projection_events_total{type="reaction.changed", outcome}` (4.6 공통) |
+| 지표 | 4.6 공통(`pf_event_process_duration_seconds{type="reaction.changed"}`) |
 | 로그 | 이모지·개수는 기록 가능, **행위자 키 금지** |
 | 시험 | 단위: `count=0` 키 제거, 서로 다른 이모지 순번 독립. 속성 기반(AC-017): added/removed 임의 순열 후 최종 `reactions` = 마지막 seq 의 count. 묘비: removed 후 늦은 added 가 `present` 를 되돌리지 않음. 구조(AC-009): 어떤 응답 DTO 에도 `actor_key` 가 없다 |
 
@@ -820,7 +850,7 @@ flowchart TD
 | 구분 | 내용 |
 |---|---|
 | 오류 | 잘못된 `cursor`/`limit` → 400. DB 일시 오류 → `TransientError`(503) |
-| 지표 | `guestbook_query_seconds{usecase="ListEntries"}`, `guestbook_list_page_size` 히스토그램, 공통 HTTP 지표 |
+| 지표 | 공통 HTTP 지표 `pf_http_request_duration_seconds{route="/api/entries"}`(F17). 페이지 크기 히스토그램은 필요 시 F17 에 추가 요청 |
 | 로그 | `usecase=ListEntries limit hasCursor hasActor rows` — 커서·행위자 키 값 금지 |
 | 시험 | 단위: `CursorCodec` 왕복·변조 거부, `ViewAssembler`(isMine/canEdit 표). 통합(L3): 페이지 경계(정확히 limit개, limit+1개), 새 글 삽입 중 페이지 안정성(키셋이라 중복·누락 없음), `hidden`/`deleted` 제외, 행위자 없음 경로. **AC-009**: 응답 JSON 키 집합이 `EntryView` 스키마와 정확히 같다(내부 필드 누출 없음). 구조: `ListEntries` 가 쓰기 포트를 주입받을 수 없다(B3) |
 
@@ -848,7 +878,7 @@ sequenceDiagram
     U-->>R: Result.ok(Page of ReportView)
 ```
 
-오류: 권한 없음은 가드 단계(403)에서 끝난다. 지표 `guestbook_query_seconds{usecase="ListReports"}`. 시험: 관리자 아님 → 403(usecase 도달 전), `resolved` 필터, 커서 경계.
+오류: 권한 없음은 가드 단계(403)에서 끝난다. 지표는 공통 HTTP 지표(`pf_http_*`, F17). 시험: 관리자 아님 → 403(usecase 도달 전), `resolved` 필터, 커서 경계.
 
 ### 7.3 GB-22 충돌 시 최신 뷰 (`LoadEntryForConflict`)
 
@@ -894,20 +924,62 @@ flowchart TD
 ```
 
 - 권한 검사(본인/관리자)는 이 조회 **전에** 명령 usecase 가 한다. 권한 없는 요청자에게 최신 본문을 돌려주지 않는다.
-- 지표: 명령 쪽 `guestbook_conflicts_total{usecase}`(F11). 시험: AC-016(동시 수정 한 건만 성공, 나머지 409 + 최신 뷰), 삭제 후 수정 → 404.
+- 지표: `pf_version_conflicts_total{resource}`(F17, 명령 쪽에서 발생). 시험: AC-016(동시 수정 한 건만 성공, 나머지 409 + 최신 뷰), 삭제 후 수정 → 404.
+
+### 7.4 `ReadPublicEntries` — realtime 스냅샷용 공개 조회 포트 (D18)
+
+| 항목 | 내용 |
+|---|---|
+| 목적 | ws-gateway 의 `SnapshotBuilder`(RT-05)가 `guestbook_read` 를 **직접 읽지 않고** 모듈 공개 usecase 로 첫 페이지를 얻는다(모듈 경계, database-schema §9) |
+| 소유 | guestbook (`query` usecase, `index` 로 공개). 소비: realtime |
+| 입력 → 출력 | `{ limit }`(기본 20, 최대 50) → `PublicEntryView[]` — **개인 필드(`myReactions`·`isMine`·`canEdit`)가 없는 공개 형태**(04 §3.2) |
+| 접근 테이블 | R: `entry_view` (`status='visible'`, `entry_id DESC`, 부분 인덱스) |
+| 일관성 | 호출자(RT-05)가 먼저 `change_log` 의 `head` 를 읽고 그 뒤에 이 usecase 를 호출한다. 결과에 `head` 이후 변경이 일부 섞일 수 있으나, 이후 재생되는 변경은 모두 **덮어쓰기·id 교체 의미**라 중복 적용해도 같다(04 §5) |
+
+```mermaid
+classDiagram
+    class ReadPublicEntries {
+        +execute(ctx, input) Result~PublicEntryView[],AppError~
+    }
+    class PublicEntryViewAssembler {
+        +toPublic(row EntryViewRow) PublicEntryView
+    }
+    class EntryViewReadRepository {
+        <<interface>>
+        +firstPage(limit) EntryViewRow[]
+    }
+    QueryHandler <|.. ReadPublicEntries
+    ReadPublicEntries ..> EntryViewReadRepository
+    ReadPublicEntries ..> PublicEntryViewAssembler
+```
+
+```mermaid
+sequenceDiagram
+    participant S as realtime.SnapshotBuilder
+    participant L as ChangeLogReader
+    participant G as guestbook.ReadPublicEntries
+    participant V as entry_view
+    S->>L: head(public)
+    L-->>S: H
+    S->>G: execute(limit)
+    G->>V: SELECT … WHERE status = visible ORDER BY entry_id DESC LIMIT n
+    V-->>G: rows
+    G-->>S: PublicEntryView[] (개인 필드 없음)
+    S-->>S: snapshot { entries, head: H }
+```
 
 ---
 
 ## 8. 보관 정리가 읽기 모델에 미치는 영향 (참조)
 
-읽기 모델은 "이벤트로만 갱신"이 원칙이지만 **보관 정리(EV-10)와 세션 정리(ID-10)는 예외적 유지보수 쓰기 주체**다. 이 문서의 읽기 모델 관련 규칙:
+읽기 모델은 "이벤트로만 갱신"이 원칙이지만 **세션 정리 잡 `PurgeExpiredSessions`(ID-10)는 예외적 유지보수 쓰기 주체**다(database-schema §9 예외 ①). 보관 정리(EV-10)는 읽기 모델 행을 지우지 않는다(M1). 이 문서의 읽기 모델 관련 규칙:
 
 | 대상 | 정리 내용 | 시점 |
 |---|---|---|
 | `my_reaction` | `session:` 행위자 행(묘비 포함) 삭제 | 세션 삭제 시 |
 | `entry_view.author_actor_key` | `session:` 값을 NULL 로(익명화) | 세션 삭제 시 |
-| `entry_view` (`deleted`) | 물리 삭제 | 보관 기준 미확인(제안: 30일) |
-| `report_queue` (`resolved`) | 삭제 | 7일(ADR-023 정리 표 기준 미확인 → F13 에서 확정) |
+| `entry_view` (`deleted`) | **M1 에서는 물리 삭제 없음**(본문은 이미 비워진 묘비) | 후속 결정(제안: 30일) |
+| `report_queue` (`resolved`) | **M1 에서는 삭제 없음** | 후속 결정(제안: 7일) |
 
 이 유지보수 쓰기는 **가드(`*_seq`)와 무관**하며 프로젝터와 경쟁하지 않도록 `entry_id` 단위의 짧은 `UPDATE` 만 쓴다.
 
@@ -920,12 +992,12 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 목적 | 프로젝터 버그·스키마 변경으로 오염된 `entry_view` 를 **점검 모드 없이** 정본에서 다시 만든다(ADR-023) |
-| 트리거 | `bun run worker rebuild entry-view`(관리자 CLI). 기본 실행 환경은 worker 컨테이너 |
+| 트리거 | `bun run worker rebuild entry_view [--dry-run]`(관리자 CLI, F16 §11.2 — 프로젝션 이름은 `entry_view`·`report_queue`·`flow_counter`). 기본 실행 환경은 worker 컨테이너 |
 | 사전 조건 | `projection_state.status = live`, 같은 이름의 재구성이 진행 중이 아님(`UPDATE … WHERE status='live'` 로 선점) |
 | 사후 조건 | `entry_view` 가 쓰기 모델과 일치, 읽기 중단 없음(교체는 밀리초 단위 잠금), 이전 테이블은 보관 후 삭제 |
 | 접근 테이블 | R: `guestbook.entry`, `guestbook.reaction`(스냅샷) · W: `entry_view_next`, `projection_state`, `entry_view` 이름 교체 |
 | 요구 | AC-017, ADR-023 |
-| 범위 | M1 은 `entry_view` 하나. `my_reaction`·`report_queue` 는 비우고 이벤트 재생(절차 **미확인**, F13 에서 확정) |
+| 범위 | 그림자 교체는 `entry_view` 하나이고 **`my_reaction` 은 같은 잡이 함께 채운다**(쓰기 모델 `reaction` 스냅샷 + 이후 이벤트 이중 적용). `report_queue` 는 쓰기 모델 `report` 스냅샷으로 자체 재구성(`worker rebuild report_queue`, 같은 알고리즘의 단순형), `flow_counter` 는 `trace_step` 재집계(이벤트 재생이 아님, database-schema §5-1) |
 
 ### 9.2 상태 기계
 
@@ -974,6 +1046,7 @@ rebuild(entry_view):
  5. 검증:   RebuildVerifier — next 의 visible 행 수·reactions 합계가 쓰기 모델 재계산과 같은지,
             샘플 N건의 내용 해시 비교. 불일치 → 중단(next 삭제, status=live, 경보)
  6. 교체:   BEGIN
+              SET LOCAL lock_timeout = '2s'                                       -- 제안: 읽기가 오래 막히지 않게 (§3.5)
               SELECT … FROM projection_state WHERE name='entry_view' FOR UPDATE   -- 프로젝터 대기
               ALTER TABLE entry_view RENAME TO entry_view_old
               ALTER TABLE entry_view_next RENAME TO entry_view
@@ -1051,8 +1124,8 @@ flowchart TD
 
 | 구분 | 내용 |
 |---|---|
-| 오류 | 선점 실패 → 종료 코드 2 (이미 진행 중). 검증 불일치 → `abort` + 경보. 교체 트랜잭션 실패 → 롤백, 상태 유지 |
-| 지표 | `projection_rebuild_status{name}` 게이지(상태 코드), `projection_rebuild_duration_seconds`, `projection_rebuild_rows`, `projection_rebuild_total{outcome}` |
+| 오류 | 선점 실패 → 종료 코드 2 (이미 진행 중). 검증 불일치 → `abort` + 경보. 교체 트랜잭션 실패(`lock_timeout` 초과 포함) → 롤백, 상태 유지 후 재시도(§3.5) |
+| 지표 | F17 의 `pf_job_duration_seconds{job="rebuild"}`, `pf_job_last_success_timestamp_seconds{job="rebuild"}`, `pf_projection_drift{projection}`. 재구성 상태 게이지(`pf_projection_rebuild_status{projection}`)와 처리 행 수는 F17 에 **추가 요청** |
 | 로그 | 단계 전환마다 `name fence_seq rows durationMs outcome` — 행 내용 금지 |
 | 시험 | **AC-017**(L3): 쓰기 부하(작성·수정·숨김·반응)를 흘리면서 `rebuild` → 완료 후 `entry_view` 가 쓰기 모델 재계산과 같음. 중단 지점별(적재 중·검증 후·교체 직전) 크래시 후 `--resume`/`--abort` 로 복구. 상태별 프로젝터 거동(이중 적용 / STALE) 단위 시험. 교체 중 읽기 쿼리가 오류 없이 대기 후 성공 |
 
@@ -1077,7 +1150,9 @@ flowchart TD
 
 ---
 
-## 11. 스키마 수정 요청 (database-schema.md · 다른 설계 문서)
+## 11. 스키마 수정 요청 (database-schema.md · 다른 설계 문서) — 반영 완료 이력
+
+> 아래 5건은 2026-11-04 에 `database-schema.md`·05 에 모두 반영되었다(정본이 우선). 이력으로 남긴다.
 
 | # | 대상 | 요청 | 이유 |
 |---|---|---|---|
@@ -1087,7 +1162,7 @@ flowchart TD
 | 4 | 05 이벤트 카탈로그 | 봉투 `ownerKey` 형식을 `anon:<해시>` 가 아니라 **내부 행위자 키 `session:<id>` / `user:<id>`** 와 동일하게 통일(공개 변환에서 제거) — **05 에 반영됨** | 프로젝터가 `ownerKey` 를 그대로 `actor_key`·`author_actor_key` 로 쓰므로 형식이 둘이면 매핑 계층이 필요 |
 | 5 | `projection_state` | `snapshot_loaded boolean`(또는 동등 컬럼) 추가 | 재구성 중 스냅샷 적재 전/후 이중 적용 판단(§9.3-2) |
 
-위 5건이 반영되기 전까지 이 문서의 SQL 은 **설계 의도**이며, 스키마 문서를 먼저 고친 뒤 마이그레이션을 쓴다.
+스키마 문서가 정본이며, 마이그레이션은 그것을 따른다.
 
 ## 12. 미결
 
@@ -1095,7 +1170,7 @@ flowchart TD
 |---|---|
 | `entry_view_old` 보관 시간(제안 1시간), 재구성 중단 판정 시간(제안 10분) | 재구성 구현 시 |
 | 검증 샘플 크기 N, 백로그 소진 시간 초과 값 | 구현 시, 측정 후 |
-| `my_reaction`·`report_queue` 재구성 절차 | F13 (이벤트 재생 방식) |
-| `deleted` 행·`resolved` 신고 물리 삭제 기준 | F13 보관 정리(EV-10) |
+| `report_queue` 재구성의 상세 단계(단순형) | 구현 시 |
+| `deleted` 행·`resolved` 신고 물리 삭제 | M1 은 하지 않음(후속) |
 | 목록 쿼리의 실측 지연(2단계 조회) | AC-013 부하 시험 |
 | `asOfSeq` 도입 여부 | 반응 경합이 문제로 드러날 때 |

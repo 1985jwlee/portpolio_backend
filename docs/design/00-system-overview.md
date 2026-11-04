@@ -225,7 +225,11 @@ classDiagram
     }
     class OutboxWriter {
         <<interface>>
-        +append(events) void
+        +append(events, ctx AppendContext) void
+    }
+    class AppendContext {
+        +traceId Uuid
+        +ownerKey string
     }
     class InboxStore {
         <<interface>>
@@ -235,7 +239,7 @@ classDiagram
     }
     class RateLimiter {
         <<interface>>
-        +hit(key, limit) Decision
+        +hit(key, rule) Decision
     }
     class PresenceCounter {
         <<interface>>
@@ -245,7 +249,7 @@ classDiagram
     }
     class EventTransport {
         <<interface>>
-        +publish(envelope) void
+        +publish(envelopes, tx) void
     }
     class Clock {
         <<interface>>
@@ -270,6 +274,8 @@ classDiagram
 
 - **`CommandHandler` 는 `ReadRepository` 를, `QueryHandler` 는 `WriteRepository` 를 주입받을 수 없다**(타입으로 분리 + dependency-cruiser 규칙). 이것이 구조적 CQRS 강제다.
 - 포트 구현(`adapter/postgres`)은 엔트리포인트의 조립 단계에서만 연결한다.
+- **모든 쓰기(C·U·D)는 `UnitOfWork.run` 의 트랜잭션 안에서만** 실행한다. `DbPool` 은 읽기 전용 핸들만 주고 쓰기 메서드는 `TxContext` 에만 있다([ADR-025](../adr/ADR-025-query-layer.md)).
+- `OutboxWriter.append(events, ctx)` 는 **현재 `UnitOfWork` 트랜잭션 안에서** 호출되며, 도메인 이벤트를 봉투로 인코딩(어댑터의 `EventCodec`)해 `outbox_event` 에 쓰고 같은 트랜잭션에서 `trace_step`(written·outboxed)과 `pg_notify('outbox_new')` 를 처리한다(F13 EV-01). 명령 usecase 는 `trace_step` 을 따로 쓰지 않는다.
 - `RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport` 는 **M1 에서 메모리/Postgres 어댑터**(`packages/infra`)이고, Redis 어댑터는 도입 기준 충족 시 포트 구현만 추가한다([ADR-024](../adr/ADR-024-redis-seam.md)).
 
 ### 4.3 오류 계층 (상속 구조)
@@ -341,7 +347,7 @@ classDiagram
 | `DuplicateRequestError` | (같은 결과 재생) | `duplicate_request` | — |
 | `RequestInProgressError` | 409 | `request_in_progress` (+`Retry-After: 1`) | 같은 키로 잠시 후 |
 | `IdempotencyKeyReuseError` | 422 | `idempotency_key_reuse` | 아니오(새 키로) |
-| `WriteLockedError` | 503 | `guestbook.write_locked` (+`Retry-After`) | 잠금 해제 후 |
+| `WriteLockedError` | 503 | `write_locked` (+`Retry-After: 60`) | 잠금 해제 후 |
 | `RateLimitedError` | 429 | `rate_limited` | `Retry-After` 후 |
 | `TransientError` | 503 | `unavailable` | 예 (백오프, ADR-023) |
 | `PermanentError` | 500 | `internal` | 아니오 → `dead` |
@@ -363,7 +369,7 @@ classDiagram
 | 요청 식별자 | 쓰기 요청 헤더 `Idempotency-Key: <uuid>`(클라이언트 생성). 상세 [03](03-api-contract.md) |
 | 추적 식별자 | `trace_id`(= 흐름 하나). 응답·이벤트·`trace_step` 이 공유. 로그에는 남기고 **지표 레이블에는 쓰지 않는다** |
 | 이벤트 이름 | `<aggregate>.<verb-past>` 소문자 점 표기: `entry.posted`, `reaction.changed`. 버전은 `schema_version` 정수 |
-| 오류 코드 | 소문자 스네이크. 모듈 전용 코드는 `<module>.<code>`(예: `guestbook.entry_hidden`) |
+| 오류 코드 | 소문자 스네이크. **와이어 코드에는 모듈 접두사를 붙이지 않는다**(`entry_hidden`, `write_locked`, `github_unavailable`). 클라이언트는 `code` 로만 분기하고 충돌은 코드 이름을 전역에서 유일하게 지어 피한다 |
 | 모듈 경계 | 다른 모듈은 `index` 의 usecase 와 `protocol` 타입만 참조 |
 | 파일 이름 | usecase 하나 = 파일 하나, `kebab-case`: `post-entry.ts`. 클래스/타입은 `PascalCase` |
 | 행위자 컨텍스트 | 모든 요청은 `ActorContext` 를 만든다: `kind`(`anonymous`\|`user`), `actorKey`(`session:<sessionId>`\|`user:<userId>`), `sessionId`, `userId?`, `displayName`(익명은 자동 이름), `isAdmin`, `traceId`, `idempotencyKey?`. usecase 는 이 값으로 `ownerKey`·소유 판정을 한다 |

@@ -4,7 +4,7 @@
 기반 클래스·오류 체계는 [00](../00-system-overview.md), 엔드포인트 계약은 [03](../03-api-contract.md), 이벤트는 [05](../05-event-catalog.md), 행위자·권한은 [06](../06-auth.md), 시험은 [08](../08-test-strategy.md).
 근거 ADR: 005(outbox) · 008(신원·악용) · 018(CQRS) · 019(계층) · 021(동시성) · 023(운영 정책).
 
-> **읽는 법.** §1~§5 는 모든 명령이 공유하는 구조(아키텍처·도메인 모델·표준 10단계·읽기-내-쓰기), §6 이후는 기능별 절이다.
+> **읽는 법.** §1~§5 는 모든 명령이 공유하는 구조(아키텍처·도메인 모델·표준 9단계·읽기-내-쓰기), §6 이후는 기능별 절이다.
 > 조회·프로젝션은 [F12](12-guestbook-read.md), 디스패처·inbox 는 [F13](13-events-pipeline.md) 이 다룬다. 이 문서의 명령은 **쓰기 모델과 outbox 까지만** 건드린다.
 
 ---
@@ -17,7 +17,7 @@ flowchart TB
         RT["routes<br/>스키마 검증 · 가드 체인 · 응답 매핑"]
     end
     subgraph uc["modules/guestbook/usecase/command"]
-        BASE["WriteUseCase 템플릿<br/>(10단계 공통 뼈대)"]
+        BASE["WriteUseCase 템플릿<br/>(9단계 공통 뼈대)"]
         C1["PostEntry"]
         C2["EditEntry · DeleteEntry"]
         C3["AddReaction · RemoveReaction"]
@@ -38,7 +38,7 @@ flowchart TB
     subgraph port["port"]
         P1["EntryRepository 계열 · WriteLockRepository"]
         P2["RequestKeyStore · UnitOfWork"]
-        P3["OutboxWriter · TraceRecorder (events 공개 포트)"]
+        P3["OutboxWriter (events 공개 포트, trace_step 기록 포함)"]
         P4["Clock · IdGenerator"]
     end
     subgraph adp["adapter/postgres"]
@@ -59,11 +59,11 @@ flowchart TB
 ```
 
 - 읽기 모델(`guestbook_read.*`)은 **어디에서도 읽지 않는다**(CQRS 구조 강제, B3). 응답에 필요한 뷰는 쓰기 모델에서 조립한다(§5).
-- `OutboxWriter`·`TraceRecorder` 는 `events` 모듈이 공개한 포트다(모듈 지도, architecture.md §4). 구현 어댑터는 같은 Postgres 연결(=같은 트랜잭션)을 받는다.
+- `OutboxWriter` 는 `events` 모듈이 공개한 포트다(`trace_step` 기록은 그 구현 내부)(모듈 지도, architecture.md §4). 구현 어댑터는 같은 Postgres 연결(=같은 트랜잭션)을 받는다.
 
 ---
 
-## 2. 표준 명령 파이프라인 (10단계)
+## 2. 표준 명령 파이프라인 (9단계)
 
 모든 명령(GB-01~GB-10)은 같은 뼈대를 따른다. 뼈대는 `WriteUseCase`(템플릿 메서드)이고 구체 명령은 **단계 일부만 재정의**한다.
 
@@ -72,17 +72,16 @@ flowchart TB
 | (0) | 스키마 검증·세션·Origin·세션 속도 제한 | **가드 체인**(usecase 밖, design/03 §8) | 400/401/403/429 |
 | 1 | 요청 키 선점 `RequestKeyStore.claim` | 템플릿 | 재생(성공 응답 재현) / 422 / 409 |
 | 2 | 권한 `authorize` | 구체 명령 | 403 |
-| 3 | 쓰기 잠금 `WriteLockPolicy.assertOpen` (잠금 대상 명령만) | 템플릿 | 503 `guestbook.write_locked` |
+| 3 | 쓰기 잠금 `WriteLockPolicy.assertOpen` (잠금 대상 명령만) | 템플릿 | 503 `write_locked` |
 | 4 | 로드 (필요 시 행 잠금) | 구체 명령 | 404 |
 | 5 | 도메인 규칙 적용 | 도메인 객체 | 400/409 |
 | 6 | 저장 — 신규 `insert` / 조건부 `saveIfVersion` / 유일 키 | 구체 명령 | 409 |
-| 7 | outbox 이벤트 추가 `OutboxWriter.append` | 템플릿 | (트랜잭션 롤백) |
-| 8 | 흐름 단계 기록 `trace_step`: `written` → `outboxed` | 템플릿 | (롤백) |
-| 9 | 응답 뷰 생성 (읽기-내-쓰기, §5) | 구체 명령 | (롤백) |
-| 10 | 요청 키에 **성공 응답 기록** `RequestKeyStore.complete` | 템플릿 | (롤백) |
+| 7 | outbox 이벤트 추가 `OutboxWriter.append(events, ctx)` — **내부에서 `trace_step`(written → outboxed)과 `pg_notify` 까지 처리**(F13 EV-01) | 템플릿 | (트랜잭션 롤백) |
+| 8 | 응답 뷰 생성 (읽기-내-쓰기, §5) | 구체 명령 | (롤백) |
+| 9 | 요청 키에 **성공 응답 기록** `RequestKeyStore.complete` | 템플릿 | (롤백) |
 
-**트랜잭션 경계**: 1~10 은 **하나의 트랜잭션**(`UnitOfWork.run`)이다. 어느 단계든 실패하면 전부 롤백된다 — 글·outbox·단계 기록·요청 키가 함께 사라진다(AC-002).
-`pg_notify('outbox_changed')` 도 같은 트랜잭션 안에서 호출한다. Postgres 는 NOTIFY 를 **커밋 시점에** 전달하므로 롤백되면 신호도 나가지 않는다(EV-13).
+**트랜잭션 경계**: 1~9 은 **하나의 트랜잭션**(`UnitOfWork.run`)이다. 어느 단계든 실패하면 전부 롤백된다 — 글·outbox·단계 기록·요청 키가 함께 사라진다(AC-002).
+`pg_notify('outbox_new')` 도 같은 트랜잭션 안에서 호출한다. Postgres 는 NOTIFY 를 **커밋 시점에** 전달하므로 롤백되면 신호도 나가지 않는다(EV-13).
 
 ### 2.1 규칙
 
@@ -108,7 +107,6 @@ classDiagram
         #uow UnitOfWork
         #requestKeys RequestKeyStore
         #outbox OutboxWriter
-        #trace TraceRecorder
         #writeLock WriteLockPolicy
         #clock Clock
         #ids IdGenerator
@@ -410,7 +408,8 @@ classDiagram
     class WriteLockRepository {
         <<interface>>
         +get() WriteLock
-        +setIfVersion(lock, expected) bool
+        +set(lock) void
+        +isLocked() bool
     }
     class RequestKeyStore {
         <<interface>>
@@ -419,11 +418,11 @@ classDiagram
     }
     class OutboxWriter {
         <<interface>>
-        +append(events, traceId, ownerKey) void
+        +append(events, ctx AppendContext) void
     }
-    class TraceRecorder {
-        <<interface>>
-        +record(traceId, step, ownerKey, detail) void
+    class AppendContext {
+        +traceId Uuid
+        +ownerKey string
     }
     class UnitOfWork {
         <<interface>>
@@ -437,7 +436,6 @@ classDiagram
     class PgWriteLockRepository
     class PgRequestKeyStore
     class PgOutboxWriter
-    class PgTraceRecorder
     class PgUnitOfWork
     EntryRepository <|.. PgEntryRepository
     ReactionRepository <|.. PgReactionRepository
@@ -446,11 +444,10 @@ classDiagram
     WriteLockRepository <|.. PgWriteLockRepository
     RequestKeyStore <|.. PgRequestKeyStore
     OutboxWriter <|.. PgOutboxWriter
-    TraceRecorder <|.. PgTraceRecorder
     UnitOfWork <|.. PgUnitOfWork
 ```
 
-- 모든 `Pg*` 어댑터는 **`UnitOfWork.run` 이 건네준 트랜잭션 핸들**로만 동작한다(별도 커넥션 금지). 그래야 10단계가 한 트랜잭션이다.
+- 모든 `Pg*` 어댑터는 **`UnitOfWork.run` 이 건네준 트랜잭션 핸들**로만 동작한다(별도 커넥션 금지). 그래야 9단계가 한 트랜잭션이다.
 - `ClaimResult` = `{ kind: 'new' } | { kind: 'replay', status, body } | { kind: 'mismatch' }`.
 
 ### 3.4 값 객체 규칙 (ADR-023 길이 상한)
@@ -460,7 +457,7 @@ classDiagram
 | `EntryBody` | NFC 정규화 → 앞뒤 공백 제거 → 1~**500** 코드포인트, 최대 **10줄**(개행 `\n` 기준 9개), 제어 문자(탭·개행 제외) 거부 | `ValidationError` `validation_failed` (`fields:[{path:'body', rule}]`) |
 | `DisplayName` | NFC → 앞뒤 공백 제거 → 2~**20** 코드포인트, 제어 문자·연속 공백 2개 이상 거부 | 위와 동일 |
 | `Emoji` | 고정 6종 `👍 ❤️ 🎉 😂 🤔 👀` 화이트리스트(`protocol` 상수). 변형 선택자 포함 정규형으로 비교 | `ValidationError` |
-| `ReasonCode` | `spam` · `abuse` · `personal_info` · `other` (**제안, 최종 목록 미확인**) | `ValidationError` |
+| `ReasonCode` | `spam` · `abuse` · `personal_info` · `off_topic` · `other` (03 §4.1 과 같은 `protocol` 상수) | `ValidationError` |
 | `note`(신고 메모) | 0~200 코드포인트 | `ValidationError` |
 | DB `CHECK` | 앱 상한의 **2배**(글 1000, 이름 40, 메모 400) — 앱 버그가 있어도 DB 가 막는 보조선(ADR-023) | `PermanentError` |
 
@@ -470,11 +467,11 @@ classDiagram
 |---|---|---|
 | `entry.posted/edited/deleted/hidden/unhidden` | `entry.id` | `entry.version` 조건부 갱신이 행 잠금을 잡음 → 이후 outbox 추가 |
 | `reaction.changed` | **`entry.id`** (반응 행이 아니라 글 단위) | 반응 명령도 `entry` 행을 `FOR NO KEY UPDATE` 로 잠그고 개수를 센 뒤 outbox 추가 |
-| `report.filed/resolved` | `report.id` | 신고 행 단위. 프로젝터의 `report_queue.last_seq` 로 검사 |
+| `report.filed/resolved` | `report.id` | 신고 행 단위. 프로젝터의 `report_queue.last_seq`(키 단위 가드)로 검사 |
 
-**왜 반응이 `entry` 행을 잠그는가.** `reaction.changed` 는 변경 후 총개수(`count`)를 싣고 프로젝터는 `entry_view.last_seq`(글 단위) 로 오래된 이벤트를 버린다. 서로 다른 이모지·행위자의 반응이 **동시에** 커밋되면 `seq` 순서와 커밋 순서가 뒤바뀔 수 있고, 먼저 보이는 큰 `seq` 가 나중에 보이는 작은 `seq` 이벤트를 "오래된 것"으로 만들어 갱신을 잃는다.
+**왜 반응이 `entry` 행을 잠그는가.** `reaction.changed` 는 변경 후 총개수(`count`)를 싣고 프로젝터는 이모지별 `reaction_seq[emoji]`(database-schema §5-1)로 오래된 이벤트를 버리고 `reactions[emoji] = count` 로 덮어쓴다. 같은 이모지의 두 반응이 **동시에** 커밋되면 `seq` 순서와 커밋 순서가 뒤바뀔 수 있고, 먼저 보이는 큰 `seq`(= 더 오래된 `count`)가 나중에 보이는 작은 `seq` 이벤트를 "오래된 것"으로 만들어 최신 개수가 영영 반영되지 않는다. 또 디스패처의 집합체 선두 규칙(F13 §3.3)도 `seq` 가 커밋 순서라는 가정에 선다.
 글 행 잠금으로 **같은 글에 대한 모든 쓰기를 직렬화**하면 `seq` 순서 = 커밋 순서가 되어 이 문제가 사라진다. 비용은 같은 글에 대한 쓰기 대기뿐이며 이 사이트 규모에서는 무시할 수 있다.
-→ 이 가정(디스패처가 집합체별 순서를 신뢰)은 [F13](13-events-pipeline.md) 이 확인해야 한다. 아래 "수정 요청" 참고.
+→ 이 가정(집합체별 `seq` 순서 = 커밋 순서)은 [F13 §3.3](13-events-pipeline.md) 이 받아들여 명시했다(디스패처 선두 규칙·프로젝터 순번 가드와 호환).
 
 ---
 
@@ -494,7 +491,7 @@ stateDiagram-v2
 ```
 
 - `hidden` 은 관리자 조치, `deleted` 는 작성자(로그인) 조치다. `deleted` 는 종단 상태이며 되돌릴 수 없다.
-- **숨김 글 수정 금지**: `hidden` 인 글을 작성자가 수정하려 하면 409 `guestbook.entry_hidden`. 삭제는 허용한다.
+- **숨김 글 수정 금지**: `hidden` 인 글을 작성자가 수정하려 하면 409 `entry_hidden`. 삭제는 허용한다.
 - **삭제는 soft(tombstone)**: 행은 남기고 `status='deleted'`, `deleted_at` 설정, `body` 를 빈 문자열로 지운다(개인정보 최소화). 반응·신고 행은 FK 때문에 남지만 더는 집계·표시되지 않는다.
 
 ### 4.2 Report
@@ -552,7 +549,7 @@ sequenceDiagram
     alt 삽입됨 (새 요청)
         DB-->>K: 1 row
         K-->>H: kind new
-        Note over H,DB: 같은 트랜잭션에서 4~9단계 수행
+        Note over H,DB: 같은 트랜잭션에서 4~8단계 수행
         H->>K: complete(actor, key, 201, body)
         K->>DB: UPDATE status done, response 기록
     else 충돌 + 커밋된 행 있음
@@ -583,7 +580,7 @@ sequenceDiagram
 
 ### 6.2 속도 제한 등급 (AC-007)
 
-가드 체인의 `SessionRateLimitGuard` 가 라우트별 **등급**으로 판정한다(usecase 밖). **수치는 제안이며 미확인**(가정 A-011, 구현 시 측정).
+가드 체인의 `RateLimitGuard` 가 라우트별 **등급**으로 판정한다(usecase 밖). **수치는 제안이며 미확인**(가정 A-011, 구현 시 측정).
 
 | 등급 | 적용 명령 | 제안 한도(세션당) |
 |---|---|---|
@@ -683,7 +680,6 @@ sequenceDiagram
     participant L as WriteLockRepository
     participant E as EntryRepository
     participant O as OutboxWriter
-    participant T as TraceRecorder
     R->>H: execute(ctx, input)
     H->>H: uow.run 시작 (트랜잭션)
     H->>K: claim(actor, key, hash)
@@ -698,18 +694,17 @@ sequenceDiagram
         H->>L: get()
         alt 잠겨 있음
             L-->>H: locked
-            H-->>R: err 503 guestbook.write_locked (롤백)
+            H-->>R: err 503 write_locked (롤백)
         else 열려 있음
             H->>H: DisplayNameService.assign, Entry.post(now)
             H->>E: insert(entry)
-            H->>O: append(entry.posted, traceId, ownerKey)
-            H->>T: record written, outboxed
+            H->>O: append(entry.posted, ctx) — 내부에서 trace_step written·outboxed
             H->>H: EntryViewAssembler.assemble
             H->>K: complete(201, body)
             H-->>R: ok(entry, traceId) 커밋 + NOTIFY
         end
     end
-    Note over H,T: 7~8단계 중 어디서든 실패하면 전부 롤백 (AC-002)
+    Note over H,O: 7~9단계 중 어디서든 실패하면 전부 롤백 (AC-002)
 ```
 
 **순서도**
@@ -742,7 +737,7 @@ flowchart TD
 | 본문/이름 검증 실패 | `ValidationError` | 400 | `validation_failed` |
 | 키 재사용(다른 요청) | `DuplicateRequestError` 계열 | 422 | `idempotency_key_reuse` |
 | 키 대기 초과 | `ConflictError` | 409 | `request_in_progress` |
-| 쓰기 잠금 | `WriteLockedError`(`DomainError`) | 503 | `guestbook.write_locked` |
+| 쓰기 잠금 | `WriteLockedError`(`DomainError`) | 503 | `write_locked` |
 | 속도 제한 | `RateLimitedError` | 429 | `rate_limited` |
 | DB 일시 오류 | `TransientError` | 503 | `unavailable` |
 
@@ -760,7 +755,7 @@ flowchart TD
 
 | 시험 | 등급 | 위치 | 기대값 |
 |---|---|---|---|
-| 원자성(AC-002) | L3 | `modules/guestbook/test/post-entry.atomic.test.ts` | `faults.hit('guestbook.post_entry.after_outbox')` 에서 예외 → `entry`·`outbox_event`·`trace_step`·`request_key` 모두 0행 |
+| 원자성(AC-002) | L3 | `modules/guestbook/test/integration/post-entry.atomic.test.ts` | `faults.failAt('guestbook.post_entry.after_outbox')`(08 §3.1) 로 예외를 주입 → `entry`·`outbox_event`·`trace_step`·`request_key` 모두 0행 |
 | 멱등 재생 | L3 | `…/post-entry.idempotent.test.ts` | 같은 키 2회 → 응답 동일, `entry` 1행, `outbox_event` 1행 |
 | 같은 키 동시 2요청 | L3 | 위 파일 | 한쪽만 쓰기, 다른 쪽은 재생 또는 409 |
 | 같은 키 다른 본문 | L2 | 위 파일 | 422 |
@@ -787,7 +782,7 @@ flowchart TD
 | `reaction` | R(응답 뷰 집계) |
 | `outbox_event`, `trace_step` | W |
 
-**조건부 갱신 SQL 의 의미**: `UPDATE entry SET body=$b, updated_at=$now, version=version+1 WHERE id=$id AND version=$expected AND status='visible' AND author_user_id=$uid`. 갱신 행이 0 이면 **원인을 진단**해 오류를 고른다: 글 없음/삭제됨 → 404, `hidden` → 409 `guestbook.entry_hidden`, 소유자 다름 → 403, 그 외(버전 불일치) → 409 `version_conflict` + `details.current`(최신 뷰, `LoadEntryForConflict`).
+**조건부 갱신 SQL 의 의미**: `UPDATE entry SET body=$b, updated_at=$now, version=version+1 WHERE id=$id AND version=$expected AND status='visible' AND author_user_id=$uid`. 갱신 행이 0 이면 **원인을 진단**해 오류를 고른다: 글 없음/삭제됨 → 404, `hidden` → 409 `entry_hidden`, 소유자 다름 → 403, 그 외(버전 불일치) → 409 `version_conflict` + `details.current`(최신 뷰, `LoadEntryForConflict`).
 
 **클래스**
 
@@ -833,7 +828,6 @@ sequenceDiagram
     participant K as RequestKeyStore
     participant E as EntryRepository
     participant O as OutboxWriter
-    participant T as TraceRecorder
     R->>H: execute(ctx, input)
     H->>K: claim
     alt 재생
@@ -861,7 +855,6 @@ sequenceDiagram
                 else 1행
                     E-->>H: true
                     H->>O: append(entry.edited)
-                    H->>T: record written, outboxed
                     H->>K: complete(200, body)
                     H-->>R: ok(entry, traceId)
                 end
@@ -899,10 +892,10 @@ flowchart TD
 |---|---|---|---|
 | 익명/타인 | `ForbiddenError` | 403 | `forbidden` |
 | 글 없음·삭제됨 | `NotFoundError` | 404 | `not_found` |
-| 숨김 글 | `ConflictError` | 409 | `guestbook.entry_hidden` |
+| 숨김 글 | `ConflictError` | 409 | `entry_hidden` |
 | 버전 불일치 | `VersionConflictError` | 409 | `version_conflict` (`details.current`) |
 | 검증 실패 | `ValidationError` | 400 | `validation_failed` |
-| 쓰기 잠금 | `WriteLockedError` | 503 | `guestbook.write_locked` |
+| 쓰기 잠금 | `WriteLockedError` | 503 | `write_locked` |
 
 **발행 이벤트 `entry.edited` v1**: `{ "entryId": "…", "body": "수정된 본문", "updatedAt": "…" }` (본문 전체 — 프로젝터 단순화, 05 §9 미결의 "전체 권장").
 
@@ -916,7 +909,7 @@ flowchart TD
 | 로그인 본인 수정(AC-005) | L3 | `…/edit-entry.test.ts` | 200, `version` +1, `entry.edited` 1건 |
 | 타인 글 수정 | L3 | 위 | 403 |
 | 동시 수정(AC-016) | L3 | `…/edit-entry.concurrent.test.ts` | 같은 `expectedVersion` 두 요청 → 한 건 200, 다른 건 409 + `current` |
-| 숨김 글 수정 | L3 | 위 | 409 `guestbook.entry_hidden` |
+| 숨김 글 수정 | L3 | 위 | 409 `entry_hidden` |
 | 되돌림 검증 | L3 | 위 | 조건 `version =` 을 제거하면 동시 시험이 실패한다(회귀 가드) |
 
 ---
@@ -936,7 +929,7 @@ flowchart TD
 | `entry` | R(`loadForUpdate`), W(조건부 UPDATE) |
 | `outbox_event`, `trace_step` | W |
 
-**tombstone 의미**: 행·`id`·`display_name`·`created_at` 은 유지, 본문은 지운다. 이유 — ① 반응/신고/조치 이력의 참조 무결성 유지 ② 프로젝터가 재전달된 오래된 `entry.posted` 로 글을 되살리지 못하게 `entry_view.last_seq` 를 가진 행을 남김 ③ 개인정보(본문) 최소 보관. 프로젝션 영향: `entry_view` 행은 `status='deleted'`, `body=''`, `reactions={}` 로 바뀌고 공개 목록 부분 인덱스(`status='visible'`)에서 빠진다. WS 에는 `entry.removed{reason:'deleted'}` 가 나간다([04](../04-ws-protocol.md) §3.2).
+**tombstone 의미**: 행·`id`·`display_name`·`created_at` 은 유지, 본문은 지운다. 이유 — ① 반응/신고/조치 이력의 참조 무결성 유지 ② 프로젝터가 재전달된 오래된 `entry.posted` 로 글을 되살리지 못하게 `entry_view` 의 `status_seq`·`content_seq` 를 가진 행을 남김 ③ 개인정보(본문) 최소 보관. 프로젝션 영향: `entry_view` 행은 `status='deleted'`, `body=''`, `reactions={}` 로 바뀌고 공개 목록 부분 인덱스(`status='visible'`)에서 빠진다. WS 에는 `entry.removed{reason:'deleted'}` 가 나간다([04](../04-ws-protocol.md) §3.2).
 
 **클래스**
 
@@ -1174,7 +1167,7 @@ flowchart TD
 |---|---|---|---|
 | 허용되지 않은 이모지 | `ValidationError` | 400 | `validation_failed` |
 | 글 없음/숨김/삭제 | `NotFoundError` | 404 | `not_found` |
-| 쓰기 잠금 | `WriteLockedError` | 503 | `guestbook.write_locked` |
+| 쓰기 잠금 | `WriteLockedError` | 503 | `write_locked` |
 | 속도 제한 | `RateLimitedError` | 429 | `rate_limited` |
 
 **발행 이벤트 `reaction.changed` v1**: `{ "entryId": "…", "emoji": "👍", "op": "added", "count": 3 }`. 행위자는 봉투 `ownerKey` 에만 있다(프로젝터의 `my_reaction` 갱신용).
@@ -1405,7 +1398,7 @@ flowchart TD
     I --> OK
 ```
 
-**오류**: 400 `validation_failed`, 404 `not_found`, 503 `guestbook.write_locked`, 429 `rate_limited`.
+**오류**: 400 `validation_failed`, 404 `not_found`, 503 `write_locked`, 429 `rate_limited`.
 
 **발행 이벤트 `report.filed` v1**: `{ "reportId": "…", "entryId": "…", "reasonCode": "spam", "excerpt": "앞 80자…" }`. `note` 는 이벤트에 싣지 않고 `report.note` 에만 둔다(공개 경로와 분리). 발췌는 **관리자 큐 전용**이며 어떤 공개 채널로도 나가지 않는다(05 §2).
 
@@ -1545,7 +1538,7 @@ flowchart TD
 | 상태가 맞지 않음/버전 불일치 | `VersionConflictError` | 409 | `version_conflict` |
 | `reason` 200자 초과 | `ValidationError` | 400 | `validation_failed` |
 
-**발행 이벤트 v1**: `entry.hidden` / `entry.unhidden` → `{ "entryId": "…", "actionId": "…" }`. 프로젝터는 숨김 시 `entry_view.status='hidden'`(공개 목록에서 제외), WS 는 `entry.removed{reason:'hidden'}`, 해제 시 `entry.created` 로 재등장.
+**발행 이벤트 v1**: `entry.hidden` / `entry.unhidden` → `{ "entryId": "…", "actionId": "…" }`. 프로젝터는 숨김 시 `entry_view.status='hidden'`(공개 목록에서 제외), WS 는 `entry.removed{reason:'hidden'}`, 해제 시 `entry.restored {entryId}` 로 알리고 클라이언트가 해당 글을 재조회해 되살린다(04 §3.2, F14 — 변환기는 DB 를 읽지 않아 전체 뷰를 만들 수 없다).
 
 **지표/로그** 공통 + `guestbook_moderation_total{action}`. **감사 로그** `audit.moderation`: `trace_id`, `action`, `entry_id`, `admin_user_id`(uuid) — 사유 본문은 `moderation_action.reason` 에만 있고 로그에는 남기지 않는다.
 
@@ -1577,7 +1570,7 @@ flowchart TD
 | `entry` | R (`entry_hidden` 검증) |
 | `outbox_event`, `trace_step` | W |
 
-**`entry_hidden` 의미**: 숨김과 신고 종결은 **별개 명령**이다. 관리자 화면은 먼저 `hide` 를 호출한 뒤 `resolve(entry_hidden)` 를 호출한다. `resolve(entry_hidden)` 는 글이 이미 `hidden` 일 때만 성공한다(없으면 409 `guestbook.entry_not_hidden`). 명령 하나가 두 집합체를 바꾸지 않게 해 트랜잭션·이벤트 순서를 단순하게 둔다.
+**`entry_hidden` 의미**: 숨김과 신고 종결은 **별개 명령**이다. 관리자 화면은 먼저 `hide` 를 호출한 뒤 `resolve(entry_hidden)` 를 호출한다. `resolve(entry_hidden)` 는 글이 이미 `hidden` 일 때만 성공한다(없으면 409 `entry_not_hidden`). 명령 하나가 두 집합체를 바꾸지 않게 해 트랜잭션·이벤트 순서를 단순하게 둔다.
 
 **클래스**
 
@@ -1641,7 +1634,7 @@ sequenceDiagram
                 H->>H: ModerationPolicy.canResolve (hidden?)
             end
             alt 글이 hidden 아님
-                H-->>R: err 409 guestbook.entry_not_hidden
+                H-->>R: err 409 entry_not_hidden
             else 통과
                 H->>P: resolveIfOpen(id, resolution, admin, now)
                 alt 0행 (이미 처리됨)
@@ -1684,7 +1677,7 @@ flowchart TD
 | 관리자 아님 | `ForbiddenError` | 403 | `forbidden` |
 | 신고 없음 | `NotFoundError` | 404 | `not_found` |
 | 이미 처리됨 | `ConflictError` | 409 | `conflict` |
-| 글이 숨김 상태 아님 | `ConflictError` | 409 | `guestbook.entry_not_hidden` |
+| 글이 숨김 상태 아님 | `ConflictError` | 409 | `entry_not_hidden` |
 | resolution 값 오류 | `ValidationError` | 400 | `validation_failed` |
 
 **발행 이벤트 `report.resolved` v1**: `{ "reportId": "…", "resolution": "dismissed" }`.
@@ -1696,11 +1689,11 @@ flowchart TD
 ## 15. GB-10 쓰기 잠금 스위치 — `SetWriteLock`
 
 **목적** 스팸 폭주 시 관리자가 새 글·수정·반응·신고를 일시 차단한다(ADR-008, FR-024 보조). 정리 작업(삭제·취소·숨김·신고 처리)은 막지 않는다.
-**트리거** `POST /api/admin/write-lock` · **관리자** · 등급 `write.admin` · 입력 `{ locked, reason?, expectedVersion }` · 응답 `{ locked, version, changedAt }`.
+**트리거** `POST /api/admin/write-lock` · **관리자** · 등급 `write.admin` · 입력 `{ locked, reason? }` · 응답 `{ writeLocked, changedAt }`(03 §4.2). **낙관적 버전 조건은 두지 않는다** — 스위치는 "원하는 상태로 설정"이라 마지막 요청이 이기며 같은 값 재설정은 멱등이다(관리자 1명).
 
 | 사전 조건 | 사후 조건 |
 |---|---|
-| 관리자, `expectedVersion == write_lock.version` | `write_lock` 갱신, `version`+1. **이벤트 없음** |
+| 관리자 | `write_lock` 을 요청 값으로 설정(`version`+1 은 진단용 카운터). **이벤트 없음** |
 
 **`guestbook.write_lock` 구조 (신규, 단일 행)**
 
@@ -1711,16 +1704,16 @@ flowchart TD
 | `reason` | text | 길이 ≤ 200 (앱), 표시용 |
 | `changed_by` | uuid | 관리자 `user_id` (FK 없음) |
 | `changed_at` | timestamptz | |
-| `version` | int | NOT NULL, 기본 1. 낙관적 버전 |
+| `version` | int | NOT NULL, 기본 1. 변경 횟수 카운터(진단용, 조건에 쓰지 않음) |
 
 초기 행은 마이그레이션이 `INSERT` 한다(`locked=false`). 변경 이력 표는 두지 않고 **감사 로그 `audit.write_lock`** 으로 남긴다(`trace_id`, `locked`, `admin_user_id`, 이전/이후 `version`). 이력 테이블이 필요한지는 미확인.
 
 | 접근 테이블 | 동작 |
 |---|---|
 | `request_key` | W |
-| `write_lock` | R, W (`UPDATE … WHERE id=1 AND version=$expected`) |
+| `write_lock` | W (`UPDATE … SET locked=$l, reason=$r, changed_by, changed_at, version=version+1 WHERE id=1`) |
 
-**클라이언트가 상태를 아는 법**: 잠금 중 쓰기는 503 `guestbook.write_locked` 로 거절되며, 입력창은 `GET /api/me` 의 `writeLocked` 로 비활성화한다(03 에 필드 추가 필요 — 수정 요청). 이벤트는 만들지 않으므로 열려 있던 다른 탭은 다음 쓰기 시도나 `/api/me` 재조회에서 알게 된다.
+**클라이언트가 상태를 아는 법**: 잠금 중 쓰기는 503 `write_locked` 로 거절되며, 입력창은 `GET /api/me` 의 `writeLocked` 로 비활성화한다(03 §4.3 에 반영됨 — 라우트 조립부가 `GetWriteLockState` 로 채운다). 이벤트는 만들지 않으므로 열려 있던 다른 탭은 다음 쓰기 시도나 `/api/me` 재조회에서 알게 된다.
 
 **클래스**
 
@@ -1734,7 +1727,6 @@ classDiagram
     class SetWriteLockInput {
         +locked bool
         +reason string?
-        +expectedVersion int
     }
     class WriteLock {
         +set(locked, reason, adminId, now) void
@@ -1774,16 +1766,11 @@ sequenceDiagram
         else 새 요청
             K-->>H: new
             H->>L: get()
-            H->>L: setIfVersion(lock, expected)
-            alt 0행
-                L-->>H: false
-                H-->>R: err 409 version_conflict + current
-            else 1행
-                L-->>H: true
-                H->>H: 감사 로그 audit.write_lock
-                H->>K: complete(200)
-                H-->>R: ok
-            end
+            H->>L: set(lock) — 요청 값으로 설정
+            L-->>H: 갱신 완료
+            H->>H: 감사 로그 audit.write_lock
+            H->>K: complete(200)
+            H-->>R: ok(writeLocked, changedAt)
         end
     end
 ```
@@ -1798,16 +1785,15 @@ flowchart TD
     C -- "아니오" --> E2["400"]
     C -- "예" --> D{"요청 키 재생?"}
     D -- "예" --> RP["저장 응답"]
-    D -- "아니오" --> F{"UPDATE WHERE version=expected 1행?"}
-    F -- "아니오" --> E3["409 version_conflict"]
-    F -- "예" --> OK["200 locked version changedAt"]
+    D -- "아니오" --> F["UPDATE write_lock SET … (요청 값으로 설정)"]
+    F --> OK["200 writeLocked changedAt"]
 ```
 
-**오류**: 403 `forbidden`, 400 `validation_failed`, 409 `version_conflict`.
+**오류**: 403 `forbidden`, 400 `validation_failed`.
 
-**지표**: `guestbook_write_lock_state` 게이지(잠금 1/해제 0)와 `guestbook_write_lock_changes_total{locked}`. 잠금이 길어지면 알림 규칙으로 쓸 수 있다(OB-05).
+**지표**: F17 카탈로그의 `pf_write_locked_total{app}`(잠금으로 거절된 쓰기 수). 잠금 상태 게이지(`pf_write_lock_state`)와 변경 횟수는 F17 에 **추가 요청**. 잠금이 길어지면 알림 규칙으로 쓸 수 있다(OB-05).
 
-**시험**: 관리자만 변경(L3, `…/set-write-lock.test.ts`) / 동시 변경 한 건만 성공 / 일반 사용자 403 / 변경 후 GB-11 이 즉시 반영(다음 요청부터).
+**시험**: 관리자만 변경(L3, `…/set-write-lock.test.ts`) / 같은 값 재설정은 멱등 / 일반 사용자 403 / 변경 후 GB-11 이 즉시 반영(다음 요청부터).
 
 ---
 
@@ -1826,6 +1812,7 @@ flowchart TD
 
 - 키 선점(1단계) 뒤에 검사하므로 잠금으로 거절돼 롤백되면 **요청 키도 남지 않는다**. 잠금 해제 후 같은 키로 재시도하면 정상 처리된다.
 - 성능: 단일 행 PK 조회라 쓰기 1건당 1회의 가벼운 읽기다. M1 은 캐시하지 않는다(`KeyValueCache` 로 1초 캐시를 붙일 수 있으나 ADR-024 이음새 사용은 도입 기준 이후).
+- **상태 조회 usecase `GetWriteLockState`** (query, guestbook 공개): `{ writeLocked, reason?, changedAt }` 를 돌려준다. `GET /api/me` 라우트 조립부가 identity 의 `GetMe` 결과에 `writeLocked` 를 덧붙이는 데 쓴다(F10 ID-04). 읽기 전용이며 `write_lock` 단일 행만 읽는다.
 - 정책 객체는 순수하다: `assertOpen(lock) = lock.locked ? err(WriteLockedError(lock.reason)) : ok`.
 
 **클래스**
@@ -1838,7 +1825,7 @@ classDiagram
     class WriteLockedError {
         +reason string?
         +httpStatus 503
-        +code guestbook.write_locked
+        +code write_locked
     }
     class DomainError {
         <<abstract>>
@@ -1890,10 +1877,10 @@ flowchart TD
     B -- "예" --> C["write_lock 읽기"]
     C --> D{"locked?"}
     D -- "아니오" --> N
-    D -- "예" --> E["503 guestbook.write_locked<br/>롤백"]
+    D -- "예" --> E["503 write_locked<br/>롤백"]
 ```
 
-**오류**: `WriteLockedError` — 503, code `guestbook.write_locked`, 본문 `details.reason`(관리자가 적은 사유, 200자 이하). `Retry-After` 는 두지 않는다(해제 시점을 모름).
+**오류**: `WriteLockedError` — 503, code `write_locked`, 본문 `details.reason`(관리자가 적은 사유, 200자 이하), 헤더 `Retry-After: 60`(해제 시점은 모르므로 고정 힌트 — 00 §4.3·03 §2 와 같다).
 
 **시험**
 
@@ -1910,7 +1897,7 @@ flowchart TD
 
 **목적** 만료된 세션이 삭제되기 전에, 그 세션이 남긴 글·반응에서 행위자 연결을 끊는다(ADR-008, AC-011). `identity` 는 `guestbook` 을 임포트할 수 없으므로 worker 잡 `PurgeExpiredSessions`(ID-10)가 두 모듈의 공개 usecase 를 차례로 호출한다([F10](10-identity.md)).
 
-**트리거** worker 정리 잡(주기, [F13](13-events-pipeline.md) EV-10). **입력** 만료된 `sessionIds[]`(배치).
+**트리거** worker 잡 `PurgeExpiredSessions`(주기, identity 소유 — [F10](10-identity.md) ID-10). events 의 `RetentionRunner` 규칙이 아니다. **입력** 만료된 `sessionIds[]`(배치).
 
 **접근 테이블** `guestbook.entry` W(`author_session_id → NULL`), `guestbook.reaction` W(`actor_key → purged:<uuid>`), `guestbook_read.entry_view` W(`author_actor_key → NULL`), `guestbook_read.my_reaction` D. 읽기 모델을 이벤트 없이 직접 쓰는 **유일한 예외**다(database-schema §9).
 
@@ -1925,11 +1912,14 @@ sequenceDiagram
     J->>I: 만료 세션 배치 조회
     I-->>J: sessionIds
     J->>G: execute(sessionIds)
-    G->>W: tx 시작
+    G->>W: 쓰기 모델 tx 시작
     G->>W: entry.author_session_id = NULL
     G->>W: reaction.actor_key = purged 무작위 값 (행마다)
+    G->>W: 커밋
+    G->>R: 읽기 모델 tx 시작
     G->>R: entry_view.author_actor_key = NULL
     G->>R: my_reaction 삭제 (session 행위자)
+    G->>R: 커밋
     G-->>J: 처리 건수
     J->>D: 세션 삭제 (익명화 성공 뒤에만)
 ```
@@ -1947,7 +1937,7 @@ flowchart TD
 
 **멱등성** 같은 배치를 다시 실행해도 결과가 같다(이미 NULL/purged 인 행은 변경 없음). 세션 삭제는 익명화 성공 이후에만 하므로 중간 실패 시 연결 끊기 전에 세션이 사라지는 일이 없다.
 
-**오류** `TransientError`(재시도). **지표** 처리 건수, 실패 횟수(식별자 레이블 없음). **시험** AC-011: 7일 경과 세션의 글은 남고 작성자 링크가 끊긴다.
+**오류** `TransientError`(재시도). **지표** 처리 건수 `pf_anonymized_rows_total{table}`(F17 에 추가 요청), 실패 횟수(식별자 레이블 없음). **시험** AC-011: 7일 경과 세션의 글은 남고 작성자 링크가 끊긴다.
 
 ## 17. 시험 연결 요약 (08 매트릭스)
 
@@ -1962,7 +1952,9 @@ flowchart TD
 | (보조) 멱등 | 전 명령 | 같은 키 재생·불일치 422 |
 | (보조) 반응 동시성 | GB-04·05 | 유일 키 + 행 잠금으로 한 건, `count` 일관 |
 
-결정적 재현을 위한 **고장 주입 지점 이름**(08 의 `faults.hit`): `guestbook.<usecase>.after_load`, `.after_save`, `.after_outbox`, `.before_commit`. 동시성 시험은 `after_load` 에서 두 트랜잭션을 정렬해 경합을 만든다.
+결정적 재현을 위한 **고장 주입 지점 이름**은 `<모듈>.<usecase>.<지점>` snake_case 이다(코드의 `faults.hit('…')` 훅, 08 §3.1): `guestbook.<usecase>.after_load`, `.after_save`, `.after_outbox`, `.before_commit`. 시험은 08 의 API 로 쓴다 — `failAt(point, nth)`, `delayAt(point)` → `Gate.reached`(Promise)·`release()`. 동시성 시험은 `after_load` 에서 `delayAt` 으로 두 트랜잭션을 정렬해 경합을 만든다.
+
+**시험 파일 경로 규칙**: 위 표의 `…/` 는 `modules/guestbook/test/{unit,integration}/` 이다 — 순수 시험(L2: 값 객체·정책·프로젝터 순수 부분)은 `unit/`, DB 가 필요한 시험(L3)은 `integration/`. 가드·속도 제한은 `apps/api/test/`.
 
 ---
 
@@ -1982,7 +1974,7 @@ flowchart TD
 > 아래 요청은 2026-11-04 에 정본 문서에 반영되었다. 이력으로 남긴다.
 
 1. **database-schema.md `entry`**: `status` 에 `deleted`, 컬럼 `deleted_at` 추가, `body` 의 길이 CHECK 를 `status='deleted' OR char_length(body) BETWEEN 1 AND 1000` 으로. `entry_view.status` 에도 `deleted` 허용. `report` 에 `reason_code`(+`note`), `resolution`, `resolved_by` 컬럼 추가(현재 `reason` 하나). 신규 `guestbook.write_lock` 표(§15) 추가. 반응 중복은 409 가 아니라 200 멱등으로 문구 수정.
-2. **00 §4.3 / 03 §2**: `WriteLockedError`(DomainError, 503, `guestbook.write_locked`) 와 `guestbook.entry_hidden`·`entry_not_hidden`·`request_in_progress` 코드 추가. `Idempotency` 표의 `request_key.status` 는 영속 상태가 `done` 뿐임을 명시.
+2. **00 §4.3 / 03 §2**: `WriteLockedError`(DomainError, 503, `write_locked`) 와 `entry_hidden`·`entry_not_hidden`·`request_in_progress` 코드 추가. `Idempotency` 표의 `request_key.status` 는 영속 상태가 `done` 뿐임을 명시.
 3. **03 §4.3 `/api/me`**: 응답에 `writeLocked: boolean` 추가, `ActorContext`(03 §8.1)·06 에 `displayName`(프로필 이름) 과 `sessionId` 추가(표시 이름 자동 부여·`isMine` 계산에 필요).
 4. **F13(이벤트 파이프라인)**: 디스패처/프로젝터가 "집합체별 `seq` 순서 = 커밋 순서" 에 의존한다(§3.5). 반응 명령이 `entry` 행을 `FOR NO KEY UPDATE` 로 잠그는 규칙과 일치하는지, 그리고 `seq` 할당이 행 잠금 이후인지 확인 필요. 프로젝터는 `report_queue.last_seq` 를 신고 단위로 검사.
 5. **05**: `entry.posted` 에 `authorUserId`(공개 변환에서 제거) 이미 반영됨 확인. `report.filed` 페이로드의 `excerpt` 와 `reasonCode` 는 있으나 `note` 는 이벤트에 싣지 않는다는 점을 05 §2 에 명시.

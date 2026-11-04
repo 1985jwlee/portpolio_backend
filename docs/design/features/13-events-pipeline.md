@@ -108,7 +108,11 @@ classDiagram
     }
     class OutboxWriter {
         <<interface>>
-        +append(tx, envelopes) void
+        +append(events DomainEvent[], ctx AppendContext) void
+    }
+    class AppendContext {
+        +traceId Uuid
+        +ownerKey string
     }
     class PostgresOutboxWriter
     class OutboxStore {
@@ -379,7 +383,8 @@ UPDATE events.outbox_event o
        attempts = o.attempts + 1
   FROM picked
  WHERE o.id = picked.id
-RETURNING o.id, o.seq, o.type, o.payload, o.aggregate_type, o.aggregate_id,
+RETURNING o.id, o.seq, o.type, o.schema_version, o.occurred_at, o.payload,
+          o.aggregate_type, o.aggregate_id, o.aggregate_version,
           o.trace_id, o.owner_key, o.attempts;
 ```
 
@@ -504,7 +509,7 @@ RETURNING o.id, o.status;
 | `batch_size` | 50 | ADR-023 | 선점 배치 |
 | `dispatch_poll_ms` | 1000 | 제안 | NOTIFY 보완 폴링 |
 | `runner_poll_ms` | 1000 | 제안 | |
-| `runner_concurrency` | 2 / 소비자 | 제안 | 워커 한 프로세스 안 병렬 처리 수 |
+| `runner_concurrency` | 2 / 소비자 | 제안 | 워커 한 프로세스 안 병렬 처리 수. **소비자 단위 어드바이저리 락은 어떤 소비자(`realtime-broadcaster` 포함)에도 두지 않는다** — 같은 집합체의 순서는 §3.3 선두 규칙이 보장하고, 서로 다른 집합체는 병렬이어도 안전하다 |
 | `leader_retry_ms` | 5000 | 제안 | 리더가 아닐 때 락 재시도 |
 | `leader_check_ms` | 5000 | 제안 | 리더가 락 연결 생존 확인 |
 
@@ -547,8 +552,8 @@ RETURNING o.id, o.status;
 
 | `step` | 기록 위치 | 트랜잭션 | `detail`(허용 키만) |
 |---|---|---|---|
-| `written` | 명령 usecase, 도메인 변경 직후 | T1 | `{ aggregate }` |
-| `outboxed` | `OutboxWriter.append` 직후 | T1 | `{ type, seq? }` (seq 는 INSERT RETURNING 값) |
+| `written` | `OutboxWriter.append` 내부, outbox INSERT 직전(도메인 변경 직후 호출되므로 "변경이 쓰였다"는 의미) — **명령 usecase 가 따로 기록하지 않는다**(F11 §2) | T1 | `{ aggregate }` |
+| `outboxed` | `OutboxWriter.append` 내부, outbox INSERT 직후 | T1 | `{ type, seq? }` (seq 는 INSERT RETURNING 값) |
 | `dispatched` | 디스패처, 발행완료 갱신과 함께 | T4 | `{ targets: n }` |
 | `received` | 구독 모듈 `ReceiveMessage` | T3 | `{ consumer }` |
 | `processed` | 러너, 완료와 같은 tx | T5 | `{ consumer, ms }` |
@@ -562,19 +567,29 @@ RETURNING o.id, o.status;
 
 ### 3.9 보관 규칙
 
-보관 정책 정본은 [database-schema.md §9](../../domains/database-schema.md), 수치는 ADR-023 이다. `RetentionRunner.tick(budgetMs)` 가 규칙을 차례로 실행한다.
+보관 정책 정본은 [database-schema.md §9](../../domains/database-schema.md), 수치는 ADR-023 이다. `RetentionRunner.tick(budgetMs)` 가 등록된 규칙을 차례로 실행한다.
+
+**규칙은 테이블을 소유한 모듈이 정의·등록한다** (events 가 남의 테이블을 직접 `DELETE` 하지 않는다 — database-schema §1·§9). 각 모듈은 자기 `RetentionRule` 구현을 `index` 로 공개하고, worker 조립부(`apps/worker/src/compose`)가 `RetentionRunner.register(rule)` 로 주입한다. `RetentionRunner` 는 실행 틀(락·배치·예산·지표)만 제공한다.
+
+| 규칙 | 소유(등록) 모듈 |
+|---|---|
+| `OutboxPublishedRule`·`OutboxDeadRule`·`TraceStepRule`·`FlowCounterRule` | events |
+| `InboxProcessedRule`·`InboxDeadRule` | 각 inbox 소유 모듈(guestbook, realtime) — 같은 클래스를 모듈 자기 테이블로 인스턴스화 |
+| `RequestKeyRule` | guestbook, identity (각자 `request_key`) |
+| `ChangeLogRule` | **realtime** (F14 의 `ChangeLogTrimmer` 가 이 규칙이다 — 별도 삭제 로직을 두지 않는다) |
+| 세션 정리 `PurgeExpiredSessions` | **identity** 가 소유하는 별도 잡(익명화 선행이 필요해 이 틀을 쓰지 않는다, F10 ID-10) |
 
 | 규칙 클래스 | 테이블 | 기준 컬럼 | 보관 | 조건 | 배치 삭제 크기 | 주기 |
 |---|---|---|---|---|---|---|
 | `OutboxPublishedRule` | `events.outbox_event` | `published_at` | 7일 | `status='published'` | 1000(제안) | 10min |
 | `OutboxDeadRule` | `events.outbox_event` | `created_at` | 30일 + 상한 1만 건 | `status='dead'` | 500(제안) | 10min |
-| `InboxProcessedRule` | `<m>.inbox_message` (모듈마다) | `processed_at` | 7일 | `status='processed'` | 1000(제안) | 10min |
+| `InboxProcessedRule` | `<m>.inbox_message` (소유 모듈이 등록) | `processed_at` | 7일 | `status='processed'` | 1000(제안) | 10min |
 | `InboxDeadRule` | `<m>.inbox_message` | `received_at` | 30일 + 상한 1만 건 | `status='dead'` | 500(제안) | 10min |
 | `TraceStepRule` | `events.trace_step` | `at` | 7일 | — | 2000(제안) | 10min |
 | `FlowCounterRule` | `events_read.flow_counter` | `bucket` | 7일 | — | 2000(제안) | 10min |
-| `ChangeLogRule` | `realtime_read.change_log` | `created_at` | **1시간** 또는 **채널당 1만 행** 중 먼저 | 채널별 상한 | 1000(제안) | **1min**(제안) |
+| `ChangeLogRule` (realtime 소유) | `realtime_read.change_log` | `created_at` | **1시간** 또는 **채널당 1만 행** 중 먼저 | 채널별 상한 | 1000(제안) | **1min**(제안) |
 | `RequestKeyRule` | `guestbook.request_key`·`identity.request_key` | `created_at` | 24시간 | — | 1000(제안) | 10min |
-| (ID-10) | `identity.session` 등 | `expires_at` | 만료 즉시 | | | F10 이 소유 |
+| (ID-10 `PurgeExpiredSessions`) | `identity.session` 등 | `expires_at` | 만료 즉시 | | | identity 소유·worker 등록(이 표의 규칙 틀 밖) |
 
 삭제 방식(공통):
 
@@ -586,9 +601,11 @@ DELETE FROM events.trace_step
 
 - **동시 실행 방지**: 규칙마다 `pg_try_advisory_xact_lock(hashtext('pf.retention.' || name))` — 못 잡으면 건너뛴다(다른 인스턴스가 실행 중).
 - 상한형(`AgeAndCapRule`)은 `row_number() OVER (PARTITION BY <partitionBy> ORDER BY created_at DESC) > cap` 인 행을 지운다(`change_log` 는 `channel` 별, `dead` 는 테이블 단위).
-- 읽기 모델·`flow_counter` 삭제는 쓰기 경로와 경합하지 않도록 **작은 배치**로만 지운다.
+- `flow_counter` 삭제는 쓰기 경로와 경합하지 않도록 **작은 배치**로만 지운다. M1 에서 `guestbook_read.*` 행은 보관 정리가 지우지 않는다(익명화 예외는 F10 ID-10).
 
-### 3.10 스키마 반영 요청
+### 3.10 스키마 반영 요청 (반영 완료 이력)
+
+> 아래는 2026-11-04 에 `database-schema.md` 에 모두 반영되었다(정본 우선). 이력으로 남긴다.
 
 | 추가/확인 | 사유 |
 |---|---|
@@ -604,7 +621,7 @@ DELETE FROM events.trace_step
 | 항목 | 내용 |
 |---|---|
 | 목적 | 도메인 변경과 이벤트 기록을 **한 트랜잭션**으로 묶는다(이중 쓰기 제거, AC-002) |
-| 트리거 | 명령 usecase(`PostEntry` 등)가 `AggregateRoot.pullEvents()` 결과를 넘겨 호출 |
+| 트리거 | 명령 usecase 의 템플릿 7단계(F11 §2)가 `AggregateRoot.pullEvents()` 결과를 `append(events, ctx)` 로 넘긴다. **현재 `UnitOfWork` 트랜잭션 안에서 호출**하며 tx 핸들은 어댑터가 UoW 에서 얻는다(인수로 받지 않는다). 인코딩은 어댑터의 `EventCodec` |
 | 사전 조건 | 같은 `tx` 안에서 집합체 잠금을 이미 잡았다(§3.3). 이벤트는 레지스트리에 등록된 `type`·`schemaVersion` |
 | 사후 조건 | `outbox_event` 에 `status='new'` 행 N개, `trace_step`(written·outboxed), 커밋 시 `outbox_new` 신호 |
 | 읽기/쓰기 | W: `outbox_event`, `trace_step` |
@@ -613,7 +630,11 @@ DELETE FROM events.trace_step
 classDiagram
     class OutboxWriter {
         <<interface>>
-        +append(tx, envelopes) void
+        +append(events DomainEvent[], ctx AppendContext) void
+    }
+    class AppendContext {
+        +traceId Uuid
+        +ownerKey string
     }
     class PostgresOutboxWriter {
         -codec EventCodec
@@ -648,14 +669,14 @@ sequenceDiagram
     U->>UW: run(tx)
     UW->>DB: BEGIN
     U->>DB: 집합체 잠금 + 도메인 변경 (saveIfVersion)
-    U->>W: append(tx, events)
+    U->>W: append(events, ctx) — 현재 UoW tx 안
     W->>C: encode(event, ctx) — 스키마 검증, id 부여
     alt 스키마 위반 (프로그래밍 오류)
         C-->>W: PermanentError
         W-->>U: 오류 전파
         UW->>DB: ROLLBACK (변경도 사라짐)
     else 정상
-        W->>DB: INSERT outbox_event (id, type, payload, aggregate, trace_id, owner_key) RETURNING seq
+        W->>DB: INSERT outbox_event (id, type, schema_version, occurred_at, payload, aggregate_type/id/version, trace_id, owner_key) RETURNING seq
         W->>DB: INSERT trace_step written, outboxed
         W->>DB: SELECT pg_notify outbox_new
         U-->>UW: ok
@@ -678,7 +699,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 스키마 위반/미등록 → `PermanentError`(전체 롤백, 500). DB 오류 → `TransientError`(503, 클라이언트가 같은 `Idempotency-Key` 로 재시도) |
-| 지표/로그 | `pf_outbox_appended_total{type}`. 로그 `event_id, trace_id, type`(본문 없음) |
+| 지표/로그 | `pf_outbox_appended_total{type}`† . 로그 `event_id, trace_id, type`(본문 없음) |
 | 시험 | 08 §5 `outbox.append` 훅에서 예외 주입 → 글·outbox 모두 없음(**AC-002**). 골든 JSON 인코딩(05 §7). 명령이 잠금 없이 append 하면 경계 시험이 실패하도록 `AggregateLock` 사용 검사 |
 
 ### EV-02 디스패처 (리더 선출·선점·전달·발행완료)
@@ -696,7 +717,7 @@ flowchart TD
 | 상황 | 동작 |
 |---|---|
 | 시작 | 전용 연결에서 `SELECT pg_try_advisory_lock(:key)`; `key = hashtextextended('pf.outbox.dispatcher', 0)` |
-| 획득 실패 | 대기자로 `leader_retry_ms` 마다 재시도. 디스패치하지 않음(`pf_leader{job="dispatcher"}=0`) |
+| 획득 실패 | 대기자로 `leader_retry_ms` 마다 재시도. 디스패치하지 않음(`pf_dispatcher_leader{app}=0`) |
 | 유지 | 락은 **세션 수준**이라 연결이 살아 있는 동안 유지. `leader_check_ms` 마다 `SELECT 1` 로 생존 확인 |
 | 상실(연결 끊김·확인 실패) | 즉시 `isLeader=false`: **새 선점을 중단**, 진행 중인 배치는 끝까지 처리(토큰·임대가 안전망), 락 재획득은 대기자 절차로 |
 | 정상 종료 | 진행 중 배치를 마친 뒤 `pg_advisory_unlock` + 연결 종료 → 다른 인스턴스가 곧 획득 |
@@ -816,8 +837,8 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | `TransientError` → 재시도, `PermanentError`(스키마 위반 등) → 즉시 `dead`, `LeaseLostError` → 폐기. 리더 상실은 오류가 아니라 정상 전환 |
-| 지표/로그 | `pf_leader{job}`, `pf_dispatch_batch_size`, `pf_dispatch_published_total{type}`, `pf_message_attempts_total{consumer="dispatcher",outcome}`, `pf_outbox_pending`, `pf_outbox_oldest_age_seconds`. 로그 `event_id, trace_id, targets, attempt` |
-| 시험 | 08 §5.6(단일 활성), §5.1(선점 경쟁), `outbox.afterClaim` 훅으로 전달 직전 정지 → 임대 만료 → 재전달 시 inbox 중복 흡수. 리더 락 연결 강제 종료 → 대기자 인수 |
+| 지표/로그 | `pf_dispatcher_leader{app}`, `pf_claim_attempts_total{kind="outbox",result}`, `pf_retry_total{kind="outbox",type}`, `pf_outbox_dead_total`, `pf_outbox_depth{status}`, `pf_outbox_oldest_age_seconds{status}`, `pf_dispatch_batch_size`†, `pf_dispatch_published_total{type}`†. 로그 `event_id, trace_id, targets, attempt` |
+| 시험 | 08 §5.6(단일 활성), §5.1(선점 경쟁), `events.dispatcher.after_claim` 훅(`delayAt`)으로 전달 직전 정지 → 임대 만료 → 재전달 시 inbox 중복 흡수. 리더 락 연결 강제 종료 → 대기자 인수 |
 
 ### EV-03 메시지 수신 (`ReceiveMessage`)
 
@@ -858,8 +879,12 @@ classDiagram
 
 ```sql
 INSERT INTO <m>.inbox_message
-  (consumer, message_id, source, type, seq, aggregate_id, payload, status, received_at, next_attempt_at)
-VALUES (:consumer, :id, 'events', :type, :seq, :aggregate_id, :payload, 'received', now(), now())
+  (consumer, message_id, source, type, schema_version, occurred_at, seq,
+   aggregate_type, aggregate_id, aggregate_version, trace_id, owner_key,
+   payload, status, received_at, next_attempt_at)
+VALUES (:consumer, :id, 'events', :type, :schema_version, :occurred_at, :seq,
+        :aggregate_type, :aggregate_id, :aggregate_version, :trace_id, :owner_key,
+        :payload, 'received', now(), now())
 ON CONFLICT (consumer, message_id) DO NOTHING
 RETURNING message_id;   -- 반환 행이 없으면 중복
 ```
@@ -898,7 +923,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | DB 일시 장애 → `TransientError`(디스패처가 재시도). 중복은 오류가 아니다 |
-| 지표/로그 | `pf_inbox_received_total{consumer,duplicate}`. 로그 `consumer, message_id, duplicate` |
+| 지표/로그 | `pf_inbox_received_total{consumer,duplicate}`†. 로그 `consumer, message_id, duplicate` |
 | 시험 | **AC-003**: 같은 `envelope` 를 N회 호출 → 행 1개, trace `received` 1줄. 동시 N 호출에서도 1개(유일 키가 심판) |
 
 ### EV-04 메시지 처리 러너 (선점·핸들러·완료)
@@ -907,7 +932,7 @@ flowchart TD
 |---|---|
 | 목적 | inbox 의 `received` 를 선점해 `EventHandler.apply` 로 **효과를 한 번** 적용하고 `processed` 로 마감한다 |
 | 트리거 | `inbox_new` 신호 또는 1000ms 폴링. 소비자별 `InboxRunnerJob`(동시성 2, 프로세스 여러 개 가능) |
-| 사전 조건 | 핸들러가 등록돼 있고 `handles(type)` |
+| 사전 조건 | 핸들러가 등록돼 있고 `handles(type)`. 러너는 선점한 **inbox 행의 컬럼**(`schema_version`, `occurred_at`, `aggregate_type/id/version`, `trace_id`, `owner_key`, `seq`, `payload`)으로 `EventEnvelope` 를 복원한다 — 별도 조회 없이 Upcaster 판정(`schema_version` > 최신이면 `dead`, 낮으면 Upcaster)과 핸들러 입력이 가능하다(database-schema §4-5) |
 | 사후 조건 | `processed`(효과 1회 반영) / 재시도 예약 / `dead` / 임대 상실(효과 미반영) |
 | 읽기/쓰기 | RW: `<m>.inbox_message` + 핸들러 대상(`entry_view`, `change_log` …), W: `trace_step` |
 
@@ -981,7 +1006,7 @@ sequenceDiagram
     participant B as 러너 B
     participant DB as inbox_message
     A->>DB: claim (토큰 TA, 임대 30s)
-    Note over A: 지연 (GC · 정지 · 훅 inbox.beforeComplete)
+    Note over A: 지연 (GC · 정지 · 훅 events.runner.before_complete)
     R->>DB: lease_until 지난 processing → received, 토큰 NULL
     B->>DB: claim (토큰 TB)
     B->>DB: processed WHERE 토큰 = TB → 1행, 효과 적용
@@ -1039,8 +1064,8 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 분류 | `ErrorClassifier`: `ValidationError`(스키마)·`PermanentError`·버전 높음(05 §5) → 영구. `TransientError`·타임아웃·연결 오류 → 일시. 나머지 미분류 예외 → 일시(8회 후 `dead`) |
-| 지표/로그 | `pf_message_handle_seconds{consumer,type}`, `pf_message_attempts_total{consumer,outcome}`(outcome: `processed`·`retried`·`dead`·`lease_lost`·`stale`·`skipped`), `pf_inbox_pending{consumer}`, `pf_inbox_oldest_age_seconds{consumer}`. 로그 `consumer, message_id, trace_id, attempt, outcome, ms` |
-| 시험 | **AC-003**(재전달 효과 1회), **AC-015**(08 §5.1 선점 경쟁 N=8, §5.2 fencing: `inbox.beforeComplete` 훅 + `FakeClock` 으로 임대 건너뛰기), 08 §7.1(worker 중단 후 회복), §7.2(dead 이행), §7.3(처리 시간 규칙: `handler_timeout*2<=lease`) |
+| 지표/로그 | `pf_event_process_duration_seconds{consumer,type,outcome}`(outcome: `ok`·`stale`·`error`·`dead`), `pf_claim_attempts_total{kind="inbox",result}`, `pf_lease_lost_total{kind}`, `pf_inbox_depth{consumer,status}`, `pf_inbox_oldest_age_seconds{consumer,status}`. 로그 `consumer, message_id, trace_id, attempt, outcome, ms` |
+| 시험 | **AC-003**(재전달 효과 1회), **AC-015**(08 §5.1 선점 경쟁 N=8, §5.2 fencing: `events.runner.before_complete` 훅(`delayAt` → `Gate.reached`/`release()`) + `FakeClock` 으로 임대 건너뛰기), 08 §7.1(worker 중단 후 회복), §7.2(dead 이행), §7.3(처리 시간 규칙: `handler_timeout*2<=lease`) |
 
 ### EV-05 임대 회수 (reaper)
 
@@ -1099,7 +1124,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | DB 일시 장애는 다음 tick 에 재시도(잡은 실패해도 스케줄러 유지) |
-| 지표/로그 | `pf_lease_reclaimed_total{table,to}`(to: `retry`·`dead`). 급증하면 임대 설정/핸들러 지연 경보. 로그 `table, count` |
+| 지표/로그 | `pf_lease_reclaimed_total{kind}`(회수 결과 retry/dead 구분은 `pf_retry_total`·`pf_*_dead_total` 로). 급증하면 임대 설정/핸들러 지연 경보. 로그 `table, count` |
 | 시험 | 08 §5.2·§7.1: 만료 후 회수 → 재처리, 회수된 행에 대한 이전 토큰의 완료 거절. 두 reaper 동시 실행에서도 중복 회수 없음 |
 
 ### EV-06 재시도·백오프·dead 전이
@@ -1179,16 +1204,16 @@ flowchart TD
     G --> H["next_attempt_at = now + delay"]
 ```
 
-백오프 상한 표(완전 지터의 **최댓값**, 실제 지연은 0 ~ 최댓값 균등):
+백오프 상한 표(완전 지터의 **최댓값**, 실제 지연은 0 ~ 최댓값 균등). `attempts` 는 선점 때 증가하므로 **N번째 실패 뒤의 대기**가 N열이고, **8번째 실패에서는 대기 없이 `dead`** 가 된다(`attempts >= max_attempts`). 재시도는 최대 7번이다:
 
-| attempts | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+| N번째 실패 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
-| 최댓값(초) | 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 (그 뒤 dead) |
+| 다음 시도까지 최댓값(초) | 1 | 2 | 4 | 8 | 16 | 32 | 64 | — (**dead**) |
 
 | 항목 | 내용 |
 |---|---|
-| 오류 | 분류 불가 예외는 일시로 취급해 8회 후 `dead` — 로그에 `classification=unknown` 을 남겨 규칙 보강 대상으로 삼는다 |
-| 지표/로그 | `pf_message_attempts_total{outcome="retried"/"dead"}`, `pf_retry_delay_seconds`(히스토그램). 로그 `attempt, delayMs, code` |
+| 오류 | 분류 불가 예외는 일시로 취급해 8회째 실패에서 `dead` — 로그에 `classification=unknown` 을 남겨 규칙 보강 대상으로 삼는다 |
+| 지표/로그 | `pf_retry_total{kind,type}`, `pf_outbox_dead_total`, `pf_inbox_dead_total{consumer}`, `pf_retry_delay_seconds`†(히스토그램). 로그 `attempt, delayMs, code` |
 | 시험 | `RetryPolicy` 단위 시험(난수 시드 고정): 지연 ≤ 상한, 8회째 dead, 영구 오류 즉시 dead. 통합: 08 §7.2 dead 이행 |
 
 ### EV-07 dead 재투입 (CLI)
@@ -1196,7 +1221,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 목적 | 조사 후 `dead` 항목을 다시 처리 대기로 되돌린다(ADR-023: 관리 스크립트, 화면 없음) |
-| 트리거 | `bun run worker dead-requeue --table outbox\|inbox --consumer <name> --id <uuid>... \| --since <ISO> [--dry-run]` |
+| 트리거 | `bun run worker dead-requeue --consumer <소비자 이름 \| outbox> [--type <t>] [--id <uuid>... \| --all] [--limit <n>] --reason <사유> [--dry-run]` (F16 §11.2 의 정의; `--consumer outbox` 는 `events.outbox_event`, 그 외는 해당 소비자의 inbox. `--reason` 필수, `--dry-run` 은 이 문서가 더한 옵션이라 F16 에 반영 요청) |
 | 사전 조건 | 운영자가 원인(예: 핸들러 버그 수정 배포)을 해결. DB 접근 가능한 환경 |
 | 사후 조건 | 대상이 `new`/`received`, `attempts=0`, `next_attempt_at=now()`, `last_error` 는 보존 대신 `requeued:<사유>` 로 교체, 감사 로그 한 줄 |
 | 읽기/쓰기 | RW: `outbox_event` 또는 `<m>.inbox_message`; W: `trace_step`(retried, detail `{requeued:true}`) |
@@ -1234,7 +1259,7 @@ sequenceDiagram
     participant CLI as DeadRequeueCommand
     participant DB as outbox / inbox
     participant TR as TraceRecorder
-    Op->>CLI: dead-requeue --table inbox --consumer realtime-broadcaster --since … --reason fix
+    Op->>CLI: dead-requeue --consumer realtime-broadcaster --all --limit 200 --reason fix
     CLI->>DB: SELECT dead 대상 (미리보기)
     alt --dry-run
         CLI-->>Op: 대상 N건 목록 출력, 변경 없음
@@ -1248,15 +1273,15 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["인자 검증"] --> B{"table, 조건 지정?"}
+    A["인자 검증"] --> B{"consumer, 조건(--id 또는 --all), --reason 지정?"}
     B -- "아니오" --> E["오류 종료 2"]
     B -- "예" --> C["대상 dead 조회"]
     C --> D{"0건?"}
     D -- "예" --> F["종료 0 대상 없음"]
     D -- "아니오" --> G{"dry-run?"}
     G -- "예" --> H["목록만 출력"]
-    G -- "아니오" --> I{"500건 초과?"}
-    I -- "예" --> J["--force 없으면 거부"]
+    G -- "아니오" --> I{"--limit 없이 500건 초과?"}
+    I -- "예" --> J["--limit 를 주지 않으면 거부"]
     I -- "아니오" --> K["UPDATE WHERE status = dead"]
     K --> L["trace + 감사 로그 + 결과 출력"]
 ```
@@ -1264,8 +1289,8 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 인자 오류 종료코드 2, 대상 없음 0, DB 오류 1. `WHERE status='dead'` 조건이라 이미 되돌려진 항목은 건너뜀(멱등) |
-| 지표/로그 | `pf_dead_requeued_total{table}`. 감사 로그 `actor(os user), table, count, reason` |
-| 시험 | 08 §7.2: dead 만들기 → 재투입 → 정상 처리 → `processed`. `--dry-run` 이 변경하지 않음. 500건 초과 거부 |
+| 지표/로그 | `pf_dead_requeued_total{kind}`†. 감사 로그 `actor(os user), table, count, reason` |
+| 시험 | 08 §7.2: dead 만들기 → 재투입 → 정상 처리 → `processed`. `--dry-run` 이 변경하지 않음. `--limit` 없이 500건 초과 거부, `--reason` 없으면 거부 |
 
 ### EV-08 흐름 단계 기록 (`TraceRecorder`)
 
@@ -1336,7 +1361,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 기록 실패는 호출자의 tx 를 실패시킨다(사실과 기록의 일치 우선) — 단 `retried`/`failed` 기록 실패는 재시도 갱신 자체를 막지 않도록 같은 tx 에서 `SAVEPOINT` 로 감싸 **기록만 건너뛰고 경고**한다(제안) |
-| 지표/로그 | `pf_trace_steps_total{step}`. `detail` 은 로그에 남기지 않는다 |
+| 지표/로그 | `pf_trace_steps_total{step}`†. `detail` 은 로그에 남기지 않는다 |
 | 시험 | 단계 순서 시험(한 글 작성 → written·outboxed·dispatched·received·processed 순). **AC-009**: 허용 키 밖 값이 들어가면 걸러짐, 본문 문자열이 `detail` 에 없음을 구조 검사 |
 
 ### EV-09 흐름 집계 (`FlowAggregator`)
@@ -1414,7 +1439,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 실패하면 다음 tick 이 같은 구간을 다시 덮어쓴다(자가 치유) |
-| 지표/로그 | `pf_flow_agg_rows`, `pf_job_duration_seconds{job="flow_agg"}` |
+| 지표/로그 | `pf_flow_agg_rows`†, `pf_job_duration_seconds{job="aggregator"}`, `pf_job_last_success_timestamp_seconds{job="aggregator"}` |
 | 시험 | 같은 구간 재집계해도 결과 동일(멱등). 늦은 `processed` 가 들어와도 다음 tick 에 반영. 두 인스턴스 동시 실행에서 한 쪽만 실행 |
 
 ### EV-10 보관 정리 (`RetentionRunner`)
@@ -1423,9 +1448,9 @@ flowchart TD
 |---|---|
 | 목적 | §3.9 규칙대로 오래된 행을 **작은 배치**로 삭제해 디스크와 인덱스를 지킨다(FR-080, AC-011) |
 | 트리거 | 10분 주기(`change_log` 규칙은 1분) |
-| 사전 조건 | 규칙별 `pg_try_advisory_xact_lock` 획득 |
+| 사전 조건 | 규칙별 `pg_try_advisory_xact_lock` 획득, 규칙이 소유 모듈에서 `register` 되어 있음 |
 | 사후 조건 | 기준을 넘긴 행 삭제(상한형은 초과분 삭제). 삭제 건수를 지표로 남김 |
-| 읽기/쓰기 | D: §3.9 표의 테이블 |
+| 읽기/쓰기 | D: §3.9 표의 테이블(각 규칙을 등록한 소유 모듈의 테이블) |
 
 ```mermaid
 classDiagram
@@ -1500,7 +1525,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 규칙 하나의 실패가 다른 규칙을 막지 않는다(격리, 경고 로그 후 계속). 장시간 테이블 잠금 방지를 위해 배치 크기·예산을 둔다 |
-| 지표/로그 | `pf_retention_deleted_total{rule}`, `pf_retention_skipped_total{rule}`, `pf_retention_lag_seconds{rule}`(가장 오래된 행의 초과 시간) |
+| 지표/로그 | `pf_retention_deleted_total{table}`, `pf_job_last_success_timestamp_seconds{job="retention"}`, `pf_retention_skipped_total{table}`†, `pf_retention_lag_seconds{table}`†(가장 오래된 행의 초과 시간) |
 | 시험 | **AC-011**: `FakeClock` 을 8일 뒤로 → 7일 초과 `published`·`processed`·`trace_step` 삭제, `dead` 는 30일까지 유지, 글은 보존. 상한형: 10,001건 → 1건 삭제. 동시 실행 안전 |
 
 ### EV-11 흐름 상세 조회 (`GetTrace`)
@@ -1634,6 +1659,39 @@ flowchart TD
 | 지표/로그 | HTTP 지표만 |
 | 시험 | **AC-009**: 응답 스키마에 `traceId`·`ownerKey` 필드가 없음(스키마 구조 검사). 빈 구간은 빈 배열 |
 
+### 공개 조회 포트 — `TraceReader` · `FlowSummaryReader` (realtime 소비용, D18)
+
+realtime(ws-gateway)은 `events` 의 테이블을 직접 읽지 않고 **events 가 `index` 로 공개한 조회 포트**를 쓴다(database-schema §1·§9). REST 조회 usecase(EV-11·12)와 같은 읽기 코드를 공유한다.
+
+| 포트 | 소유 | 소비 | 시그니처 | 접근 테이블 |
+|---|---|---|---|---|
+| `TraceReader` | events | realtime `TraceWatcher`/`PrivateRouter`(RT-08) | `stepsAfter(cursor: bigint, limit): TraceStepRow[]` — `trace_step.id` 커서 증분 읽기, 행에 `ownerKey` 포함(**내부 전용**, 공개로 나가기 전 realtime 이 세션 소유자에게만 전달) | `events.trace_step` R |
+| `FlowSummaryReader` | events | realtime `SnapshotBuilder`(RT-05), `FlowSummaryPublisher`(RT-14), REST `GetFlowSummary` | `buckets(window): FlowBucket[]` — 개수만, 식별자 없음 | `events_read.flow_counter` R |
+
+```mermaid
+classDiagram
+    class TraceReader {
+        <<interface · events 공개>>
+        +stepsAfter(cursor, limit) TraceStepRow[]
+    }
+    class FlowSummaryReader {
+        <<interface · events 공개>>
+        +buckets(window) FlowBucket[]
+    }
+    class GetTrace
+    class GetFlowSummary
+    class TraceWatcher {
+        <<realtime>>
+    }
+    class SnapshotBuilder {
+        <<realtime>>
+    }
+    GetTrace ..> TraceReader
+    GetFlowSummary ..> FlowSummaryReader
+    TraceWatcher ..> TraceReader
+    SnapshotBuilder ..> FlowSummaryReader
+```
+
 ### EV-13 깨우기 신호 (`NotifyEmitter` / `NotifyListener`)
 
 | 항목 | 내용 |
@@ -1703,33 +1761,26 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 오류 | 연결 끊김 → 재연결 + 즉시 보충 실행. LISTEN 불가(풀러 등) → 폴링만으로 계속 동작(지표로 가시화) |
-| 지표/로그 | `pf_notify_connected`(0/1), `pf_notify_wakeups_total{channel,source}`(source: `notify`·`poll`), 재연결 횟수 |
+| 지표/로그 | `pf_notify_connected`†(0/1), `pf_notify_wakeups_total{channel,source}`†(source: `notify`·`poll`), 재연결 횟수 |
 | 시험 | 08 §5·G4: NOTIFY 차단 상태에서도 폴링으로 전달됨. 재연결 후 즉시 보충. 디바운스가 폭주 신호를 합침 |
 
 ## 5. 총괄
 
 ### 5.1 지표 목록 (레이블에 식별자 금지)
 
-| 지표 | 종류 | 레이블 |
-|---|---|---|
-| `pf_outbox_appended_total` | counter | `type` |
-| `pf_outbox_pending` / `pf_outbox_dead` | gauge | — |
-| `pf_outbox_oldest_age_seconds` | gauge | — |
-| `pf_inbox_received_total` | counter | `consumer`, `duplicate` |
-| `pf_inbox_pending` / `pf_inbox_dead` | gauge | `consumer` |
-| `pf_inbox_oldest_age_seconds` | gauge | `consumer` |
-| `pf_dispatch_batch_size` | histogram | — |
-| `pf_dispatch_published_total` | counter | `type` |
-| `pf_message_handle_seconds` | histogram | `consumer`, `type` |
-| `pf_message_attempts_total` | counter | `consumer`, `outcome` |
-| `pf_event_end_to_end_seconds` | histogram | `consumer` (outbox `created_at` → 처리 완료) |
-| `pf_lease_reclaimed_total` | counter | `table`, `to` |
-| `pf_leader` | gauge | `job` |
-| `pf_job_runs_total` / `pf_job_duration_seconds` | counter / histogram | `job`, `result` |
-| `pf_retention_deleted_total` / `pf_retention_lag_seconds` | counter / gauge | `rule` |
-| `pf_flow_agg_rows` | gauge | — |
-| `pf_notify_connected` / `pf_notify_wakeups_total` | gauge / counter | `channel`, `source` |
-| `pf_trace_steps_total` | counter | `step` |
+**이름·레이블의 정본은 [F17](17-ops-observability.md) 의 지표 카탈로그**다. 아래는 이 모듈의 발생 지점과 F17 이름의 대응이며, `†` 표시는 F17 카탈로그에 아직 없어 **F17 에 추가를 요청하는** 보조 지표다(F17 §0.3 이 보조 지표를 허용한다).
+
+| 이 모듈의 측정 | F17 지표(레이블) |
+|---|---|
+| outbox 적체 | `pf_outbox_depth{status}`, `pf_outbox_oldest_age_seconds{status}`, `pf_outbox_dead_total` |
+| inbox 적체 | `pf_inbox_depth{consumer,status}`, `pf_inbox_oldest_age_seconds{consumer,status}`, `pf_inbox_dead_total{consumer}` |
+| 선점 경쟁·임대 | `pf_claim_attempts_total{kind,result}`, `pf_lease_reclaimed_total{kind}`, `pf_lease_lost_total{kind}` |
+| 재시도 | `pf_retry_total{kind,type}` |
+| 리더 | `pf_dispatcher_leader{app}` |
+| 처리 시간·종단 지연 | `pf_event_process_duration_seconds{consumer,type,outcome}`, `pf_event_end_to_end_seconds{consumer}` (outbox `created_at` → 처리 완료) |
+| 잡 | `pf_job_last_success_timestamp_seconds{job}`, `pf_job_duration_seconds{job}` |
+| 보관 | `pf_retention_deleted_total{table}` |
+| 추가 요청† | `pf_outbox_appended_total{type}`, `pf_inbox_received_total{consumer,duplicate}`, `pf_dispatch_batch_size`, `pf_dispatch_published_total{type}`, `pf_retry_delay_seconds`, `pf_dead_requeued_total{kind}`, `pf_trace_steps_total{step}`, `pf_flow_agg_rows`, `pf_retention_skipped_total{table}`, `pf_retention_lag_seconds{table}`, `pf_notify_connected`, `pf_notify_wakeups_total{channel,source}` |
 
 (OB-02 가 이 목록을 도메인 지표로 노출한다. 대시보드 패널 구성은 F17.)
 

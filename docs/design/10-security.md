@@ -21,7 +21,7 @@ flowchart TD
     Q -- "/" --> NX["Next.js<br/>CSP(nonce) · 출력 이스케이프"]
     OG --> SG["SessionGuard<br/>쿠키 → 세션 조회"]
     SG --> RG["RateLimitGuard<br/>세션별 앱 제한"]
-    RG --> AG["AdminGuard / 본인 검사<br/>(해당 경로만)"]
+    RG --> AG["RequireAdmin / 본인 검사<br/>(해당 경로만)"]
     AG --> UC["usecase<br/>입력 검증 · 도메인 불변식 · 버전 조건"]
     WH --> RT["realtime<br/>구독 권한(private 은 본인만)"]
 ```
@@ -55,7 +55,7 @@ flowchart TD
 | `style-src` | `'self'` (+ 필요 시 `'nonce-<요청별>'`) | Tailwind 는 정적 CSS. 인라인 스타일이 필요해지면 nonce 로 해결하고 `'unsafe-inline'` 은 쓰지 않는다. Next 가 요구하는지 **미확인(G3)** |
 | `img-src` | `'self' data:` + **CI 배지 호스트 1개** | 외부 이미지는 CI 상태 배지(FR-003)뿐이다. 호스트는 `site.ciBadgeUrl`([12](12-content.md) §1.1)에서 빌드 시 뽑아 넣고, 변수가 `null` 이면 이 값을 넣지 않는다. 배지의 실제 호스트·리다이렉트(예: GitHub Actions 배지가 다른 호스트로 넘기는지)는 **미확인** — 구현 시 브라우저 콘솔 위반 보고로 확정. 아바타는 쓰지 않는다 |
 | `font-src` | `'self'` | 폰트는 자체 호스팅 |
-| `connect-src` | `'self' wss://<PUBLIC_HOST>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
+| `connect-src` | `'self' wss://<PUBLIC_ORIGIN 의 호스트>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
 | `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1) | G6 로 확정. 임베드가 안 되면 링크로 대체해 이 값을 제거 |
 | `frame-ancestors` | `'none'` | 클릭재킹 방지 |
 | `base-uri` | `'self'` | |
@@ -120,7 +120,7 @@ classDiagram
 2. `OriginGuard`: `Origin` 헤더가 있으면 `PUBLIC_ORIGIN` 과 일치해야 한다. 없으면 `Referer` 로 폴백, 둘 다 없으면 거부 → `ForbiddenError`(`origin_mismatch`)
 3. 본문은 `application/json` 만 받는다 (폼 전송 차단)
 4. `Idempotency-Key` 헤더 필수 ([03](03-api-contract.md)) — 단순 폼으로는 보낼 수 없는 사용자 지정 헤더라 추가 방어가 된다
-5. 로그아웃·로그인 시작은 GET 이 상태를 바꾸지 않도록 설계(로그인 시작 GET 은 상태 변경 없음, 로그아웃은 POST)
+5. 로그아웃·로그인 시작은 GET 이 상태를 바꾸지 않도록 설계(로그인 시작 GET 은 상태 변경 없음, 로그아웃은 POST). **예외: `POST /api/auth/logout` 은 `Idempotency-Key` 면제**([03](03-api-contract.md) §1)라 4번 방어가 빠지고 1·2·3번 **3중**으로 막는다
 
 WebSocket 핸드셰이크는 브라우저가 CORS 를 적용하지 않으므로 **서버가 `Origin` 을 직접 검사**한다(교차 사이트 WebSocket 하이재킹 방지). 허용 출처는 `PUBLIC_ORIGIN` 하나.
 
@@ -141,14 +141,22 @@ classDiagram
     class OriginGuard
     class SessionGuard
     class RateLimitGuard
-    class AdminGuard
+    class SchemaGuard
+    class AuthorizationGuard {
+        <<abstract>>
+    }
+    class RequireLogin
+    class RequireAdmin
     class OwnerPolicy {
         +assertOwner(entry, actor) Result
     }
     RequestGuard <|.. OriginGuard
     RequestGuard <|.. SessionGuard
     RequestGuard <|.. RateLimitGuard
-    RequestGuard <|.. AdminGuard
+    RequestGuard <|.. SchemaGuard
+    RequestGuard <|.. AuthorizationGuard
+    AuthorizationGuard <|-- RequireLogin
+    AuthorizationGuard <|-- RequireAdmin
     GuardChain "1" o-- "*" RequestGuard
 
     class AppError
@@ -162,12 +170,13 @@ classDiagram
     OriginGuard ..> ForbiddenError : 출처 불일치
     SessionGuard ..> UnauthenticatedError : 세션 없음·만료
     RateLimitGuard ..> RateLimitedError : 한도 초과
-    AdminGuard ..> ForbiddenError : 허용목록 밖
+    RequireAdmin ..> ForbiddenError : 허용목록 밖
+    RequireLogin ..> UnauthenticatedError : 익명이 로그인 전용 경로 호출
     OwnerPolicy ..> ForbiddenError : 본인 아님
 ```
 
 - 가드는 **엔트리포인트(api, ws-gateway) 계층**이다. 규칙이 아니라 "누구의 요청인가"만 판정한다.
-- **소유자 검사(`OwnerPolicy`)는 도메인 서비스**(`service/`)다. 가드가 아니라 usecase 안에서 실행한다 — 규칙이 엔트리포인트에 새는 것을 막는다(ADR-019). `AdminGuard` 가 허용목록(`ADMIN_GITHUB_IDS`)을 보는 것은 "신원의 속성"이므로 가드이고, "이 글을 고칠 수 있는가"는 도메인 규칙이다.
+- **소유자 검사(`OwnerPolicy`)는 도메인 서비스**(`service/`)다. 가드가 아니라 usecase 안에서 실행한다 — 규칙이 엔트리포인트에 새는 것을 막는다(ADR-019). `RequireAdmin` 가 허용목록(`ADMIN_GITHUB_IDS`)을 보는 것은 "신원의 속성"이므로 가드이고, "이 글을 고칠 수 있는가"는 도메인 규칙이다.
 - 오류 클래스는 [00](00-system-overview.md) §4.3 의 것을 그대로 쓴다.
 
 ### 4.2 쓰기 요청 가드 시퀀스 (글 수정)
@@ -215,6 +224,7 @@ sequenceDiagram
 | `GITHUB_CLIENT_SECRET` | 연 1회 또는 노출 의심 시 | GitHub 에서 새 secret 생성 → `secrets/` 교체 → api 재기동 → 구 secret 폐기 | 즉시 폐기·교체. 기존 세션은 영향 없음(세션은 우리 것) |
 | DB 비밀번호 | 연 1회 | 새 비밀번호 설정 → `secrets/database_url` 교체 → 앱 재기동 | 즉시 교체 |
 | Cloudflare Tunnel 토큰 | 노출 시 | 터널 재생성 후 토큰 교체 | 즉시 |
+| `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, api 필수) | 연 1회 또는 노출 시 | 새 값 생성 → `secrets/oauth_state_secret` 교체(저장 위치는 [02](02-dev-environment.md) §5) → api 재기동. 진행 중인 로그인 시도(10분 쿠키)만 실패한다 | 즉시 교체 |
 | Grafana 관리자 비밀번호 | 연 1회 | 환경 파일 교체 후 재기동 | 즉시 |
 | 백업 암호화 키 | 키 분실·노출 시만 | 새 키로 이후 백업 암호화. 기존 덤프는 구 키가 있어야 복호화되므로 **구 키를 보관** | 새 키 발급, 외부 보관분 재암호화 |
 | 세션 토큰 | 7일 만료(자동) | 만료·로그아웃 시 서버에서 폐기(ADR-008) | 사용자 단위 전체 폐기 가능 |
@@ -256,7 +266,7 @@ sequenceDiagram
 | 범주 | 위협 | 대응 | 근거 |
 |---|---|---|---|
 | **S**poofing 신원 도용 | 세션 쿠키 탈취 | HttpOnly·Secure·`__Host-`, 토큰 해시 저장, 7일 만료, CSP 로 XSS 억제 | §3, ADR-008 |
-| | OAuth 로그인 CSRF·코드 가로채기 | `state` + PKCE(S256), 임시 쿠키 10분 | 06 |
+| | OAuth 로그인 CSRF·코드 가로채기 | `state`(+ PKCE S256 은 GitHub 지원 확인 후, 미지원이면 `state` 만), 임시 쿠키 10분 | 06 |
 | | 접속 주소 위조(헤더 주입) | 프록시가 클라이언트 헤더 폐기·정규화 | G1·G7 |
 | **T**ampering 변조 | 남의 글 수정·삭제 | 로그인 + `OwnerPolicy` + 버전 조건 갱신 | AC-004·005, ADR-021 |
 | | 이벤트 위조·중복 처리 | 내부 경로만, inbox 중복 제거, 토큰 fencing | ADR-020·021 |
@@ -270,7 +280,7 @@ sequenceDiagram
 | | WebSocket 연결 폭주·느린 소비자 | 최대 연결 수, 연결별 송신 큐 상한 후 종료, 재접속 지터 | G2, ADR-014·022 |
 | | 재접속 폭풍 | 클라이언트 백오프 + 지터, 서버 복구 처리량 상한 | ADR-014 |
 | | 무거운 쿼리 | 커서 페이지네이션 상한, 조회는 읽기 모델만 | 03 |
-| **E**levation of privilege 권한 상승 | 일반 사용자가 숨김·신고 처리 | `AdminGuard`(숫자 ID 허용목록) + 서버 재검사 | AC-006 |
+| **E**levation of privilege 권한 상승 | 일반 사용자가 숨김·신고 처리 | `RequireAdmin`(숫자 ID 허용목록) + 서버 재검사 | AC-006 |
 | | 허용목록 우회(이름 변경으로 탈취) | 로그인 이름이 아니라 **GitHub 숫자 ID** 로 비교 | 01 §8.2 |
 | | XSS | 텍스트만 렌더, CSP, 입력 정규화 | ADR-008, §2 |
 
