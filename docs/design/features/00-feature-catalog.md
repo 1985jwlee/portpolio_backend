@@ -31,6 +31,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | ID-08 | 표시 이름 변경 | `PUT /api/me/profile` | `UpdateProfile` | `user_account` W | FR-011 | S2-3 |
 | ID-09 | 관리자 판정 | ID-04/가드 | `AdminPolicy` | — (설정) | FR-012 | S2-4 |
 | ID-10 | 만료 세션 정리·익명화 | worker 잡 | `PurgeExpiredSessions` — **worker 잡이 두 모듈의 공개 usecase 를 차례로 호출**: `identity.ListExpiredSessionIds` → `guestbook.AnonymizeSessionData`(GB-12) → `identity.DeleteSessions` | `session` D, (GB-12 경유) `entry`·`reaction` W | FR-080, AC-011 | S6-6 |
+| ID-11 | 세션 폐기(사고 대응) | `worker admin revoke-sessions --all\|--user\|--session` (ADR-028) | `RevokeSessions`(identity 공개 usecase), 대상 범위 `RevokeScope` | `session` W(`expires_at = now`), `audit_log` W(`admin.sessions_revoked`) | ADR-028, design/13 §5 | S2-6 |
 
 ## 2. guestbook 명령 (GB, 쓰기)
 
@@ -81,6 +82,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | EV-13 | 깨우기 신호(NOTIFY 발행/수신) | outbox·change_log·trace 변경 | `NotifyEmitter`, `NotifyListener` | — (Postgres NOTIFY) | FR-030 | S3-3 |
 | EV-14 | 감사 기록 | 명령·관리 usecase 내부 / CLI | `AuditWriter`, `PostgresAuditWriter` | `audit_log` W(호출자의 같은 tx) | ADR-027 | S1-14 |
 | EV-15 | 감사 조회 | `GET /api/admin/audit`, `worker audit:list` | `ListAuditLog`, `AuditCursorCodec` | `audit_log` R | ADR-027 | S6-9 |
+| EV-16 | 보관 정지(증거 보존) | `worker retention:pause\|resume` | `RetentionPauseState`, `RetentionRunner`(pause 확인), `PurgeExpiredSessions`·`archive-logs.sh` 도 준수 | `status/retention/pause.json` W, `audit_log` W(`system.retention_paused`) | ADR-028, F13 | S6-10 |
 
 ## 5. realtime (RT)
 
@@ -144,6 +146,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | CM-09 | 프로토콜 스키마·JSON Schema 내보내기 | `packages/protocol` | design/01 | S1-9 |
 | CM-10 | 시험 지원(testkit) | `packages/testkit` | design/08 | S1-10 |
 | CM-12 | 컬럼 보호 등급 검사 | `modules/*/adapter/postgres/classification.ts` + `check:classification` | ADR-026, database-schema §9.1 | S1-13 |
+| CM-13 | 비밀 스캔 (CI `secret-scan` + pre-commit) | `.github/workflows/ci.yml`, `.githooks/pre-commit` | ADR-028, design/13 §10 (도구 미확인) | S1-15 |
 | CM-11 | 시계·식별자 주입 | `kernel` 포트 | | S1-2 |
 
 ## 8. 운영 (OB)
@@ -172,14 +175,14 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 
 | 영역 | 기능 수 |
 |---|---|
-| ID | 10 |
+| ID | 11 |
 | GB | 12 + 8 = 20 |
-| EV | 15 |
+| EV | 16 |
 | RT | 16 |
 | WB | 21 |
-| CM | 12 |
+| CM | 13 |
 | OB | 17 |
-| **합** | **111** |
+| **합** | **114** |
 
 ## 9.1 공개 usecase / 공개 포트 등록 (모듈 경계용)
 
@@ -196,6 +199,7 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | events | `AuditWriter`(`record(tx, entry)`) | 모든 명령·관리 usecase, worker CLI | 행위와 같은 트랜잭션의 감사 기록 (EV-14) |
 | events | `ListAuditLog` | api(`GET /api/admin/audit`), worker CLI | 감사 조회 (EV-15, 관리자 전용) |
 | identity | `ListExpiredSessionIds`, `DeleteSessions` | worker(`PurgeExpiredSessions`) | 만료 세션 정리 |
+| identity | `RevokeSessions` | worker CLI(`admin revoke-sessions`) | 사고 대응 세션 폐기(ID-11) |
 
 ## 9.2 백로그 (M1 이후, 위 합계에 포함하지 않음)
 

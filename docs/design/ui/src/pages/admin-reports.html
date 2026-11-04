@@ -1,0 +1,48 @@
+<section class="section">
+  <div class="wrap stack" style="--stack:2rem">
+    <div class="stack" style="--stack:.5rem">
+      <h1>신고 큐</h1>
+      <p class="lede">신고된 글을 확인하고 숨기거나 기각합니다. 모든 조치는 감사 기록에 남습니다.</p>
+    </div>
+
+    <div id="forbidden" class="card empty" hidden role="alert">
+      <svg class="node node-error" style="width:2rem;height:2rem" aria-hidden="true"><use href="#n-error"/></svg>
+      <h2 style="font-size:var(--text-lg)">관리자만 볼 수 있는 화면입니다</h2>
+      <p class="muted small">이 계정에는 관리자 권한이 없어요. 권한은 서버가 판정합니다.</p>
+      <a class="btn btn-secondary" href="home.html">홈으로</a>
+    </div>
+
+    <div id="admin" class="stack" style="--stack:2rem">
+      <section class="card row lock-card" aria-labelledby="lock-h" style="justify-content:space-between">
+        <div class="stack" style="--stack:.25rem;flex:1 1 16rem">
+          <h2 id="lock-h" style="font-size:var(--text-base)">쓰기 잠금 <span id="lock-badge" class="badge badge-danger" hidden>켜짐</span></h2>
+          <p class="small muted">켜면 방문자는 글, 반응, 신고를 할 수 없습니다. 읽기는 계속됩니다. 입력한 이유가 방문자에게 보입니다.</p>
+        </div>
+        <div class="row"><span class="small" id="lock-state">꺼짐</span><button class="switch" id="lock-sw" role="switch" aria-checked="false" aria-labelledby="lock-h"><span class="sr-only">쓰기 잠금</span></button></div>
+      </section>
+
+      <section class="stack" style="--stack:1rem" aria-labelledby="q-h">
+        <div class="row" style="justify-content:space-between">
+          <h2 id="q-h" style="font-size:var(--text-lg)">신고 <span class="mono small subtle" id="q-count">3</span></h2>
+          <div class="row"><label class="small muted" for="status">상태</label><select class="select" id="status" style="width:auto;min-height:2.25rem"><option>열림</option><option>처리됨</option><option>전체</option></select></div>
+        </div>
+        <div class="table-wrap desk" id="tbl-desk"><table>
+          <thead><tr><th scope="col">사유</th><th scope="col">글 발췌</th><th scope="col">신고 시각</th><th scope="col">상태</th><th scope="col"><span class="sr-only">조치</span></th></tr></thead>
+          <tbody id="rows"></tbody></table></div>
+        <div class="stack mob" id="cards" style="--stack:.75rem"></div>
+        <div class="card empty" id="empty" hidden><svg class="node node-done" style="width:2rem;height:2rem" aria-hidden="true"><use href="#n-done"/></svg><h3>처리할 신고가 없습니다</h3><p class="muted small">새 신고가 들어오면 여기에 나타납니다.</p></div>
+      </section>
+    </div>
+  </div>
+</section>
+
+<dialog id="lock-dlg" aria-labelledby="lock-dlg-h">
+  <form method="dialog" class="stack" style="--stack:1rem">
+    <h2 id="lock-dlg-h" style="font-size:var(--text-lg)">쓰기를 잠글까요?</h2>
+    <p class="small muted">방문자는 글, 반응, 신고를 할 수 없게 됩니다. 이미 있는 글은 계속 볼 수 있어요.</p>
+    <div class="field"><label for="lock-reason">방문자에게 보일 이유</label><input class="input" id="lock-reason" maxlength="200" placeholder="예: 스팸이 늘어 확인하고 있어요."><span class="help">200자까지</span></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" value="cancel" type="submit">취소</button><button class="btn btn-danger" value="ok" type="submit">잠그기</button></div>
+  </form>
+</dialog>
+
+<div class="mock-ctl" role="group" aria-label="목업 전용 컨트롤"><strong>목업 전용</strong><label>화면 상태 <select id="adm-select"><option value="ok">관리자(정상)</option><option value="empty">빈 큐</option><option value="forbidden">권한 없음(403)</option></select></label></div>

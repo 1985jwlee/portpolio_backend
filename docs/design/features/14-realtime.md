@@ -402,6 +402,8 @@ classDiagram
 
 ADR-022 측정에서 Elysia 의 WebSocket 백프레셔 옵션은 **라우트 옵션으로 주면 무시**되고(0/10 종료, RSS 110~120MB), **최상위 옵션으로 주면 느린 연결은 끊기지만 정상 연결 p99 가 531~886ms 로 악화**됐다. 순수 `Bun.serve` 는 같은 정책에서 p99 0.5~0.7ms 였다. 그래서 **프레임워크가 주는 백프레셔 정책에 기대지 않고** 앱이 큐를 관리한다.
 
+**G2 재시험(2026-11-04, 로컬)**: 앱 레벨 큐(`gw.ts` 방식)는 느린 연결 10/10 을 4408 로 격리했고 RSS 가 평탄(33MB)했다. `Bun.serve` 네이티브 `backpressureLimit`+`closeOnBackpressureLimit` 은 10/10 을 끊지만 **코드 1006** 으로만 끊어 4408 통지가 불가하고, Elysia 라우트 옵션은 여전히 0/10 이며 RSS 50→154MB 증가, Elysia 최상위 옵션은 10/10 을 1006 으로 끊었고 앞선 p99 531~886ms 악화는 이번 조건(100연결·초당 200건·1KB)에서 **재현되지 않았다**(이전 조건은 초당 2000건이라 같지 않음 → "해결"이 아니라 "이 부하에서는 안 보였다"로만 기록). 읽지 않는 연결은 close 프레임을 받지 못하므로 클라이언트는 4408 코드에 의존한 분기를 두지 않는다(04 §4). 결론은 그대로 **앱 레벨 큐 유지**다.
+
 ```mermaid
 flowchart TB
     subgraph app["앱 코드 (런타임 중립)"]
@@ -1078,7 +1080,7 @@ flowchart TD
 
 | 코드 | 의미 |
 |---|---|
-| `4408` | 느린 소비자 — 클라이언트 즉시 재접속 + `resume` |
+| `4408` | 느린 소비자 — 클라이언트 즉시 재접속 + `resume`. 클라이언트는 이 코드를 못 받고 `1006` 으로 보는 것이 일반적이다(G2 실측), 코드 분기 금지 |
 | `4500` | 전송 반복 실패 |
 
 지표: `pf_ws_send_queue_length` 히스토그램, `pf_ws_send_queue_bytes`, `pf_ws_queue_overflow_total`, `pf_ws_coalesced_total`, `pf_ws_messages_sent_total{channel,type}`, `pf_ws_fanout_seconds`(읽기→모든 큐 적재).
@@ -1454,7 +1456,7 @@ flowchart TD
     H --> G
 ```
 
-**실측 주의(Bun 1.4.4)**: `await server.stop()` 은 열린 WebSocket 이 있으면 **영원히 끝나지 않는다**. 종료 순서는 ① `stop()` 을 **await 없이** 호출(신규 수락 중단) → ② 각 소켓에 `bye` 후 `close(1001)` → ③ 유예 시간(타임아웃) 안에 모두 닫히기를 기다린 뒤 `stop()` 의 완료를 기다림. 타임아웃 후 `stop(true)` 강제 종료 경로는 미확인(G2). 지표: `pf_ws_shutdown_connections`(종료 시점 연결 수), `pf_ws_shutdown_forced_total`. 시험(08 §6): SIGTERM → `bye` → `1001` → 클라이언트가 새 인스턴스로 `resume`, 강제 종료 경로, 유예 시간 주입.
+**실측 주의(Bun 1.4.4, 1000연결에서도 재현)**: `await server.stop()` 은 열린 WebSocket 이 있으면 **영원히 끝나지 않는다**(5초 후에도 연결 1000개 잔존). 회피 순서는 1000연결에서 10~14ms 에 전량 정상 종료했다. 종료 순서는 ① `stop()` 을 **await 없이** 호출(신규 수락 중단) → ② 각 소켓에 `bye` 후 `close(1001)` → ③ 유예 시간(타임아웃) 안에 모두 닫히기를 기다린 뒤 `stop()` 의 완료를 기다림. 타임아웃 후 `stop(true)` 강제 종료 경로는 미확인(G2). 지표: `pf_ws_shutdown_connections`(종료 시점 연결 수), `pf_ws_shutdown_forced_total`. 시험(08 §6): SIGTERM → `bye` → `1001` → 클라이언트가 새 인스턴스로 `resume`, 강제 종료 경로, 유예 시간 주입.
 
 ### RT-12. 깨우기 신호 수신 (LISTEN + 폴링)
 
@@ -1889,8 +1891,8 @@ flowchart TD
 
 | 항목 | 결정 시점 |
 |---|---|
-| `ElysiaRuntime` vs `BunServeRuntime` 확정 | G2 |
-| `WS_MAX_CONNECTIONS` 전역 상한 값 | G2 소크 후 |
+| `ElysiaRuntime` vs `BunServeRuntime` 확정 | G2 로컬 재시험으로 어느 쪽이든 앱 큐가 필요함은 확정. 런타임 선택은 팬아웃 p99 비교 후(Elysia 최상위 옵션 악화는 재현 안 됨 — 결론 유보). 지연 측정 시 서버 타임스탬프는 `Date.now()` |
+| `WS_MAX_CONNECTIONS` 전역 상한 값 | 초기값 400(탭당 소켓 2 × 동시 접속 50~100 의 2배 여유, 01 §8.3). G2 22분 소크는 1000연결에서 평탄(RSS +0.45MB/h)했고 수 시간 소크는 미실행 |
 | Elysia `ws` 훅·업그레이드 사전 검사 API 세부 | `ElysiaRuntime` 구현 시 공식 문서 확인(미확인) |
 | 연결당 메모리 실측(앱 큐·상태 포함) | 구현 후 측정(현재 5.5KB 는 순수 Bun 유휴 측정치) |
 | 로그아웃 즉시 반영(`NOTIFY session_revoked`) | WS 구현 시 |

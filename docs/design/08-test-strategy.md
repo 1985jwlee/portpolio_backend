@@ -1,7 +1,7 @@
 # 08. 테스트 전략
 
 "어떻게 검증하는가"의 정본. 공통 기반·포트는 [00](00-system-overview.md), 계약은 [03](03-api-contract.md)·[04](04-ws-protocol.md)·[05](05-event-catalog.md), 인증은 [06](06-auth.md), CI 배치는 [09](09-ci-cd.md).
-근거: ADR-005(outbox)·014(재접속·무중단)·020(inbox)·021(동시성)·022(스택·관문)·023(운영 정책), 명세 AC-001~017, 검증 등급 체계(L0~L4, `.claude/rules/pipeline-verification.md`).
+근거: ADR-005(outbox)·014(재접속·무중단)·020(inbox)·021(동시성)·022(스택·관문)·023(운영 정책), 명세 AC-001~035, 검증 등급 체계(L0~L4, `.claude/rules/pipeline-verification.md`).
 
 ## 1. 원칙
 
@@ -61,6 +61,20 @@ flowchart TB
 | 읽기 모델 프로젝터 **규칙**(`last_seq` 비교, `count` 덮어쓰기) | 인메모리 저장소 대역으로 순수 | **L2** (SQL 반영은 L3) |
 | 브라우저 구동, k6 | 서브프로세스·네트워크 | L3 |
 | 터널 경유 측정 | 실환경 | L4 |
+
+### 2.0e 보안사고 대응 (ADR-028, design/13)
+
+| 시험 | 기대값 | 등급 |
+|---|---|---|
+| `revoke-sessions --all` 후 기존 쿠키로 요청 | 가드가 세션 없음으로 판정, `GET /api/me` 가 **새 익명 세션** 발급(인증 안 됨) | L3 |
+| 폐기 후 기존 `/ws/private` 연결 | 세션 캐시 만료(≤30초) 후 `4401` 로 종료, 새 연결은 새 세션으로만 | L3 |
+| `revoke-sessions --user U` | U 의 세션만 만료, 다른 사용자 세션 유지 | L3 |
+| `--dry-run` / 이미 만료된 세션 재실행 | 변경 없음 / 건수 0, 멱등 | L3 |
+| 폐기 트랜잭션 롤백 | 감사 행 `admin.sessions_revoked` 도 없음 | L3 |
+| `retention:pause` 중 정리 | 모든 `RetentionRule`·`PurgeExpiredSessions`·`archive-logs.sh` 삭제가 건너뛰어짐, `pf_retention_skipped_total{reason="paused"}` 증가 | L3 |
+| 정지 TTL(24시간) 경과(가짜 시계) | 자동 해제, 감사 `auto_released`, 정지 중 `retention:run` 은 거부 | L2·L3 |
+| `secret-scan` | 시험용 비밀 패턴 파일을 검출하고 PR 이 실패(도구 미확인, S1-15) | L3 |
+| 회전 리허설 체크리스트(13 §10) | 9개 비밀·스위치 각각 구 비밀 거부 + 새 비밀 동작, 소요 시간 기록 | L4(리허설, 분기 1회) |
 
 ### 2.0d 운영 실측 회귀 시험 (ADR-027, 로컬 실측 반영)
 
@@ -251,6 +265,24 @@ classDiagram
 | AC-015 | 동시 선점·fencing | 동시성 시험 §5.1·§5.2 | L3 | `test/chaos/claim-race.test.ts`, `claim-fencing.test.ts` |
 | AC-016 | 동시 수정 409 | 동시성 시험 §5.3 | L3 | `test/chaos/version-conflict.test.ts` |
 | AC-017 | 재구성·순서 뒤섞임 | 프로젝터 규칙(L2) + 뒤섞어 중복 전달 후 정본 대조(L3) + §7.4 | L2·L3 | `modules/guestbook/test/unit/projector.test.ts`, `test/chaos/rebuild.test.ts` |
+| AC-018 | 신고 메모 보호·열람 | 센티널 메모 신고 후 `pg_dump`·outbox·`request_key`·로그 평문 부재(L3) + 관리자/비관리자 note 조회·감사 행 | L2·L3 | §2.0b, `modules/guestbook/test/integration/report-note.test.ts`, `apps/api/test/contract/` |
+| AC-019 | 쓰기 잠금 | 잠금 on/off 후 대상 4종 503+`Retry-After: 60`, 허용 3종 정상, 감사 행 | L3 | `apps/api/test/integration/write-lock.test.ts` |
+| AC-020 | 감사 기록 원자성 | 결함 주입(`faults.failAt('events.audit_writer.after_record')`)으로 글 상태·`moderation_action`·감사 행 동시 부재 확인 | L3 | §2.0c, `modules/guestbook/test/integration/audit-atomic.test.ts` |
+| AC-021 | 접근 로그 프라이버시 | `?code=SECRET&state=X`·위조 `X-Forwarded-For` 요청 후 nginx 접근 로그·앱 로그 검사, `rid` 연결 | L3 | §2.0c, `test/compose/access-log.test.ts` |
+| AC-022 | 세션 일괄 폐기 | `revoke-sessions --all` 후 기존 쿠키가 새 익명 세션으로 처리, private `4401`(캐시 30초 내), 감사 행 | L3 | §2.0e, `apps/ws-gateway/test/revoke.test.ts`, `apps/worker/test/cli/` |
+| AC-023 | 모든 쓰기는 트랜잭션 | `ReadDb` 쓰기 시도 거절(L1·L2) + 잡 쓰기가 tx 안(L3) + 배치 삭제 배치별 커밋 + `check-purity` | L1·L2·L3 | §2.0a, `packages/db/test/` |
+| AC-024 | 컬럼 보호 등급 | `check:classification` 이 등급 없는 컬럼을 검출, ENC 컬럼의 쓰기 경로가 `FieldCipher` 뿐임 | L1·L2 | §2.0b, `packages/db/test/classification.test.ts` |
+| AC-025 | 운영 상태 지표·경보 | `promtool test rules`(10건 발화·9건 불발·`OpsJobStale` 경계), `StatusFileCollector` 3상태 구분, 시험 알림 수신 | L2·L3 (실제 Discord 는 L4) | §2.0d, `infra/prometheus/test/`, `apps/worker/test/status-collector.test.ts` |
+| AC-026 | 보관 정지 | `retention:pause` 중 삭제 없음, 24시간 자동 해제(가짜 시계), 경보 | L3 | §2.0e, `modules/*/test/integration/retention-pause.test.ts` |
+| AC-027 | 비밀 스캔 | 시험용 비밀 패턴 커밋이 `secret-scan`·pre-commit 에서 실패 | L1·L3 | §2.0e, `.github/workflows` 시험 브랜치 |
+| AC-028 | 백업·복구 | 암호화 백업을 개인키로 복호화해 빈 DB 에 복원, 행 수·무결성, 서버에 개인키 부재 | L3 → L4(외부 보관) | §7.5, `test/restore-drill/` |
+| AC-029 | 감사 조회·보관 | 비관리자 403, 키셋 조회, `auth` 7일·`admin`/`system` 90일 경계(가짜 시계) | L3 | §2.0c, `apps/api/test/integration/audit.test.ts` |
+| AC-030 | dead 재투입 | `dead → received/new`, 시도 횟수 초기화, 사유·감사 행 | L3 | §7.2, `test/chaos/dead-requeue.test.ts` |
+| AC-031 | public/private 분리 연결 | 쿠키 없는 `/ws/private` 업그레이드 401, 익명 세션의 `flow.step` 수신·타 세션 미수신, `4409` | L3 | §6.x, `apps/ws-gateway/test/channels.test.ts`, `test/e2e/realtime.spec.ts` |
+| AC-032 | 라이선스·콘텐츠 고지 | 저장소 루트 `LICENSE`(MIT)와 README 고지 존재 검사 | L1 | `scripts/check-license.ts`(제안) |
+| AC-033 | 멱등 쓰기 | 같은 키 재전송·동시 2건·다른 본문 422·처리 중 409 | L3 | `modules/guestbook/test/integration/idempotency.test.ts` |
+| AC-034 | 필드 키 회전 | `k1`→`k2` 재암호화, 재실행 멱등, 중단 후 이어서, 옛 키 행 0 확인 | L3 | §2.0b, `packages/infra/test/crypto/rotate.test.ts` |
+| AC-035 | 사고 대응 리허설 | design/13 §10 체크리스트 실행(구 비밀 거부·새 비밀 동작·소요 시간) | L4(수동) | 릴리스·분기 체크리스트 |
 
 ## 5. 동시성 시험 설계
 
@@ -561,8 +593,12 @@ test/
 
 | 항목 | 결정 시점 |
 |---|---|
-| E2E 도구(Playwright 등)와 Bun 호환 | E2E 시작 시 (tech-stack §13) |
-| Testcontainers on Bun | 관문 G9(S1-6 에서 확인). 실패·미확인 시 **compose 의 `postgres` 서비스를 시험 DB 로** 쓰고 스키마 격리로 병렬 처리 |
+| ~~E2E 도구(Playwright 등)와 Bun 호환~~ | Playwright 1.64.1 이 Bun 에서 동작(tech-stack §11.1). 브라우저 약 150MB를 CI 에서 받아야 한다 |
+| ~~Testcontainers on Bun~~ | G9 로컬 통과(testcontainers 12.2.1, postgres:18.6). 실패 대안은 **서비스 Postgres + 템플릿 DB 복제**(`CREATE DATABASE … TEMPLATE`) |
+
+**G9 실측 패턴**: ① `bun test`(순차)에서는 `bunfig.toml` `preload` 로 컨테이너를 한 번 띄워 파일 간 공유 ② `bun test --parallel` 에서는 preload 가 워커마다 컨테이너를 만드므로(시작 3~4초) **래퍼 스크립트가 컨테이너 1개를 띄우고 `DATABASE_URL` env 로 넘기고** 워커가 공유(총 약 4초) ③ `beforeAll` 기본 타임아웃 5초는 컨테이너 시작에 걸려 한 번 실패했으므로 **60초**로 올린다 ④ Ryuk 필수(켜면 SIGKILL 후 약 11초 안에 정리, 끄면 12초 뒤에도 컨테이너 누수) ⑤ 시험 격리는 템플릿 DB 복제가 빠르다(복제 중앙값 약 36ms, 병렬 8개 191ms. 복제본 삭제는 `WAL_LOG` 복제본 10개에 4.2초라 컨테이너를 통째로 버리는 편이 안전해 보이나 이는 추측) ⑥ 템플릿에 접속 중이면 복제가 실패한다.
+
+**WS 시험 규약(G2 실측)**: 서버 타임스탬프는 `Date.now()` 를 쓴다(`performance.timeOrigin + performance.now()` 는 이 WSL2 호스트에서 벽시계와 분당 수 초씩 어긋나 지연 값이 무효였다). 느린 소비자 시험은 클라이언트가 4408 close 프레임을 받는다고 단정하지 않는다(읽지 않는 연결은 `1006`). `await server.stop()` 교착 회피 종료 순서(stop() await 없이 → bye+1001 → 연결 0 대기)를 1000연결로 시험한다.
 | 작성→시각화 반영 지연(p95) 합격선 | 측정 후 (현재 수치 없음) |
 | 뮤테이션 점검 도구 | 수동 가드 제거로 시작, 자동화는 선택 |
 | 2단계 정적 미러 시험 방법 | 관문 G11 |

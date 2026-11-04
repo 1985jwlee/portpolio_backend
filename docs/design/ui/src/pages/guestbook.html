@@ -1,0 +1,81 @@
+<section class="section">
+  <div class="wrap gb-layout">
+   <div class="gb-grid">
+    <div class="gb-head">
+      <div class="stack" style="--stack:.5rem">
+        <h1>방명록</h1>
+        <p class="muted">글을 남기면 이벤트 흐름 화면에서 그 글이 지나는 단계를 볼 수 있어요.</p>
+      </div>
+      <p class="small muted" id="presence"><svg class="node node-done" style="width:.75rem;height:.75rem" aria-hidden="true"><use href="#n-done"/></svg> 지금 <span class="mono">12</span>명 접속 중</p>
+    </div>
+
+    <div id="conn-banner" class="conn-banner" hidden></div>
+    <p class="sr-only" id="live-new" role="status" aria-live="polite"></p>
+
+    <form class="card compose stack" id="compose" novalidate aria-labelledby="compose-h" style="--stack:1rem">
+      <h2 id="compose-h" style="font-size:var(--text-base)">글 남기기</h2>
+      <div class="field">
+        <label for="name">이름</label>
+        <input class="input" id="name" name="name" autocomplete="nickname" placeholder="손님-a3f9" maxlength="20" aria-describedby="name-help">
+        <span class="help" id="name-help">2~20자. 비워 두면 손님-xxxx 이름이 붙습니다.</span>
+      </div>
+      <div class="field">
+        <label for="body">내용</label>
+        <textarea class="textarea" id="body" name="body" maxlength="520" aria-describedby="body-help body-err" placeholder="구조에서 궁금했던 점이나 소감을 남겨 주세요."></textarea>
+        <div class="row" style="justify-content:space-between">
+          <span class="help" id="body-help">최대 500자, 10줄까지. 글은 텍스트로만 표시됩니다.</span>
+          <span class="counter" id="counter" aria-hidden="true">0/500</span>
+        </div>
+        <p class="err" id="body-err" hidden><svg class="node node-error" aria-hidden="true"><use href="#n-error"/></svg><span></span></p>
+      </div>
+      <div class="row compose-actions">
+        <p class="small muted" style="flex:1 1 14rem">익명 글은 나중에 수정하거나 삭제할 수 없어요. 수정과 삭제가 필요하면 먼저 로그인하세요.</p>
+        <a class="btn btn-secondary" href="#">GitHub로 로그인</a>
+        <button class="btn btn-primary" type="submit" id="submit">남기기</button>
+      </div>
+    </form>
+
+    <section aria-labelledby="list-h" class="stack" style="--stack:.875rem">
+      <div class="row" style="justify-content:space-between"><h2 id="list-h" style="font-size:var(--text-base)">최근 글</h2><span class="xs subtle">새 글은 위에 나타납니다</span></div>
+      <div id="list" class="stack" style="--stack:.875rem" aria-busy="false"></div>
+      <div class="row" style="justify-content:center"><button class="btn btn-ghost" type="button" id="more">이전 글 더 보기</button></div>
+    </section>
+   </div>
+
+   <aside class="gb-aside" aria-labelledby="mine-h">
+     <div class="card stack" style="--stack:.875rem">
+       <h2 id="mine-h" style="font-size:var(--text-base)">내가 방금 남긴 글의 흐름</h2>
+       <ol class="mini-rail" aria-label="단계 진행">
+         <li><svg class="node node-done" aria-hidden="true"><use href="#n-done"/></svg><span class="mono">written</span><span class="state">완료</span></li>
+         <li><svg class="node node-done" aria-hidden="true"><use href="#n-done"/></svg><span class="mono">outboxed</span><span class="state">완료</span></li>
+         <li><svg class="node node-done" aria-hidden="true"><use href="#n-done"/></svg><span class="mono">dispatched</span><span class="state">완료</span></li>
+         <li><svg class="node node-active" aria-hidden="true"><use href="#n-active"/></svg><span class="mono">received</span><span class="state" style="color:var(--flow-active)">진행 중</span></li>
+         <li><svg class="node node-pending" aria-hidden="true"><use href="#n-pending"/></svg><span class="mono">processed</span><span class="state">대기</span></li>
+       </ol>
+       <a class="small" href="flow.html">흐름 화면에서 자세히 보기</a>
+     </div>
+   </aside>
+  </div>
+</section>
+
+<dialog id="report-dlg" aria-labelledby="report-h">
+  <form method="dialog" class="stack" style="--stack:1rem" id="report-form">
+    <h2 id="report-h" style="font-size:var(--text-lg)">글 신고하기</h2>
+    <fieldset style="border:0;padding:0;margin:0" class="stack" style="--stack:.5rem">
+      <legend class="label">신고 사유</legend>
+      <label class="row small"><input type="radio" name="reason" value="spam" checked> 스팸이나 광고</label>
+      <label class="row small"><input type="radio" name="reason" value="abuse"> 욕설이나 괴롭힘</label>
+      <label class="row small"><input type="radio" name="reason" value="personal_info"> 개인정보 노출</label>
+      <label class="row small"><input type="radio" name="reason" value="off_topic"> 주제와 무관</label>
+      <label class="row small"><input type="radio" name="reason" value="other"> 기타</label>
+    </fieldset>
+    <div class="field"><label for="note">메모 (선택)</label><textarea class="textarea" id="note" maxlength="200" style="min-height:5rem" aria-describedby="note-help"></textarea><span class="help" id="note-help">200자까지. 관리자만 볼 수 있고 암호화되어 저장됩니다.</span></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn btn-ghost" value="cancel" type="submit">취소</button><button class="btn btn-danger" value="ok" type="submit">신고하기</button></div>
+  </form>
+</dialog>
+
+<div class="mock-ctl" role="group" aria-label="목업 전용 컨트롤">
+  <strong>목업 전용</strong>
+  <label>연결 상태 <select id="conn-select"><option value="connected">연결됨</option><option value="connecting">연결 중</option><option value="unstable">불안정</option><option value="backoff">재연결 대기</option><option value="idle">일시 중지(탭 숨김)</option><option value="stopped4409">다른 탭에서 열림</option><option value="stopped4400">실시간 비활성</option><option value="offline">오프라인</option></select></label>
+  <label>목록 상태 <select id="list-select"><option value="ok">정상</option><option value="loading">불러오는 중</option><option value="empty">빈 목록</option><option value="error">오류</option></select></label>
+</div>

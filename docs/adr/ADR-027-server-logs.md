@@ -77,8 +77,8 @@ log_format pf_json escape=json
 | category | action | 기록 위치 |
 |---|---|---|
 | auth | `login_succeeded`, `login_failed`(`reason_code`: `state_invalid`·`state_expired`·`github_rejected`·`github_unavailable`), `logout` | ID-06·07 |
-| admin | `entry_hidden`, `entry_unhidden`, `report_resolved`, `write_lock_changed`, `report_note_read` | GB-07·08·09·10·27 |
-| system | `dead_requeued`, `field_keys_rotated`, `projection_rebuilt`, `retention_ran`(삭제 건수) | EV-07, CLI, GB-26, EV-10 |
+| admin | `entry_hidden`, `entry_unhidden`, `report_resolved`, `write_lock_changed`, `report_note_read`, `sessions_revoked`(ID-11, 대상 수) | GB-07·08·09·10·27 |
+| system | `dead_requeued`, `field_keys_rotated`, `projection_rebuilt`, `retention_ran`(삭제 건수), `retention_paused`(`detail.state`: `paused`·`resumed`·`auto_released`) | EV-07, CLI, GB-26, EV-10 |
 
 - `entry_hidden` 등은 `moderation_action` 과 중복처럼 보이지만 **목적이 다르다**: `moderation_action` 은 도메인 이력(공개 판단 근거), `audit_log` 는 보안·운영 감사. 같은 트랜잭션에서 둘 다 쓴다.
 - 반응·글 작성 같은 일반 사용자 행위는 감사 로그에 쓰지 않는다(이벤트·`trace_step` 이 담당).

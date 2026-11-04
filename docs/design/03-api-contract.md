@@ -16,9 +16,61 @@
 | 쓰기 헤더 | `Idempotency-Key: <uuid>` **필수**(모든 `POST`/`PUT`/`PATCH`/`DELETE`, 로그인·로그아웃 제외) |
 | CSRF | `SameSite=Lax` + `Origin` 검사 + JSON 전용 + `Idempotency-Key` 필수의 조합. 별도 토큰 없음([06](06-auth.md) §4, [10](10-security.md) §3.3) |
 | 추적 | 모든 응답에 `X-Trace-Id`(= `traceId`). 쓰기 응답 본문에도 `traceId` |
-| 속도 제한 | 초과 시 `429` + `Retry-After`. 헤더 `RateLimit-Limit`/`Remaining`/`Reset` 제공(앱 세션 단위 기준) |
+| 속도 제한 | 초과 시 `429` + `Retry-After`. 헤더 `RateLimit-Limit`/`Remaining`/`Reset` 제공(앱 세션 단위 기준). **수치는 §1.1** |
 | 캐시 | 조회는 `Cache-Control: no-store`(개인화·실시간), 정적 자원만 길게 |
 | 압축 | 프록시(nginx) 담당 |
+
+### 1.1 속도 제한 값 (AC-007, 가정 A-011)
+
+> **초기값이며 측정 후 조정한다(트래픽 미측정).** 근거는 "동시 접속 50, API p95 300ms" 목표를 넘기지 않는 상한이다. 값은 설정이고 규칙 이름은 코드 상수다. 이 표가 앱 세션 제한의 정본이고, nginx 값은 [F17 §9](features/17-ops-observability.md), 상세 규칙은 [10 §7.1](10-security.md) 이다.
+
+**앱(세션 단위, `RateLimitGuard`, 키 = 행위자 키)** — 토큰 버킷: `capacity` 만큼 모아 두었다가 `보충 속도`로 채운다.
+
+| 규칙(등급) | 대상 | 보충 속도 | capacity(연타 허용량) | 추가 창 |
+|---|---|---|---|---|
+| `write.entry` | `POST /api/entries`(흐름 화면 "보내기" 포함) | 5건/분 | 5 | 30건/시간 |
+| `write.react` | `PUT`/`DELETE …/reactions/{emoji}` | 30건/분 | 10 | — |
+| `write.report` | `POST …/reports` | 5건/분 | 3 | 20건/시간 |
+| `write.owner` | `PATCH`/`DELETE /api/entries/{id}` | 20건/분 | 5 | — |
+| `write.profile` | `PUT /api/me/profile` | 6건/분 | 3 | — |
+| `write.admin` | 관리자 쓰기(숨김·해제·신고 처리·쓰기 잠금) | 60건/분 | 20 | — |
+| (조회 `GET`) | 목록·`me`·흐름 조회 | 앱 제한 없음 | — | nginx IP 제한만 |
+
+- **세션 발급**은 세션이 없을 때 일어나므로 세션 키 제한이 불가능하다 → `GET /api/me` 의 **접속 주소 제한(nginx)** 이 맡는다(아래).
+- 규칙은 "추가 창"이 있으면 **두 버킷을 모두 통과해야** 한다(분당 5건 + 시간당 30건).
+- 멱등 재생(`Idempotency-Key` 가 같은 요청)도 가드가 먼저 돌므로 **토큰을 쓴다**(단순성). 반응 중복 `PUT` 도 마찬가지다.
+- 관리자도 예외 없이 제한한다(탈취된 관리자 계정의 폭주 방지).
+
+**초과 시 응답**
+
+| 항목 | 값 |
+|---|---|
+| 상태·코드 | `429` `rate_limited`, `details.retryAfterSeconds` |
+| `Retry-After` | `ceil((1 - 현재 토큰) / 보충 속도[토큰/초])` 초. 추가 창이 막힌 경우 **막힌 버킷들의 최댓값**. 예) `write.entry` 5건을 빠르게 쓴 직후 12초 |
+| `RateLimit-Limit` | 남은 비율이 가장 낮은 버킷의 `capacity` |
+| `RateLimit-Remaining` | 그 버킷의 `floor(토큰)` |
+| `RateLimit-Reset` | 그 버킷이 가득 찰 때까지 `ceil((capacity - 토큰) / 보충 속도)` 초 |
+
+**nginx(접속 주소 단위, 메모리 전용 — 주소를 저장하지 않는다)**
+
+| 대상 | 값 | 비고 |
+|---|---|---|
+| `/api/` 쓰기 메서드 | `pf_write`: 5r/s, burst 10 | 거절 시 429, `Retry-After: 1` |
+| `/api/` 조회, `/` | `pf_read`: 20r/s, burst 40 | |
+| `GET /api/me` | `pf_me`: 30r/분, burst 10 | **세션 발급 남용 방지** (F17 에 zone 추가 요청) |
+| `/api/auth/` | `pf_auth`: 10r/분, burst 5 | 로그인 시작·콜백 남용 방지 (추가 요청) |
+| `/ws/` 동시 연결 | `limit_conn pf_ws 20` | 주소당. 탭당 소켓 2 × 여러 탭 |
+| `/ws/` 업그레이드 속도 | `pf_wsup`: 30r/분, burst 20 | 재접속 폭주 방지 (추가 요청) |
+| 본문 크기 | `client_max_body_size 16k` | 글 500자 기준 여유 |
+
+`r/분` 존의 `Retry-After` 는 `ceil(60 / 분당 한도)` 초(예: `pf_me` 30r/분 → 2초)로 응답한다.
+
+**WebSocket 한도**: 클라이언트 메시지 초당 10건 초과 시 `4429`, 세션당 private 연결 3개(초과 시 `4409`), 전체 연결 수 상한 `WS_MAX_CONNECTIONS` **초기값 400**(예상 100 = 동시 50 × 소켓 2 의 4배, [04 §1](04-ws-protocol.md)).
+
+**정합 근거(미측정 추정)**
+- 사람 속도의 사용은 방문자당 쓰기가 10초에 1건 안팎이라 동시 50 이면 약 5건/초다. 표의 상한을 전 세션이 동시에 채우는 이론치(글 4.2건/초 + 반응 25건/초)는 **예상이 아니라 천장**이다.
+- 쓰기 명령 1건은 트랜잭션 1개(행 3~5개 삽입)이므로 이론 천장에서도 수십 TPS 수준이며, p95 300ms 에 닿는지는 S9 의 터널 경유 부하 시험으로 확인한다(AC-013).
+- 같은 주소 뒤에 여러 방문자가 있는 경우(사무실 NAT)는 `pf_write` 5r/s 를 나눠 쓴다. 동시 쓰기 인원이 10명 안팎까지는 burst 10 으로 흡수된다. 문제가 관측되면 `pf_write` 를 올린다.
 
 ## 2. 에러 형식
 
@@ -104,6 +156,7 @@ type Me = {
   displayName: string;
   isAdmin: boolean;
   writeLocked: boolean;       // 쓰기 잠금 중이면 true — 클라이언트는 작성 UI 를 비활성화한다
+  writeLockReason?: string;   // 잠금 사유(관리자가 입력, ≤200자, 사용자에게 보이는 공지). 잠금이 아니면 생략
   locale?: 'ko' | 'en';
 };
 ```
@@ -145,7 +198,7 @@ type Me = {
 | 메서드·경로 | 인증 | 쿼리 | 성공 응답 |
 |---|---|---|---|
 | `GET /api/entries` | 익명 허용 | `limit`(1~50, 기본 20), `cursor` | `200` `Page<EntryView>` |
-| `GET /api/me` | 익명 허용 | — | `200` `Me` — `{ kind:'anonymous'\|'user', userId?, displayName, isAdmin, writeLocked, locale? }` |
+| `GET /api/me` | 익명 허용 | — | `200` `Me` — `{ kind:'anonymous'\|'user', userId?, displayName, isAdmin, writeLocked, writeLockReason?, locale? }` |
 | `GET /api/admin/reports/{id}/note` | 관리자 | — | `200` `{ note }` (복호화, `Cache-Control: no-store`) — 접근 로그에는 reportId 만 |
 | `GET /api/admin/audit` | 관리자 | `category`(`auth`\|`admin`\|`system`), `action`, `since`(ISO 8601), `limit`(1~100, 기본 50), `cursor` | `200` `Page<AuditRecordView>` — 키셋(`id DESC`), `detail` 은 응답에 포함하지 않는다 (ADR-027, EV-15) |
 | `GET /api/admin/reports` | 관리자 | `status`, `limit`, `cursor` | `200` `Page<ReportView>` |

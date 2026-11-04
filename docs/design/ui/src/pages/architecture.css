@@ -1,0 +1,20 @@
+.diagram-wrap{padding:1rem;overflow:hidden}
+svg.arch{display:none;width:100%;height:auto;color:var(--color-muted)}
+@media (min-width:64rem){svg.arch{display:block}}
+svg.arch text{font-family:var(--font-sans);font-size:15px;fill:var(--color-text);font-weight:600}
+svg.arch text.mono{font-family:var(--font-mono);font-size:15px}
+svg.arch text.sub{font-size:12px;fill:var(--color-muted);font-weight:400}
+svg.arch .nodes rect{fill:var(--color-surface);stroke:var(--color-border-strong);stroke-width:1.5}
+svg.arch .nodes .hl rect{stroke:var(--color-accent);stroke-width:2;fill:var(--color-accent-subtle)}
+svg.arch .nodes .dim rect{fill:transparent}
+svg.arch .ln{stroke:var(--color-border-strong)}
+svg.arch .ln.flow{stroke:var(--color-accent);stroke-width:2}
+svg.arch .ln.dash{stroke-dasharray:5 4;stroke:var(--color-muted)}
+svg.arch .lines{color:inherit}
+svg.arch .steps circle{fill:var(--color-primary)}
+svg.arch .steps text{fill:var(--color-primary-fg);font-size:13px;font-family:var(--font-mono)}
+.steps-list{display:grid;gap:.75rem;max-width:var(--container-prose)}
+.steps-list li{display:grid;grid-template-columns:1.75rem 1fr;gap:.75rem;align-items:start}
+.stepno{display:grid;place-items:center;width:1.5rem;height:1.5rem;border-radius:50%;background:var(--color-primary);color:var(--color-primary-fg);font-family:var(--font-mono);font-size:var(--text-xs);margin-top:.15rem}
+.tag{display:inline-block;margin-bottom:.5rem;font-size:var(--text-xs);color:var(--color-subtle)}
+.grid.cols-3 .card h3{margin-bottom:.375rem}

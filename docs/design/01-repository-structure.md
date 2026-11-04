@@ -385,9 +385,9 @@ flowchart TD
 | `WS_PORT` | int | `3002` | 아니오 | 아니오 | |
 | `WS_POLL_INTERVAL_MS` | int | `1000` | 아니오 | 아니오 | NOTIFY 보완 폴링 (ADR-023) |
 | `WS_SEND_QUEUE_MAX` | int | `64` | 아니오 | 아니오 | 연결별 송신 큐 상한. 초과 시 연결 종료 (G2) |
-| `WS_BACKPRESSURE_BYTES` | int | 미확인 (G2) | 아니오 | 아니오 | 적용 위치별 동작이 달라 실측으로 정한다 (ADR-022) |
+| `WS_BACKPRESSURE_BYTES` | int | `262144` (256KB) | 아니오 | 아니오 | 적용 위치별 동작이 달라 실측으로 정한다 (ADR-022) |
 | `WS_IDLE_TIMEOUT_SECONDS` | int | `120` | 아니오 | 아니오 | Elysia 기본값 |
-| `WS_MAX_CONNECTIONS` | int | 미정 | 아니오 | 아니오 | 목표 동시 접속 50 이상의 여유로 G2 에서 |
+| `WS_MAX_CONNECTIONS` | int | `400` | 아니오 | 아니오 | 탭마다 소켓이 둘(public+private)이라 동시 접속 50 이면 약 100~200 이다. 2배 여유로 초기값 400. G2 22분 소크는 1000연결에서 평탄했으나 수 시간 소크는 미실행 |
 
 ### 8.4 worker
 
@@ -410,7 +410,12 @@ flowchart TD
 |---|---|---|---|---|---|
 | `WEB_PORT` | int | `3000` | 아니오 | 아니오 | |
 | `API_INTERNAL_URL` | URL | `http://api:3001` | 아니오 | 아니오 | SSR 이 api 를 부르는 내부 주소 |
+| `SEO_INDEXING` | `on`/`off` | `off` | 아니오 | 아니오 | 검색 색인 허용. 기본 `off`(`robots.txt` disallow + `noindex`), 공개 전환 시 `on` ([14](14-seo-and-error-pages.md)) |
 | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | base64 | — | 다중 인스턴스일 때만 | **예** | 단일 인스턴스에서는 생략 가능 (tech-stack.md §5) |
+
+**web `proxy.ts` matcher**: `/healthz`, `/readyz`, `/metrics`, `/api` 와 정적 자원은 반드시 제외한다. 예: `'/((?!api|healthz|readyz|metrics|_next|_vercel|.*\\..*).*)'`. 제외하지 않으면 로케일 협상이 이 경로를 `/en/healthz` 로 307 리다이렉트하고 따라간 결과가 404 가 된다(G3 실측: `/healthz`·`/api/time` 모두 재현).
+
+**도구 버전(로컬 실측, 2026-11-04)**: gitleaks 8.30.1, age 1.3.2, Playwright 1.64.1(`@playwright/test`), testcontainers 12.2.1, cloudflared 2026.10.7, k3d v5.9.0(k3s v1.35.5), Envoy Gateway v1.9.3, Gateway API v1.7.0 — 구현 시작 시 재조회한다([tech-stack §11.1](../domains/tech-stack.md)).
 
 ### 8.6 코드 상수로 두는 것 (환경변수가 아님)
 
@@ -428,6 +433,6 @@ flowchart TD
 | 항목 | 결정 시점 |
 |---|---|
 | Biome 로 시간·난수 호출 금지를 표현할 수 있는지 | 구현 단계 0 (`check-purity.ts` 로 시작) |
-| `WS_BACKPRESSURE_BYTES`·`WS_MAX_CONNECTIONS` 값 | 관문 G2 |
+| `WS_BACKPRESSURE_BYTES` 값 | 앱 레벨 큐 기준(256KB)으로 확정. 수 시간 소크 후 조정 |
 | 속도 제한 수치 | 구현 시 (A-011) |
 | 이모지 6종의 구체 목록 | protocol 작성 시 |

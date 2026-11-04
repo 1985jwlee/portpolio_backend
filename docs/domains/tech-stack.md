@@ -92,7 +92,7 @@
 |---|---|---|---|---|
 | 지표 수집 | **Prometheus** | 3.15.1 | 확정 | |
 | 대시보드 | **Grafana** | 13.3.0 | 확정 | |
-| 공개 방식 | **Public dashboards 우선** | — | **관문부 G6** | iframe 임베드 허용 설정 키를 문서로 확인하지 못함 → 실측, 안 되면 익명 읽기 전용 뷰(`[auth.anonymous]` `org_role = Viewer`)로 후퇴 |
+| 공개 방식 | **Public dashboards 우선** | — | **G6 로컬 통과** | `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off 로 임베드 확인(§11.1). **후퇴안 없음** — 익명 Viewer 는 임의 PromQL 이 열려 부적합, 실패 시 링크/스크린샷으로 대체 |
 | 앱 지표 라이브러리 | 후보: prom-client / OpenTelemetry(`@elysiajs/opentelemetry` 1.4.11) | — | **스파이크 G5(부분 실측)** | prom-client 15.1.3 이 Bun 1.4.4 에서 Registry·Counter·Histogram·`/metrics` 동작. 단 `nodejs_gc_duration_seconds` 는 샘플 없음, `nodejs_eventloop_lag_seconds` 는 항상 0, `nodejs_active_handles` 류는 무의미 → 이벤트 루프는 `nodejs_eventloop_lag_{max,p99}_seconds` 로 본다 |
 | 부하 시험 | **k6** | 2.3.0 | 확정 | Docker(`grafana/k6`)로 실행, Arm 이미지 지원은 미확인 |
 
@@ -105,7 +105,7 @@
 | 린트·포맷 | **Biome** | 2.6 | 확정 | **계층 검사는 못 한다**(`noRestrictedImports` 는 임포트하는 쪽을 구분하지 못함) → 위 도구가 맡는다 |
 | 단위·통합 시험 | **`bun test`** | Bun 내장 | 확정 | `mock.module` 지원. 가짜 타이머 지원 여부는 미확인 → 시계는 포트로 주입(ADR-019) |
 | DB 통합 시험 | CI 의 compose 서비스(실제 Postgres) | — | 확정 | Testcontainers 는 Bun 호환 확인 후(**G9**, 선택) |
-| E2E | Playwright 계열 | — | 후속 | 도구 선정은 E2E 시작 시 |
+| E2E | **Playwright** | 1.64.1 | 채택(Bun 동작 확인) | `bun add -d @playwright/test` + `bunx playwright install chromium`(브라우저 약 150MB를 CI 에서 받음) |
 | 타입 검사 | `tsc --noEmit` | — | 확정 | CI 필수 |
 
 ## 10. M1 에서 쓰지 않는 것
@@ -129,7 +129,7 @@
 | **G3** | Next.js on Bun | 빌드·`standalone` 실행·SSR·ISR·정적 에셋·`next-intl`·이미지 최적화가 Bun 런타임에서 정상 | web 만 Node 22 LTS 로 실행 |
 | **G4** | DB 드라이버 | Drizzle 호환 + 트랜잭션 + **LISTEN/NOTIFY 전용 연결** + `SKIP LOCKED` 동시성 시험 통과 | 후보 순서대로 대체. **로컬 실측 결과: Bun.sql 통과, 권장(ADR-022 관문 결과)** |
 | **G5** | 지표·로깅 | `/metrics` 에 요청 수·지연·outbox 적체 지표가 나오고 레이블 규칙(식별자 금지)을 지킴 | 후보 교체 |
-| **G6** | Grafana 임베드 | Public dashboards 가 사이트에 임베드되고 편집·탐색 UI 가 노출되지 않음 | 익명 Viewer + 프로비저닝 대시보드 |
+| **G6** | Grafana 임베드 | Public dashboards 가 사이트에 임베드되고 편집·탐색 UI 가 노출되지 않음 | **후퇴안 없음**(익명 Viewer 는 임의 PromQL 이 열려 부적합, §11.1). 실패 시 임베드를 포기하고 링크/스크린샷으로 대체 |
 | **G7** | nginx | ① 사용할 이미지에서 `nginx -V` 로 `realip` 포함 확인 ② 클라이언트가 보낸 주소 헤더가 버려지고 정규화됨 ③ Oracle 경로 TLS 자동 발급·갱신 방식 확정 | 모듈 포함 이미지 사용 또는 직접 빌드, 인증서 발급 컨테이너 분리 |
 | **G8** | Envoy Gateway on k3d | HTTPRoute 로 `/api`, `/ws`(WebSocket), `/` 가 라우팅됨 | 다른 구현체 |
 | **G9** | Testcontainers on Bun | (선택, **S1-6 에서 확인**) Bun 에서 동작 | compose 서비스 유지 |
@@ -143,8 +143,16 @@
 
 | 관문 | 결과 | 비고 |
 |---|---|---|
+| G1 | **통과(로컬, 임시 터널)** | trycloudflare 임시 터널(cloudflared 2026.10.7)에서 wss 업그레이드·64KB/512KB 에코·서버 close 1001/4408 이 사유까지 그대로 도달, `CF-Connecting-IP`·`X-Forwarded-Proto`·`CF-Ray` 부착. 유휴 ping 이 없으면 약 126초(125.6~126.5초 3회)에 1006 으로 끊기고 서버 hb 25초면 252초(관찰 상한)까지 유지. 에지는 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않으므로 nginx 정규화(덮어쓰기)가 필수이고, 클라이언트가 보낸 `CF-Connecting-IP` 요청 헤더는 에지가 403(error 1000)으로 거부한다. cloudflared→nginx→Bun 체인에서 `set_real_ip_from 127.0.0.1` + `real_ip_header CF-Connecting-IP` 가 동작. **미확인**: 정식 Named Tunnel·Access 정책·다중 커넥터(HA)·재연결(계정 필요), 임시 터널과 정식 터널의 유휴 한도 차이 |
+| G2 | **통과(조건부, 로컬)** | 1000연결(public 900 + private 100)·초당 20건·22분 소크: 유실·순서 어긋남 0, RSS 34.3→36.5MB 후 평탄(5분 이후 기울기 +0.45MB/h, 오차 수준). 느린 소비자: **앱 레벨 큐(64건/256KB)가 10/10 을 4408 로 격리**, RSS 평탄. 재접속 폭풍: SIGTERM+bye 는 5초 안에 전량 복구·접속 실패 0, kill -9 는 접속 실패 59~72건 후 1~3초에 복구. `await server.stop()` 은 1000연결에서도 교착(5초 후에도 연결 1000개 잔존) → stop() 을 await 없이 호출하고 bye+close(1001) 후 연결 0 대기(10~14ms). 조건: 앱 레벨 큐 유지, `stop()` await 금지. **미실행**: 수 시간 소크, 부하 20건/초 외 조건 |
+| G3 | **통과(조건부, 로컬)** | Next 16.4.5·React 19.3.1 이 Bun 1.4.4 에서 빌드(Turbopack 기본, 약 5.9초)·standalone(41MB)·SSR·ISR·재검증·Server Action·next-intl·next/image(sharp)·우아한 종료(종료 코드 143)·Docker(`oven/bun:1.4` 멀티스테이지, 최종 341MB, 헬스체크 `bun -e fetch`)·dev HMR 정상. Node 25 대비(단일 측정, 참고치) 부하 후 RSS 186 vs 413MB, `/ko` 평균 8.3 vs 15.9ms. Bun 은 의존성 postinstall 을 기본 차단하나 sharp 는 optionalDependency 라 동작. **조건**: nonce CSP 는 정적·ISR 페이지에서 하이드레이션을 깨뜨림 → 모든 페이지 동적 렌더로 확정(10 §2). **미실행**: Node 22 LTS 직접 비교(호스트에 Node 25 만 있음), `bunx shadcn` CLI 호환 |
+| G6 | **통과(로컬)** | Public dashboards 가 다른 오리진 iframe 에서 렌더(패널 결과 표시, 콘솔 오류 없음). 필요: `GF_SECURITY_ALLOW_EMBEDDING=true`(기본은 `X-Frame-Options: deny`), 익명 접근은 off 유지, iframe `sandbox="allow-scripts allow-same-origin"`(둘 다 필수), 사이트 CSP `frame-src` 에 Grafana 공개 출처 1개. 공개 URL 에서 `/explore`·다른 대시보드·`/api/search`·`/api/datasources`·`/api/ds/query` 는 막히고 쿼리 API 는 저장된 패널 쿼리만 실행(임의 `expr` 무시). 주의: 공개 페이지 HTML 에 데이터 소스 이름·uid·내부 URL 이 노출, Grafana 포트 `/metrics` 무인증(프록시 차단 대상), 공개 토큰이 곧 자격(유출 시 해제·재발급). **익명 Viewer 안은 `POST /api/ds/query` 로 임의 PromQL 이 실행(`count({__name__=~".+"})` 200)되고 다른 대시보드·데이터 소스 목록이 열려 후퇴안으로도 부적합** |
+| G8 | **통과(로컬, k3d v5.9.0)** | Gateway Programmed=True, `/api`·`/ws/`(WS 업그레이드·왕복)·`/` 라우팅. Gateway API v1.7.0 + Envoy Gateway v1.9.3 를 그대로 helm 설치하면 CRD(차트 내장 v1.6.1) 충돌 → `kubectl apply --server-side` 로 v1.7.0 표준 채널, EG 차트는 `--set crds.enabled=false` + 차트 `crds/generated` 의 EG CRD 별도 적용. 유휴 타임아웃 기본값은 사실상 무제한(504초 유지), 조정은 `ClientTrafficPolicy`/`BackendTrafficPolicy` 의 `spec.timeout.http.streamIdleTimeout`(`requestTimeout`·`connectionIdleTimeout` 은 WS 에 효과 없음). 롤링 중 WS: `preStop sleep 5` + readyz 503 + bye/1001 → 새 연결 실패 0/1156, 연결 40개 모두 1001 로 종료·첫 시도 재접속 성공; preStop 없이 우아한 종료만이면 새 연결 실패 26/837. 주소 헤더 정규화는 `ClientTrafficPolicy` `headers.earlyRequestHeaders`(remove `x-forwarded-for`·`cf-connecting-ip`, set `x-real-ip=%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%`; `x-real-ip` 를 remove 와 set 에 동시에 두면 사라짐). 운영 경로는 catch-all 에 걸려 노출되므로 `HTTPRouteFilter` `directResponse` 404 + 정확 일치 HTTPRoute. 리소스: EG 컨트롤 플레인 40~84Mi, 프록시 17~54Mi. **미확인**: 호스트 실 클라이언트 IP(k3d serverlb 가 L4), WS 업그레이드 요청에서의 헤더 정규화, `sectionName` 단위 정책 |
+| G9 | **통과(로컬)** | testcontainers 12.2.1 + postgres:18.6 이 bun test 에서 동작(시작 약 2~5초, 정지 0.25초). Ryuk 필수(켜면 SIGKILL 후 약 11초 안에 정리, 끄면 12초 뒤에도 누수). `bun test --parallel` 에서는 preload 가 워커마다 컨테이너를 만들므로 **래퍼가 컨테이너 1개를 띄우고 `DATABASE_URL` env 로 공유**(총 4.0초). `beforeAll` 기본 5초는 부족 → 60초. compose Postgres 대안은 템플릿 DB 복제(`CREATE DATABASE … TEMPLATE`, WAL_LOG 중앙값 약 36ms, 병렬 8개 191ms, 복제본 10개 삭제 4.2초) |
+| 도구 | **확인(로컬)** | gitleaks 8.30.1: 저장소 이력 9커밋 누출 0, 기본 규칙에 Discord 웹훅이 없어 `.gitleaks.toml` 사용자 규칙 필요(추가 후 합성 비밀 3건 모두 검출), CI 는 `git` 모드·pre-commit 은 `gitleaks git --staged`(작업 트리 `dir` 모드는 `.claude/skills/*/references/secrets.md` 예제 오탐). age 1.3.2: `-r` 공개키만으로 암호화, 개인키 없이 복호화 불가(`identities are required`), 50MB 0.10초. Playwright 1.64.1: `bun add -d @playwright/test` + `bunx playwright install chromium`(약 150MB)으로 Bun 에서 동작 → **E2E 도구로 채택** |
 | G4 | **통과(로컬)**, Bun.sql 권장 | Drizzle 0.45.4 의 bun-sql·postgres-js·node-postgres 어댑터 모두 동작. 어떤 드라이버든 끊긴 동안의 NOTIFY 는 유실되므로 재구독 후 `change_log` 를 마지막 seq 부터 다시 읽는 보정은 유지 |
 | G7 ①② | **통과(로컬)** | 공식 nginx 이미지(stable·alpine·mainline) 모두 realip 포함. 신뢰 대역 밖 `CF-Connecting-IP` 는 무시되고 위조 `X-Forwarded-For` 등은 정규화. 신뢰 대역은 G1 에서 실제 Tunnel 로 확인 필요 |
+| G11·G12 | **미확인(계정 필요)** | Cloudflare 계정·외부 저장소 가입이 필요해 로컬에서 확인할 수 없다. 구현 단계에서 사용자가 계정을 만든 뒤 확인 |
 | G7 ③ | 미확인 | 이미지에 `ngx_http_acme_module.so` 가 있으나 동작 시험은 안 함 |
 | G10 | **통과(로컬)** | 아래 운영 규칙 |
 
@@ -166,6 +174,8 @@
 | ~~DB 드라이버~~ | G4 로컬 실측으로 Bun.sql 선택(실서버 재시험은 S0-4) |
 | Oracle 경로 TLS 자동화 방식 | G7 |
 | Redis vs Valkey, 클라이언트 | ADR-006 측정(Phase 2) |
-| E2E 도구 | E2E 시작 시 |
+| ~~E2E 도구~~ | Playwright 1.64.1 채택(Bun 동작 확인, §11.1) |
 | 3D·게임 관련 라이브러리 | Phase 1 |
-| 백업 실행 도구(cron/컨테이너)·암호화 도구 | M1 후반(방식은 ADR-023) |
+| 백업 실행 도구(cron/컨테이너) | M1 후반(systemd 타이머, ADR-027). 암호화는 age 1.3.2 확인(§11.1) |
+| G11 Cloudflare 정적 미러, G12 무료 외부 백업 저장소 | 계정 필요, 구현 단계 |
+| 정식 Named Tunnel·Access·다중 커넥터, 수 시간 소크, Node 22 LTS 직접 비교 | S0 실서버 재시험 |

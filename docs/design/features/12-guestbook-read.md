@@ -4,7 +4,7 @@
 정본 이름·기반 클래스는 [00](../00-system-overview.md), 계약은 [03](../03-api-contract.md)·[05](../05-event-catalog.md), 기능 ID는 [F00](00-feature-catalog.md).
 근거: ADR-018(CQRS), ADR-019(계층), ADR-020(inbox), ADR-021(동시성), ADR-023(재구성·보관).
 
-> 이 문서가 [database-schema.md](../domains/database-schema.md) 와 다르게 요구하는 점(필드별 순번, `version`, `author_actor_key`, `present`, `deleted` 상태)은 §10 에 모았다. 구현 전에 스키마 문서를 먼저 고친다.
+> 이 문서가 [database-schema.md](../../domains/database-schema.md) 와 다르게 요구하는 점(필드별 순번, `version`, `author_actor_key`, `present`, `deleted` 상태)은 §10 에 모았다. 구현 전에 스키마 문서를 먼저 고친다.
 
 ---
 

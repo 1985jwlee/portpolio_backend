@@ -62,15 +62,16 @@ flowchart LR
 ### S1 — 기반 골격
 | ID | 내용 | 의존 | 완료 기준 |
 |---|---|---|---|
-| S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check` 통과 |
+| S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check` 통과, AC-032 |
 | S1-2 | `packages/kernel`: `Result`, `AppError` 계층, `AggregateRoot`, `DomainEvent`, 포트 인터페이스 | S1-1 | 오류 계층·`Result` 단위 시험(L2), 오류→HTTP 매핑 표 시험 |
 | S1-3 | `packages/config`: 환경변수 스키마·검증·`_FILE` 지원 | S1-1 | 필수 누락 시 기동 실패 시험, 비밀값이 로그에 안 나옴 |
-| S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만 |
+| S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만, AC-023 |
 | S1-5 | `.dependency-cruiser.cjs` **B1~B10** 규칙(B10 = `@pf/infra` 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
-| S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 | ADR-027, EV-14 |
-| S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 | ADR-026 |
-| S1-12 | `FieldCipher` 포트 + AES-256-GCM 구현(`packages/infra/crypto`), 키링 로더·키 ID 선택, 단위 시험(왕복·AAD 불일치·변조·iv 중복·회전 멱등) | S1-3, S1-8 | 시험 통과, `pg_dump` 에 평문 센티널 부재 | ADR-026 |
+| S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 | ADR-027, EV-14, AC-020, FR-090 |
+| S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 | ADR-028, AC-027, FR-110 |
+| S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 | ADR-026, AC-024, FR-100 |
+| S1-12 | `FieldCipher` 포트 + AES-256-GCM 구현(`packages/infra/crypto`), 키링 로더·키 ID 선택, 단위 시험(왕복·AAD 불일치·변조·iv 중복·회전 멱등) | S1-3, S1-8 | 시험 통과, `pg_dump` 에 평문 센티널 부재 | ADR-026, AC-018, AC-034, FR-025, FR-101, FR-102 |
 | S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 | ADR-024 |
 | S1-7 | 로컬 compose(02): postgres, 개발 모드 기동 + **조립 루트·생명주기 골격**(기동 순서·종료 순서, `ShutdownCoordinator`) + 시드/CLI 프레임(`db:seed`, `worker <cmd>`) | S1-4 | `bun run dev` 로 api·worker 기동, api `/readyz` 성공, SIGTERM 시 종료 순서대로 정리 |
 | S1-9 | `packages/protocol`: TypeBox 스키마(REST·WS·이벤트)·상수(`ENTRY_BODY_MAX_CHARS` 등)·`gen:schema`(JSON Schema 내보내기)·골든 JSON(`packages/protocol/golden/`) 골격 | S1-1 | `gen:schema --check` 통과, 골든 왕복 시험(L2), 별도 `@sinclair/typebox` 0.34 사용(`typebox` 1.x 금지) |
@@ -85,12 +86,13 @@ flowchart LR
 | S2-3 | GitHub OAuth(PKCE+state), 콜백 검증, 세션 회전 | S2-2 | 콜백 검증 순서도(06 §3.2)의 모든 분기 시험, `returnTo` 오픈 리다이렉트 차단 | FR-011 |
 | S2-4 | 관리자 허용목록 판정, `RequireAdmin` | S2-3 | 숫자 ID 허용목록 시험 | FR-012 |
 | S2-5 | 가드 체인(Origin·Session·RateLimit·Schema·Authorization) | S2-2 | 03 §7.1 순서도 분기별 시험 | FR-024 일부 |
+| S2-6 | `RevokeSessions` usecase + `worker admin revoke-sessions`(`--all`\|`--user`\|`--session`, `--dry-run`, `--yes`), 감사 `admin.sessions_revoked` | S2-1, S1-14 | 폐기 후 기존 쿠키가 새 익명 세션으로 처리, private `4401`, 롤백 시 감사 행 없음, 멱등 | ADR-028, ID-11, AC-022, FR-013 |
 
 ### S3 — 첫 수직 조각 (가장 중요)
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
 | S3-1 | `guestbook` 도메인(`Entry`, `EntryBody`…)·값 객체 불변식 | S2 | 경계값(500/501자, 10/11줄, NFC) 단위 시험 | FR-020, FR-024 |
-| S3-2 | `request_key`(멱등) + `PostEntry` 명령 + outbox 기록 한 트랜잭션 | S3-1 | **AC-002**: 중간 실패 시 글·outbox 둘 다 없음. 같은 키 재요청 = 같은 응답 | FR-020, AC-002 |
+| S3-2 | `request_key`(멱등) + `PostEntry` 명령 + outbox 기록 한 트랜잭션 | S3-1 | **AC-002**: 중간 실패 시 글·outbox 둘 다 없음. 같은 키 재요청 = 같은 응답 | FR-020, AC-002, AC-033, FR-028 |
 | S3-3 | `events` 디스패처: 선점(CAS)·임대·reaper·advisory 락 단일 활성 | S3-2, S0-4 | **AC-015**: N 워커 경쟁에서 한 건당 한 주체. 임대 만료 후 늦은 완료 거절 | FR-030, FR-033 |
 | S3-4 | inbox 수신·선점·처리(`MessageRunner`), 재시도·`dead` | S3-3 | **AC-003**: 같은 이벤트 재전달해도 효과 1회 | FR-031, FR-032 |
 | S3-5 | `GuestbookProjector` + `entry_view`(`last_seq` 검사) | S3-4 | **AC-017** 순서 역전·재전달 시 결과 동일 | FR-035 |
@@ -107,7 +109,7 @@ flowchart LR
 | S4-3 | 재개: replay / snapshot 분기, `change_log` 보관 정리(realtime 이 등록하는 `RetentionRule`) | S4-2 | 건너뜀·이력 부족·처음 접속 3경로 시험 (**AC-008** 서버 쪽) | FR-051, AC-008 |
 | S4-4 | 송신 큐·`4408`·`bye` 우아한 종료 | S4-2 | 느린 소비자 격리(다른 연결 무영향), SIGTERM→`bye`→`1001` | FR-051, ADR-014 |
 | S4-5 | 공개 채널 변환(`ownerKey`·`userId` 제거) | S4-2 | **AC-009** 구조 시험: 공개 메시지 스키마에 식별자 필드 없음 | FR-041 |
-| S4-6 | **`/ws/private`**: 세션 쿠키 필수(익명 포함), 세션 캐시, `PrivateRouter`, `flow.step` 전송(세션 소유자만), 세션당 연결 수 제한(`4409`), 회전 시 `4401` | S4-2, S3-7 | 타 세션이 받지 못함. 쿠키 없으면 업그레이드 401. 익명 세션도 자기 흐름 수신. 로그인 후 이전 세션 연결이 닫힘 | FR-040 |
+| S4-6 | **`/ws/private`**: 세션 쿠키 필수(익명 포함), 세션 캐시, `PrivateRouter`, `flow.step` 전송(세션 소유자만), 세션당 연결 수 제한(`4409`), 회전 시 `4401` | S4-2, S3-7 | 타 세션이 받지 못함. 쿠키 없으면 업그레이드 401. 익명 세션도 자기 흐름 수신. 로그인 후 이전 세션 연결이 닫힘 | FR-040, AC-031 |
 | S4-7 | `flow_counter` 주기 집계 + `flow.summary` | S3-7 | 개수만 노출, 식별자 없음 | FR-041 |
 
 ### S5 — 웹 UI
@@ -125,23 +127,24 @@ flowchart LR
 |---|---|---|---|---|
 | S6-1 | 반응 PUT/DELETE, 유일 키 중복 심판, `reaction.changed(count)`, `my_reaction` | S3 | 같은 반응 동시 2회 → 1건. 총개수 덮어쓰기 | FR-021 |
 | S6-2 | 수정/삭제(로그인+본인), `version` 조건 갱신, 409 + 최신 뷰 | S2-3, S3 | **AC-005**, **AC-016**(동시 수정 한 건만), **AC-004**(익명 403) | FR-022, FR-034 |
-| S6-9 | 감사 조회 `GET /api/admin/audit`·`worker audit:list`·보관 규칙(`auth` 7일·`admin`/`system` 90일), 감사 호출을 ID-06·07, GB-07~10·27, CLI 에 연결 | S6-3, S1-14 | 비관리자 403·키셋 조회·보관 경계 시험, 각 행위가 같은 tx 에서 기록됨 | ADR-027, EV-15 |
-| S6-8 | 신고 메모 암호화 저장 + `GetReportNote`(관리자) + `rotate-field-keys` CLI | S6-3, S1-12 | 덤프·로그·이벤트에 평문 부재, 회전 후 모든 행이 새 키로 복호화 | ADR-026 |
+| S6-9 | 감사 조회 `GET /api/admin/audit`·`worker audit:list`·보관 규칙(`auth` 7일·`admin`/`system` 90일), 감사 호출을 ID-06·07, GB-07~10·27, CLI 에 연결 | S6-3, S1-14 | 비관리자 403·키셋 조회·보관 경계 시험, 각 행위가 같은 tx 에서 기록됨 | ADR-027, EV-15, AC-029, AC-020, FR-090, FR-091, FR-093 |
+| S6-10 | 보관 정지: `worker retention:pause\|resume`, `status/retention/pause.json`, `RetentionRunner`·`PurgeExpiredSessions`·`archive-logs.sh` 의 정지 준수, 24시간 자동 해제, 경보 `RetentionPaused` | S6-6, S8-7 | 정지 중 삭제 없음, TTL 후 자동 해제, 감사 `retention_paused` | ADR-028, EV-16, AC-026, FR-038 |
+| S6-8 | 신고 메모 암호화 저장 + `GetReportNote`(관리자) + `rotate-field-keys` CLI | S6-3, S1-12 | 덤프·로그·이벤트에 평문 부재, 회전 후 모든 행이 새 키로 복호화 | ADR-026, AC-018, AC-034, FR-025, FR-026, FR-101 |
 | S6-3 | 신고·관리자 숨김/해제·`report_queue`·조치 이력 | S2-4, S3 | **AC-006**: 숨김 즉시 공개 목록에서 제외, 이력 남음 | FR-023 |
-| S6-4 | 속도 제한(세션) + nginx `limit_req` 설정 + **쓰기 잠금**(`SetWriteLock`·`WriteLockPolicy`, `POST /api/admin/write-lock`, `worker admin write-lock on\|off`) | S2-5, S0-6 | **AC-007**: 초과 시 429 + `Retry-After`. 잠금 중 쓰기는 503 `write_locked` + `Retry-After`, 읽기·WS 정상 | FR-024, ADR-008 |
-| S6-5 | 읽기 모델 재구성(`rebuild`, 그림자 교체) | S3-5 | **AC-017**: 재구성 중 쓰기가 들어와도 최종 결과가 정본과 일치 | ADR-023 |
-| S6-6 | 보관 정리(모듈별 `RetentionRule` 등록: 세션·이벤트·`request_key`·`change_log`·`dead`)·익명화(`AnonymizeSessionData`) | S3 | **AC-011**: 7일 경과 데이터 삭제, 글 보존, 작성자 링크 익명화 | FR-080 |
-| S6-7 | `dead` 재투입 CLI(`worker dead-requeue`) | S3-4 | `dead → new` 전이, 시도 횟수 초기화, 사유 기록 | ADR-023 |
+| S6-4 | 속도 제한(세션) + nginx `limit_req` 설정 + **쓰기 잠금**(`SetWriteLock`·`WriteLockPolicy`, `POST /api/admin/write-lock`, `worker admin write-lock on\|off`) | S2-5, S0-6 | **AC-007**: 초과 시 429 + `Retry-After`. 잠금 중 쓰기는 503 `write_locked` + `Retry-After`, 읽기·WS 정상 | FR-024, ADR-008, AC-019, FR-027 |
+| S6-5 | 읽기 모델 재구성(`rebuild`, 그림자 교체) | S3-5 | **AC-017**: 재구성 중 쓰기가 들어와도 최종 결과가 정본과 일치 | ADR-023, FR-036 |
+| S6-6 | 보관 정리(모듈별 `RetentionRule` 등록: 세션·이벤트·`request_key`·`change_log`·`dead`)·익명화(`AnonymizeSessionData`) | S3 | **AC-011**: 7일 경과 데이터 삭제, 글 보존, 작성자 링크 익명화 | FR-080, FR-080, FR-093 |
+| S6-7 | `dead` 재투입 CLI(`worker dead-requeue`) | S3-4 | `dead → new` 전이, 시도 횟수 초기화, 사유 기록 | ADR-023, AC-030, FR-037 |
 
 ### S7 — 관측
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
 | S7-1 | 지표 노출(요청·지연·오류·outbox 적체·WS 연결 수·큐 길이) | S0-5, S4 | `/metrics` 에 명세 지표, 레이블에 식별자 없음 | FR-060 |
 | S7-2 | Prometheus·Grafana 프로비저닝, 대시보드 JSON | S7-1 | compose 에서 대시보드가 자동 로드 | FR-060 |
-| S7-3 | Public dashboards 임베드 | S7-2 | **G6**: 사이트에서 편집·탐색 UI 없이 보임. 실패 시 익명 읽기 전용 뷰 | FR-061, AC-012 |
+| S7-3 | Public dashboards 임베드 | S7-2 | **G6**: 사이트에서 편집·탐색 UI 없이 보임(로컬 실측 통과: `GF_SECURITY_ALLOW_EMBEDDING=true`, iframe `sandbox="allow-scripts allow-same-origin"`, `frame-src` 에 Grafana 공개 출처 1개). **후퇴안 없음** — 실패하면 임베드를 포기하고 링크·스크린샷으로 대체(익명 Viewer 는 임의 PromQL 이 열려 부적합) | FR-061, AC-012 |
 | S7-4 | 운영 지표 페이지(웹) | S7-3, S5 | 임베드 + 폴백 안내 | FR-061 |
-| S7-5 | `StatusFileCollector`(OB-16)와 상태 파일 규약(`status/<job>/last_run.json`: job·started_at·finished_at·ok·detail·version·last_success_at, 원자적 rename) — 스크립트 3종이 같은 쓰기 헬퍼를 쓴다 | S7-1, S1-11 | 파일 없음/오래됨/`ok=false` 를 구분해 `pf_ops_*` 노출, 깨진 파일은 `pf_collector_errors_total` | ADR-027 |
-| S7-6 | Grafana 경보 규칙·Discord 연락처·정책 프로비저닝(OB-17), `rules/pf.yml` 식 정본과 `promtool test rules`, 경보 임계값 표(F17 §17) | S7-2, S7-5 | **G**(미검증 항목): 시험 알림 1건이 Discord 에 도착, `$__file{}` 시크릿 확장 확인, 개발 모드에서 규칙 미로드 · **실측 반영 확인**: 시크릿 파일/환경변수 누락 시 프로비저닝 전체 실패 동작 점검, 시험 알림은 새 API 경로(`/apis/notifications.alerting.grafana.app/v1beta1/…/receivers/{base64url 이름}/test`), 카운터 선초기화로 첫 건 유실 없음, 정본 규칙에 `\|` 이스케이프 없음 | ADR-027 |
+| S7-5 | `StatusFileCollector`(OB-16)와 상태 파일 규약(`status/<job>/last_run.json`: job·started_at·finished_at·ok·detail·version·last_success_at, 원자적 rename) — 스크립트 3종이 같은 쓰기 헬퍼를 쓴다 | S7-1, S1-11 | 파일 없음/오래됨/`ok=false` 를 구분해 `pf_ops_*` 노출, 깨진 파일은 `pf_collector_errors_total` | ADR-027, AC-025, FR-062 |
+| S7-6 | Grafana 경보 규칙·Discord 연락처·정책 프로비저닝(OB-17), `rules/pf.yml` 식 정본과 `promtool test rules`, 경보 임계값 표(F17 §17) | S7-2, S7-5 | **G**(미검증 항목): 시험 알림 1건이 Discord 에 도착, `$__file{}` 시크릿 확장 확인, 개발 모드에서 규칙 미로드 · **실측 반영 확인**: 시크릿 파일/환경변수 누락 시 프로비저닝 전체 실패 동작 점검, 시험 알림은 새 API 경로(`/apis/notifications.alerting.grafana.app/v1beta1/…/receivers/{base64url 이름}/test`), 카운터 선초기화로 첫 건 유실 없음, 정본 규칙에 `\|` 이스케이프 없음 | ADR-027, AC-025, FR-063 |
 
 ### S8 — 운영 경화
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -149,15 +152,16 @@ flowchart LR
 | S8-1 | 라이브 compose + nginx(realip·정규화·**정적 보안 헤더**; CSP 는 web 이 설정 — S5-1) + cloudflared + 쓰기 잠금 운영 런북(OB-13) | S0-1, S0-6 | 외부에서 HTTPS·WSS 동작, 주소 헤더 위조 무시 시험 · **호스트 확인**: 실제 `pf` 사용자로 아카이브/백업이 `PF_LOG_DIR`·`STATUS_DIR` 에 쓰기 가능, systemd 유닛 `ReadWritePaths` 절대 경로 치환 후 `systemd-analyze verify` 경고 0, docker 그룹 대안(소켓 프록시/journald/rootless) 중 결정 | AC-014 일부 |
 | S8-2 | 정적 폴백 1단계(nginx, `build:fallback` 산출) | S5-2, S8-1 | 앱 컨테이너 중지 시 소개·아키텍처 페이지 제공, 데모 영역 '점검 중' | FR-070, **AC-010** |
 | S8-3 | Cloudflare 정적 미러 | S8-2 | **G11**: 호스트 다운에도 정적 페이지 응답 | FR-070 |
-| S8-4 | 백업(`pg_dump` 일/주) + 복구 시험 + 외부 보관 | S8-1 | **G12**: 빈 DB 복원 후 무결성 검사 통과, 절차 문서화 | ADR-023 |
+| S8-4 | 백업(`pg_dump` 일/주) + 복구 시험 + 외부 보관 | S8-1 | **G12**: 빈 DB 복원 후 무결성 검사 통과, 절차 문서화 | ADR-023, AC-028, FR-081, FR-102 |
 | S8-5 | k3d + Gateway API + Envoy Gateway 매니페스트 | S8-1 | **G8**: `/api`·`/ws`·`/` 라우팅, 롤링 배포 중 재접속 복구 (ADR-002 검증, AC-014 가 아님) | ADR-002 |
-| S8-7 | 로그 아카이브(`archive-logs.sh`)·조회(`logq.sh`)·nginx 접근 로그 형식(`pf_json`, `$uri`·`rid`)·컨테이너 로깅 옵션(20m×10)·**systemd 유닛 3종**(`infra/systemd`: archive-logs 03:10, backup 03:30, pull-deploy 5분, `Persistent=true`)·`install-systemd.sh`·`PF_LOG_DIR`/`STATUS_DIR` 권한·`pf_log_*` 지표·경보 | S8-1 | 접근 로그에 쿼리·IP 부재, 7일 지난 아카이브 삭제, `rid`↔`req_id` 연결, 24시간 미성공 경보 | ADR-027, OB-15 |
+| S8-7 | 로그 아카이브(`archive-logs.sh`)·조회(`logq.sh`)·nginx 접근 로그 형식(`pf_json`, `$uri`·`rid`)·컨테이너 로깅 옵션(20m×10)·**systemd 유닛 3종**(`infra/systemd`: archive-logs 03:10, backup 03:30, pull-deploy 5분, `Persistent=true`)·`install-systemd.sh`·`PF_LOG_DIR`/`STATUS_DIR` 권한·`pf_log_*` 지표·경보 | S8-1 | 접근 로그에 쿼리·IP 부재, 7일 지난 아카이브 삭제, `rid`↔`req_id` 연결, 24시간 미성공 경보 | ADR-027, OB-15, AC-021, FR-092, FR-093 |
+| S8-8 | 비밀 회전·사고 대응 리허설: design/13 §10 체크리스트 전 항목 실행(구 비밀 거부·새 비밀 동작·소요 시간 기록), 증거 보존 명령 실제 실행, 런북 수정 | S8-1, S7-6, S2-6, S6-10 | 체크리스트 9개 항목 통과, 막힌 단계는 13 에 반영 | ADR-028, AC-035, FR-111 |
 | S8-6 | 이미지 빌드·GHCR·pull 배포 + 릴리스 게이트(`CONTENT_STRICT=1 content:check`) | S1-6, S8-1 | 태그 푸시 → 호스트가 새 이미지로 교체(09), worker 는 `/healthz`·나머지는 `/readyz` 게이트 | — |
 
 ### S9 — 인수
 | ID | 내용 | 완료 기준 |
 |---|---|---|
-| S9-1 | AC-001~017 전수 실행 | 매트릭스(08)의 모든 행이 초록 또는 사유 기록 |
+| S9-1 | AC-001~035 전수 실행 | 매트릭스(08)의 모든 행이 초록 또는 사유 기록 |
 | S9-2 | 성능(**AC-013**) | 터널 경유 API p95 300ms, 첫 화면 LCP 2.5s, 동시 50. 측정 환경·반복·결과를 기록 |
 | S9-3 | 소크·재접속·롤링 | WS 장시간 안정, 배포 중 끊김 후 자동 복구 |
 | S9-4 | 이중 호스팅(**AC-014**) | 집 PC(Compose)와 Oracle 호스트에서 AC-001·008·010 통과 (Oracle 가입 불가면 사유 기록, spec AC-014) |
@@ -217,9 +221,9 @@ sequenceDiagram
 | 체크포인트 | 시점 | 확인 |
 |---|---|---|
 | **C0** | S0 종료 | G1·G2 통과(또는 대안 결정). ADR-022 갱신 |
-| **C1** | S3 종료 | `curl` 로 글 작성 → 목록에 보임, 이벤트가 inbox 를 거쳐 처리됨, AC-001(서버)·002·003·015·017 |
-| **C2** | S5 종료 | 브라우저에서 작성 → 실시간 반영 → 흐름 시각화. 연결 끊김 복구 |
-| **C3** | S7 종료 | 지표 대시보드 임베드. **S1~S7 에서 다루는 AC**(AC-001~009·011~013·015~017) 초록. AC-010·014 는 S8 이후 |
+| **C1** | S3 종료 | `curl` 로 글 작성 → 목록에 보임, 이벤트가 inbox 를 거쳐 처리됨, AC-001(서버)·002·003·015·017. 기반 AC: AC-020(감사 원자성)·022(세션 폐기)·023(쓰기는 트랜잭션)·024(컬럼 등급)·027(비밀 스캔)·032(라이선스)·033(멱등) |
+| **C2** | S5 종료 | 브라우저에서 작성 → 실시간 반영 → 흐름 시각화. 연결 끊김 복구. AC-031(public/private 분리 연결) |
+| **C3** | S7 종료 | 지표 대시보드 임베드. **S1~S7 에서 다루는 AC**(AC-001~009·011~013·015~020·022~027·029~034) 초록. AC-010·014·021·028·035 는 S8 이후 |
 | **C4** | S9 종료 | 인수 전체, 이중 호스팅, 성능 기록. M1 완료 선언 |
 
 ## 8. 위험과 대응

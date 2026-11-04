@@ -18,7 +18,10 @@
 | [10](10-security.md) | CSP·보안 헤더, 시크릿, 의존성 점검 |
 | [11](11-implementation-plan.md) | M1 작업 분할, 단계 0 관문, 완료 기준 |
 | [12](12-content.md) | 자기소개·개인정보 안내 문구 구조 |
-| [features/](features/00-feature-catalog.md) | **기능 104개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
+| [13](13-incident-response.md) | 보안사고 대응: 심각도, 증거 보존, 비상 스위치, 자산별 런북, 리허설 |
+| [14](14-seo-and-error-pages.md) | SEO·공유 미리보기·robots/sitemap·JSON-LD·오류 화면(404/403/500/점검) |
+| [15](15-visual-design.md) | 시각 디자인: 토큰·타이포·컴포넌트 모양·핵심 화면 목업(모던 미니멀) |
+| [features/](features/00-feature-catalog.md) | **기능 114개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
 
 각 문서는 해당하는 만큼 **시퀀스 · 순서도 · 클래스 · 상속 구조** 다이어그램을 갖는다. 해당 없는 종류는 이유를 한 줄로 적는다.
 

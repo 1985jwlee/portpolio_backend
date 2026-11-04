@@ -1,0 +1,179 @@
+/* ==========================================================================
+   디자인 토큰 — 모던 미니멀 (docs/design/15-visual-design.md 가 정본 설명)
+   - Tailwind 4: `@theme` 안의 `--color-*` 는 유틸리티(bg-bg, text-muted …)를 만든다.
+   - 다크 값은 `:root[data-theme="dark"]` 가 같은 변수를 덮어쓴다(SSR 이 <html data-theme> 를 쓴다, 07 §4.1).
+   - 정적 목업은 build-mockups.ts 가 `@theme {` 를 `:root {` 로 바꿔 인라인한다.
+   - 대비(WCAG 2.2 AA)는 tools/contrast.mjs 가 이 파일을 읽어 계산한다. 값을 바꾸면 다시 돌린다.
+   ========================================================================== */
+
+@theme {
+  /* ---- 중립 스케일 (차가운 회색, 테마 무관 원값) ---- */
+  --color-neutral-0:   #ffffff;
+  --color-neutral-50:  #f6f7f9;
+  --color-neutral-100: #eceef2;
+  --color-neutral-200: #dfe3e9;
+  --color-neutral-300: #c6ccd5;
+  --color-neutral-400: #8e97a4;
+  --color-neutral-500: #667080;
+  --color-neutral-600: #4a5260;
+  --color-neutral-700: #343b47;
+  --color-neutral-800: #222831;
+  --color-neutral-900: #151a21;
+  --color-neutral-950: #0d1015;
+
+  /* ---- 의미 색: 라이트(기본) ---- */
+  --color-bg:            #fbfbfc;   /* 페이지 바탕 */
+  --color-surface:       #ffffff;   /* 카드·입력 */
+  --color-surface-sunken:#f1f3f6;   /* 코드·표 줄무늬·트랙 바탕 */
+  --color-text:          #151a21;
+  --color-muted:         #4a5260;   /* 보조 텍스트 */
+  --color-subtle:        #5b6472;   /* 캡션·플레이스홀더 (큰 글자/비필수) */
+  --color-border:        #dfe3e9;   /* 장식 경계 */
+  --color-border-strong: #7a8392;   /* 입력 테두리 등 UI 경계(대비 3:1) */
+
+  --color-accent:        #1d5bd6;   /* 링크·포커스·진행 중·선택 — 이 사이트의 강조색 1개 */
+  --color-accent-hover:  #164aae;
+  --color-accent-subtle: #e8effc;   /* 선택 배경 */
+  --color-accent-fg:     #ffffff;   /* accent 위 글자 */
+
+  --color-primary:       #151a21;   /* 주 버튼: 잉크(중립) — 강조색과 분리 */
+  --color-primary-hover: #2b323d;
+  --color-primary-fg:    #ffffff;
+
+  --color-success:       #14733a;
+  --color-success-subtle:#e6f5ec;
+  --color-warn:          #8f4f00;
+  --color-warn-subtle:   #fdf0dc;
+  --color-danger:        #c0262d;
+  --color-danger-subtle: #fdecec;
+  --color-info:          #1d5bd6;
+  --color-info-subtle:   #e8effc;
+
+  --color-focus:         #1d5bd6;
+
+  /* ---- 타이포 ---- */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+               "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
+               "D2Coding", "Noto Sans Mono CJK KR", monospace;
+
+  --text-xs:   0.75rem;    /* 12 — 캡션, 단계 시각 */
+  --text-sm:   0.875rem;   /* 14 — 보조, 폼 도움말 */
+  --text-base: 1rem;       /* 16 — 본문 */
+  --text-lg:   1.25rem;    /* 20 */
+  --text-xl:   1.5625rem;  /* 25 */
+  --text-2xl:  1.9375rem;  /* 31 */
+  --text-3xl:  2.4375rem;  /* 39 */
+  --text-4xl:  3.0625rem;  /* 49 — 홈 히어로(모바일은 clamp 로 축소) */
+
+  --leading-tight: 1.25;
+  --leading-snug:  1.4;
+  --leading-body:  1.6;    /* 영문 본문 */
+  --leading-ko:    1.7;    /* 한글 본문 (:lang(ko)) */
+  --tracking-display: -0.02em;
+  --tracking-normal: 0;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ---- 간격: Tailwind 기본 4px 기준 ---- */
+  --spacing: 0.25rem;
+
+  /* ---- 반경·그림자 ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px rgb(21 26 33 / 0.06);
+  --shadow-md: 0 6px 16px rgb(21 26 33 / 0.10);
+
+  /* ---- 모션 ---- */
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 400ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);   /* ease-out 계열 */
+
+  /* ---- 레이아웃 ---- */
+  --container-prose: 42rem;    /* 672px: 본문 열(한글 약 36자/줄 ≈ 읽기 폭) */
+  --container-page:  70rem;    /* 1120px: 데모·카드 그리드 */
+  --breakpoint-sm: 40rem;      /* 640 */
+  --breakpoint-md: 48rem;      /* 768 — 흐름 트랙 가로↔세로 전환점 */
+  --breakpoint-lg: 64rem;      /* 1024 */
+  --breakpoint-xl: 80rem;      /* 1280 */
+  --header-h: 3.5rem;          /* 고정 헤더 높이: 포커스 가려짐 방지 scroll-padding */
+  --tap-min: 2.75rem;          /* 44px 터치 대상 */
+}
+
+/* ---- 흐름 시각화 (07 §3.2 상태 색, 테마별) — 유틸리티를 만들지 않으므로 @theme 밖 ---- */
+:root {
+  --flow-pending: #667080;   /* ○ 대기 */
+  --flow-active:  #1d5bd6;   /* ◐ 진행 중 */
+  --flow-done:    #14733a;   /* ● 완료 */
+  --flow-warn:    #8f4f00;   /* ↻ 재시도 */
+  --flow-error:   #c0262d;   /* ✕ 실패 */
+  --flow-dead:    #343b47;   /* ▣ 격리(dead) */
+  --flow-bar:     #1d5bd6;   /* 익명 요약 막대(정상 단계) */
+
+  /* 단계(step)별 별칭: 정상 5단계는 한 색(막대 길이+숫자+이름으로 구분), 예외 3단계는 상태색 */
+  --flow-step-written:    var(--flow-bar);
+  --flow-step-outboxed:   var(--flow-bar);
+  --flow-step-dispatched: var(--flow-bar);
+  --flow-step-received:   var(--flow-bar);
+  --flow-step-processed:  var(--flow-bar);
+  --flow-step-retried:    var(--flow-warn);
+  --flow-step-failed:     var(--flow-error);
+  --flow-step-dead:       var(--flow-dead);
+}
+
+/* ---- 다크 ---- */
+:root[data-theme="dark"] {
+  --color-bg:            #0d1015;
+  --color-surface:       #151a21;
+  --color-surface-sunken:#10141a;
+  --color-text:          #e8ebf0;
+  --color-muted:         #a9b1bd;
+  --color-subtle:        #8892a0;
+  --color-border:        #262d37;
+  --color-border-strong: #6b7584;
+
+  --color-accent:        #7ea8ff;
+  --color-accent-hover:  #a3c0ff;
+  --color-accent-subtle: #1a2740;
+  --color-accent-fg:     #0d1015;
+
+  --color-primary:       #e8ebf0;   /* 다크의 주 버튼은 밝은 잉크 */
+  --color-primary-hover: #ffffff;
+  --color-primary-fg:    #0d1015;
+
+  --color-success:       #52c88a;
+  --color-success-subtle:#12281d;
+  --color-warn:          #f0b048;
+  --color-warn-subtle:   #2d2210;
+  --color-danger:        #ff8080;
+  --color-danger-subtle: #32161a;
+  --color-info:          #7ea8ff;
+  --color-info-subtle:   #1a2740;
+
+  --color-focus:         #9dbfff;
+
+  --shadow-sm: none;                       /* 다크는 그림자 대신 경계를 강조(07 §4.1) */
+  --shadow-md: 0 0 0 1px #262d37;
+
+  --flow-pending: #8892a0;
+  --flow-active:  #7ea8ff;
+  --flow-done:    #52c88a;
+  --flow-warn:    #f0b048;
+  --flow-error:   #ff8080;
+  --flow-dead:    #aab2bf;
+  --flow-bar:     #7ea8ff;
+}
+
+/* ---- 모션 축소 ---- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+  }
+}

@@ -191,7 +191,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `id` | bigint identity | PK. 키셋 조회 커서 |
 | `at` | timestamptz | NOT NULL. `tx.now` |
 | `category` | text | `auth` / `admin` / `system` (`CHECK`) |
-| `action` | text | 고정 열거(`login_succeeded`, `login_failed`, `logout`, `entry_hidden`, `entry_unhidden`, `report_resolved`, `write_lock_changed`, `report_note_read`, `dead_requeued`, `field_keys_rotated`, `projection_rebuilt`, `retention_ran`) |
+| `action` | text | 고정 열거(`login_succeeded`, `login_failed`, `logout`, `entry_hidden`, `entry_unhidden`, `report_resolved`, `write_lock_changed`, `report_note_read`, `sessions_revoked`, `dead_requeued`, `field_keys_rotated`, `projection_rebuilt`, `retention_ran`, `retention_paused`) |
 | `actor_role` | text | `anonymous` / `user` / `admin` / `system` |
 | `actor_key` | text | `session:<id>` / `user:<id>` / NULL(system) |
 | `target_type`, `target_id` | text | 대상(`entry`·`report`·`write_lock`·`session` …), `target_id` 는 uuid 문자열 또는 NULL |

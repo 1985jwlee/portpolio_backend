@@ -31,7 +31,7 @@ ADR-004 는 핵심 스택(Bun · Elysia · Next.js · WebSocket · 공유 타입
 ### 조사가 바꾼 이전 결정
 | 이전 | 변경 | 이유 |
 |---|---|---|
-| ADR-007: Grafana 익명 읽기 전용 뷰 + iframe 임베드 | **Public dashboards 우선**, 임베드는 실측(G6), 안 되면 익명 읽기 전용 뷰로 후퇴 | Grafana 공식 문서가 익명 접근보다 Public dashboards 를 더 안전한 공유 방법으로 안내 |
+| ADR-007: Grafana 익명 읽기 전용 뷰 + iframe 임베드 | **Public dashboards 우선**, 임베드는 G6 로컬 실측으로 통과(`GF_SECURITY_ALLOW_EMBEDDING=true`). **후퇴안은 없다**(익명 Viewer 는 임의 PromQL 이 열려 부적합) — 안 되면 링크/스크린샷으로 대체 | Grafana 공식 문서가 익명 접근보다 Public dashboards 를 더 안전한 공유 방법으로 안내 |
 | ADR-004: OAuth 라이브러리 미정 | 직접 구현 | Arctic 은 2026-07 deprecated, Better Auth 는 토큰 해시 저장 여부가 문서에 없어 `identity.session` 설계와 충돌 가능 |
 | ADR-004: ORM 후보 | Drizzle 0.45.x 고정 | 엔진 규약상 DB 정본은 Drizzle. 1.0 은 rc 이고 마이그레이션 폴더 구조가 바뀜 |
 | ADR-001: 경계 검사 도구 미정 | dependency-cruiser | 계층·CQRS 규칙을 정규식 규칙으로 표현 가능. Biome 는 임포트하는 쪽을 구분하지 못해 부적합 |
@@ -50,11 +50,13 @@ Go(coder/websocket)·C#(.NET 10 Kestrel 순수 WebSocket)·Bun(Elysia)로 같은
 |---|---|---|---|
 | 유휴 RSS 10k 연결 | 299MB | 229MB | 89MB |
 | 연결당 증가분(10k) | 약 30KB(기본 버퍼, 튜닝 여지) | 약 17KB | 약 5.5KB |
-| 팬아웃 1k·초당 100건 p50/p99 | 2.6/11.5ms | 3.2/24ms | 1.8/4.6ms |
-| 5k·초당 10건 p50/p99 | 15.8/57ms | 17.3/50ms | 10.6/27ms |
+| 팬아웃 1k·초당 10건 p50/p99 | 3.3/21.9ms | 3.7/9.2ms | 2.8/11.1ms |
+| 팬아웃 1k·초당 100건 p50/p99 | 2.5/11.4ms | 2.8/8.8ms | 2.45/13.9ms |
+| 5k·초당 10건 p50/p99 | 18.2/76ms | 18.4/63ms | **11.0/29.4ms** |
 | 유실·중복 | 0 | 0 | 0 |
 | 느린 소비자(100연결 중 10개 미독·초당 2000건) | 10/10 서버가 끊음(15MB) | 10/10 서버가 끊음(90MB) | **설정 위치에 따라 다름 — 아래** |
 - 목표 규모(동시 50, 최대 수천)에서 세 언어 모두 충분하다. 성능은 언어를 바꿀 이유가 되지 않았다.
+- **정정(2026-11-04, 재측정)**: 처음 표의 Bun 지연(1k·초당 100건 1.8/4.6ms 등)은 Bun 서버가 `performance.timeOrigin + performance.now()` 로 찍은 타임스탬프가 벽시계에서 어긋나 만든 값이었다(이 WSL2 호스트에서 분당 수 초 어긋남을 G2 소크에서 확인). `Date.now()` 로 고쳐 같은 호스트 상태에서 세 언어를 다시 잰 값이 위 표다. 결론이 약해졌다: **Bun 은 Go·C# 과 "비슷하다"**(1k 구간에서는 사실상 동률, `Date.now()` ms 해상도 한계로 낮은 지연 구간의 상대 오차가 크다). **5k 연결 구간에서만 p50 이 약 40% 낮고 p99 도 낮다.** 메모리와 느린 소비자 결과는 타임스탬프와 무관해 그대로다. 측정 중 호스트에 다른 부하(dotnet, Grafana 등)가 있었고 Go·C# 은 1회뿐이라 순위는 범위로 읽는다.
 - **Bun 의 느린 소비자 보호는 설정 위치에 따라 동작이 갈린다**(시나리오 4b, 각 3회):
   - `.ws()` 라우트 옵션의 `backpressureLimit`/`closeOnBackpressureLimit`: **적용되지 않음**(0/10 종료, RSS 110~120MB).
   - `new Elysia({ websocket })` 최상위 옵션: 10/10 종료되지만 **정상 연결 p99 가 531~886ms** 로 악화(원인 불명, 3회 재현).
@@ -91,6 +93,12 @@ WSL2, Bun 1.4.4, Docker(postgres:18.6, nginx 1.30/1.31)에서 실행했다. 실�
 | G4 DB 드라이버 | **Bun.sql 통과·권장.** Bun.sql·postgres.js 4.0.0·pg 모두 바인딩·트랜잭션·`SKIP LOCKED` 1000행×8워커(중복 0)·늦은 완료 0행 거절·advisory 리더 선출 통과. LISTEN 자동 재구독은 Bun.sql 만 서버 재시작까지 복구, postgres.js 4.0.0 은 재시작 후 복구 못함(3.4.7 은 복구) | 드라이버 = Bun.sql. SQLSTATE 는 `errno`. NOTIFY 유실 보정(change_log 재조회) 필수 |
 | G7 nginx | ①② 통과. 공식 이미지 4종 모두 realip 포함, 신뢰 대역 밖 헤더 무시, 위조 헤더 정규화, WS 101, `limit_req` 429, 업스트림 다운 시 정적 폴백 서빙. ③ TLS 자동화 미확인(이미지에 acme 모듈 존재) | 직접 빌드 불필요. 내부 경로 차단은 대소문자 무시 정규식(`location ~*`) |
 | G10 Drizzle | 통과. `generate --custom` 으로 부분 인덱스·CHECK·함수·트리거 적용, 빈 DB 재현·멱등, 두 마이그레이터 동작 | 운영 규칙 6개(tech-stack §11.1): push 금지 등 |
+| G1 Cloudflare Tunnel | **통과(임시 터널).** wss 업그레이드·64KB/512KB 에코·close 1001/4408 그대로 도달, `CF-Connecting-IP` 부착, 유휴 ping 없으면 약 126초에 1006(hb 25초면 유지). 에지는 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않고 `CF-Connecting-IP` 요청 헤더는 403(error 1000)으로 거부. 정식 Named Tunnel·Access 는 미확인 | nginx 주소 헤더 정규화 필수, hb 25초 필수 |
+| G2 Bun WS | **조건부 통과.** 1000연결 22분 소크 RSS 기울기 +0.45MB/h(참고)·유실 0, SIGTERM+bye 재접속 폭풍 5초 내 전량 복구, 앱 레벨 큐가 느린 소비자 10/10 을 4408 로 격리. Bun.serve 네이티브 `closeOnBackpressureLimit` 은 1006 으로만 끊고 Elysia 라우트 옵션은 여전히 무시(0/10), Elysia 최상위 옵션의 이전 p99 악화는 이번 조건에서 재현 안 됨(결론 유보). 수 시간 소크는 미실행 | 앱 레벨 큐 유지, `stop()` await 금지, 클라이언트는 4408 코드에 의존한 분기 금지(느린 연결은 close 프레임을 못 받음), 서버 타임스탬프는 `Date.now()` |
+| G3 Next on Bun | **조건부 통과.** 빌드·standalone(41MB)·SSR·ISR·재검증·Server Action·next-intl·next/image·종료(143)·Docker(341MB)·HMR 정상, Bun 이 Node 25 보다 같거나 빠름(단일 측정). nonce CSP 는 정적·ISR 에서 하이드레이션을 깨뜨림 | **모든 페이지 동적 렌더 + nonce CSP 유지, ISR 포기**(10 §2). proxy matcher 에서 `/healthz`·`/readyz`·`/metrics`·`/api` 제외 |
+| G6 Grafana 임베드 | **통과.** Public dashboards 다른 오리진 iframe 렌더, 편집·탐색·타 대시보드 차단, 쿼리는 패널 저장 쿼리만. 익명 Viewer 는 임의 PromQL 실행 | 후퇴안 없음(ADR-007). `ALLOW_EMBEDDING=true`, sandbox `allow-scripts allow-same-origin`, 공개 출처 1개 `frame-src` |
+| G8 Envoy Gateway on k3d | **통과.** 라우팅·WS 왕복 확인. v1.7.0 CRD + EG v1.9.3 helm 설치는 CRD 충돌 → 우회 절차 필요. 유휴 타임아웃 기본 무제한, 롤링 중 `preStop sleep 5` 조합으로 새 연결 실패 0/1156(없으면 26/837) | 설치 절차·`streamIdleTimeout` 정책·`earlyRequestHeaders` 정규화·`directResponse` 404 (F17) |
+| G9 Testcontainers | **통과.** 병렬 실행은 래퍼 1컨테이너 + `DATABASE_URL` 공유, Ryuk 필수, 훅 타임아웃 60초 | 08·09 |
 | (G2 보조) Bun/Elysia | `await server.stop()` 은 WS 가 열려 있으면 교착 → `stop()` 을 await 없이 호출하고 `bye`+`close(1001)` 후 타임아웃 대기. 업그레이드 사전 검사·`ws.send` 반환값(-1/0)·두 경로 분리는 Elysia 와 Bun.serve 모두 동작. 라우트 옵션 `backpressureLimit` 의 **차단 동작은 미검증**(앞선 측정에서는 무시) | 앱 레벨 큐 상한 유지 |
 | 기타 | `timingSafeEqual` 은 길이가 다르면 예외 → 해시 후 비교. `Bun.randomUUIDv7()` 내장(시간 정렬 확인). prom-client 는 Bun 에서 GC 지표 샘플 없음, `eventloop_lag_seconds` 0. 별도 `@sinclair/typebox` 를 Elysia 에 사용 가능(typebox 1.x 는 peer 범위 밖), 브라우저는 `Value.Check` 만(약 13.9KB gzip) | F16·F17 반영 |
 

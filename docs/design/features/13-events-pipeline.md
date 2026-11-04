@@ -580,6 +580,19 @@ RETURNING o.id, o.status;
 | `ChangeLogRule` | **realtime** (F14 의 `ChangeLogTrimmer` 가 이 규칙이다 — 별도 삭제 로직을 두지 않는다) |
 | 세션 정리 `PurgeExpiredSessions` | **identity** 가 소유하는 별도 잡(익명화 선행이 필요해 이 틀을 쓰지 않는다, F10 ID-10) |
 
+#### 일시 정지 (EV-16, ADR-028 — 증거 보존)
+
+보안사고 대응 중에는 보관 정리가 증거를 지우지 않도록 **정리를 멈춘다**([design/13](../13-incident-response.md) §4).
+
+| 항목 | 규칙 |
+|---|---|
+| 상태 | `status/retention/pause.json` = `{paused_at, reason, expires_at}` (원자적 rename, worker 가 읽기 전용 마운트가 아니라 **쓰기 가능한** 상태 디렉터리에 둔다) |
+| 설정 | `worker retention:pause --reason "<id>" [--ttl 24h]` / `retention:resume`. 감사 `system.retention_paused`(`detail.state` = `paused`·`resumed`·`auto_released`) |
+| 효과 | `RetentionRunner.tick` 가 정지 중이면 **모든 규칙을 건너뛰고** 지표 `pf_retention_skipped_total{rule,reason="paused"}` 만 올린다. `PurgeExpiredSessions` 와 `archive-logs.sh`(7일 지난 날짜 디렉터리 삭제)도 같은 파일을 확인해 삭제를 건너뛴다 |
+| 자동 해제 | `expires_at` 이 지나면 다음 tick 이 정지를 풀고 `auto_released` 를 기록한다(해제를 잊어 디스크가 차는 것을 막는다) |
+| 경보 | `RetentionPaused`(정지 상태 12시간 초과, warn — 제안 임계값). 지표 `pf_retention_paused`(0/1 게이지, F17 카탈로그 추가 필요) |
+| 시험 | 정지 중 규칙 미실행, TTL 경과 후 자동 해제, 정지 상태에서 `retention:run` 거부(08) |
+
 | 규칙 클래스 | 테이블 | 기준 컬럼 | 보관 | 조건 | 배치 삭제 크기 | 주기 |
 |---|---|---|---|---|---|---|
 | `OutboxPublishedRule` | `events.outbox_event` | `published_at` | 7일 | `status='published'` | 1000(제안) | 10min |

@@ -51,12 +51,12 @@ flowchart TD
 | 지시어 | 값 | 이유 |
 |---|---|---|
 | `default-src` | `'self'` | 기본 차단 |
-| `script-src` | `'self' 'nonce-<요청별>' 'strict-dynamic'` | 인라인 스크립트는 nonce 가 있는 것만. Next 의 nonce 지원 동작은 G3 에서 확인 |
-| `style-src` | `'self'` (+ 필요 시 `'nonce-<요청별>'`) | Tailwind 는 정적 CSS. 인라인 스타일이 필요해지면 nonce 로 해결하고 `'unsafe-inline'` 은 쓰지 않는다. Next 가 요구하는지 **미확인(G3)** |
+| `script-src` | `'self' 'nonce-<요청별>' 'strict-dynamic'` | 인라인 스크립트는 nonce 가 있는 것만. **G3 로컬 실측으로 확정**: 동적 렌더 페이지에서는 서버 컴포넌트가 `headers()` 로 읽은 nonce 가 인라인 스크립트와 Next 청크 스크립트에 적용돼 하이드레이션·Server Action 이 동작한다. 반면 **프리렌더된 정적·ISR 페이지의 HTML 에는 요청별 nonce 가 없어 모든 `_next/static` 청크가 `script-src-elem` 위반으로 차단**되고 하이드레이션이 깨진다(Bun 이 아니라 Next 구조 문제). → **모든 페이지를 동적 렌더로 하고 nonce CSP 를 유지, ISR 은 포기**한다(07 §8). 기각: 정적 페이지에 `'unsafe-inline'` 을 여는 안(CSP 약화). 시험하지 못한 안: 해시/SRI 방식(`experimental.sri`). 정적 폴백(nginx) 페이지는 별도 산출물이고 폴백 응답의 CSP 는 `script-src 'none'` 이라 이 문제와 무관하다 |
+| `style-src` | `'self'` (+ 필요 시 `'nonce-<요청별>'`) | Tailwind 는 정적 CSS. 인라인 스타일이 필요해지면 nonce 로 해결하고 `'unsafe-inline'` 은 쓰지 않는다. **G3 실측**: `next/image` 가 `<img style="color:transparent">` 인라인 style 속성을 쓰므로 `style-src 'self'` 만으로는 `style-src-attr` 위반이 난다. `style-src` 에 `'unsafe-inline'` 을 넣으면 사라지는 것은 확인했다. 선택지: (a) `style-src-attr 'unsafe-inline'` 만 좁게 연다 — **미시험**, 권장 후보, (b) `style-src 'unsafe-inline'`, (c) `next/image` 에 `unoptimized`·자체 `<img>`. 구현 시 (a) 를 먼저 시험하고 안 되면 (c) 를 검토한다 |
 | `img-src` | `'self' data:` + **CI 배지 호스트 1개** | 외부 이미지는 CI 상태 배지(FR-003)뿐이다. 호스트는 `site.ciBadgeUrl`([12](12-content.md) §1.1)에서 빌드 시 뽑아 넣고, 변수가 `null` 이면 이 값을 넣지 않는다. 배지의 실제 호스트·리다이렉트(예: GitHub Actions 배지가 다른 호스트로 넘기는지)는 **미확인** — 구현 시 브라우저 콘솔 위반 보고로 확정. 아바타는 쓰지 않는다 |
 | `font-src` | `'self'` | 폰트는 자체 호스팅 |
 | `connect-src` | `'self' wss://<PUBLIC_ORIGIN 의 호스트>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
-| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1) | G6 로 확정. 임베드가 안 되면 링크로 대체해 이 값을 제거 |
+| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1) | **G6 로컬 실측으로 확정**(Grafana 공개 출처 1개). 임베드가 안 되면 링크/스크린샷으로 대체하고 이 값을 제거한다. iframe `sandbox="allow-scripts allow-same-origin"` 필수, Grafana 는 `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off. **후퇴안 없음**: 익명 Viewer 는 임의 PromQL 이 열려(`POST /api/ds/query`) 부적합 |
 | `frame-ancestors` | `'none'` | 클릭재킹 방지 |
 | `base-uri` | `'self'` | |
 | `form-action` | `'self'` | |
@@ -229,8 +229,12 @@ sequenceDiagram
 | `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 노출 시 | Discord 에서 웹훅 **삭제 후 재생성** → `secrets/discord_webhook` 교체 → grafana 재기동. URL 자체가 자격이라 `SecretString`·로그 마스킹(`https://discord.com/api/webhooks/…` 패턴 → `[redacted]`) 대상 | 즉시(웹훅 삭제) |
 | Grafana 관리자 비밀번호 | 연 1회 | 환경 파일 교체 후 재기동 | 즉시 |
 | 백업 암호화 키 | 키 분실·노출 시만 | 새 키로 이후 백업 암호화. 기존 덤프는 구 키가 있어야 복호화되므로 **구 키를 보관** | 새 키 발급, 외부 보관분 재암호화 |
-| 세션 토큰 | 7일 만료(자동) | 만료·로그아웃 시 서버에서 폐기(ADR-008) | 사용자 단위 전체 폐기 가능 |
+| 세션 토큰 | 7일 만료(자동) | 만료·로그아웃 시 서버에서 폐기(ADR-008) | 사용자 단위 전체 폐기 가능: `worker admin revoke-sessions --all|--user|--session` ([13](13-incident-response.md) §5) |
+| 관리자 GitHub 계정 | — (계정 보안 2FA 유지) | `ADMIN_GITHUB_IDS` 로 권한을 설정값으로만 부여(DB 플래그 없음) | 허용목록에서 제거 후 재배포 + 세션 폐기 + GitHub 비밀번호·2FA·OAuth 앱·PAT 점검 ([13](13-incident-response.md) §6.9) |
+| 호스트 GHCR pull 토큰(읽기 전용 PAT) | 연 1회 | GitHub 에서 재발급 → 호스트 `docker login` 자격(`pf` 홈) 교체 | 즉시 폐기·재발급 ([13](13-incident-response.md) §6.13) |
+| SSH 키(Oracle 호스트 사용 시) | 연 1회 | 키 교체, `authorized_keys` 점검 | 호스트 침해로 취급, 전체 비밀 회전 고려 |
 
+- **노출됐을 때의 대응**(증거 보존, 비상 스위치, 자산별 런북, 영향 산정, 공지, 리허설)은 [13](13-incident-response.md) 이 정본이고, 위 표는 평상시 회전 정책이다.
 - 비밀은 `SecretString` 으로만 다루고(01 §7.1) 로그·오류 메시지·지표 레이블·`/metrics` 에 들어가지 않는다.
 - 저장소 비밀 유출 방지: `.env`·`secrets/` 무시 + 커밋 전 검사(시크릿 스캔은 CI 에서 `gitleaks` 류 도구 후보 — **도구 선택은 미확인**, 구현 시 비교).
 - **로그·상태 디렉터리 권한**: `PF_LOG_DIR`(기본 `/var/log/pf`)·`STATUS_DIR` 는 `pf:pf` **0750**, 아카이브 파일은 **0640**. 외부 업로드·백업에서 제외한다(ADR-027).
@@ -276,6 +280,21 @@ sequenceDiagram
 | 인증·권한 | 없음 | 가드 + 도메인 정책 | 프록시는 신원을 모른다 |
 | 로그 | 액세스 로그에서 **주소 필드 제외** | 구조화 로그, 비밀·본문 제외 | |
 
+### 7.1 속도 제한 값 요약
+
+수치의 정본은 [03 §1.1](03-api-contract.md) 이다(초기값, 측정 후 조정). 보안 관점에서의 요점만 둔다.
+
+| 계층 | 키 | 막는 것 | 주소 저장 |
+|---|---|---|---|
+| nginx `limit_req`/`limit_conn` | 접속 주소(메모리 전용 zone) | 단일 출처 폭주, 세션 발급 남용(`/api/me`), 로그인 남용(`/api/auth/`), 소켓 재접속 폭주 | **안 함**(메모리, ADR-023) |
+| 앱 `RateLimitGuard` | 행위자 키(세션/사용자) | 계정(세션)당 도배, 반응 연타, 신고 남용, 관리자 계정 탈취 시 폭주 | 해당 없음 |
+| WS | 연결·메시지 | 메시지 폭주(`4429`), 탭 폭증(`4409`), 전체 상한 | 해당 없음 |
+
+- 세션이 새로 발급되는 경로(`/api/me`)는 **세션 키로 막을 수 없어** 주소 기준 nginx 제한이 유일한 방어다. 세션을 계속 새로 받아 세션 제한을 우회하려는 시도도 같은 주소 제한에 걸린다.
+- 주소를 모르는 상태(주소 헤더 정규화 실패, G1)에서는 nginx 제한이 모든 요청을 한 주소로 묶을 수 있다 → 정규화 검증(G7 ②)이 선행 조건이다.
+- 제한 초과는 `pf_rate_limit_decisions_total{app,rule,decision}` 로 관측하고(레이블에 주소·세션 금지), 급증 시 쓰기 잠금 스위치(ADR-028 사다리 1단계)를 쓴다.
+- 도구 관련: 비밀 스캔(CI `secret-scan`, gitleaks 후보)은 **기본 규칙만으로는 Discord 웹훅 URL 을 못 잡고**(실측) 낮은 엔트로피·알려진 예제 키는 무시하므로 저장소 `.gitleaks.toml` 에 웹훅 규칙을 추가해야 한다(ADR-028, 13 §10).
+
 ## 8. 위협 모델 (STRIDE 요약)
 
 | 범주 | 위협 | 대응 | 근거 |
@@ -305,9 +324,9 @@ sequenceDiagram
 
 | 항목 | 결정 시점 |
 |---|---|
-| Next 의 nonce CSP 동작, `style-src` 인라인 필요 여부 | 관문 G3 |
-| Grafana 임베드 출처(`frame-src`) | 관문 G6 |
-| `CF-Connecting-IP` 부착, 헤더 정규화 설정 | 관문 G1·G7 |
+| ~~Next 의 nonce CSP 동작~~ | G3 로컬 확정(동적 렌더 + nonce). `style-src-attr` 만 좁게 여는 방식은 구현 시 시험 |
+| ~~Grafana 임베드 출처(`frame-src`)~~ | G6 로컬 확정. 실제 공개 출처 값은 배포 시. 공개 페이지 HTML 에 데이터 소스 내부 URL 이 노출되고 Grafana 포트 `/metrics` 가 무인증이므로 프록시에서 차단 |
+| ~~`CF-Connecting-IP` 부착, 헤더 정규화 설정~~ | G1·G7 로컬 통과(임시 터널). 에지가 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않아 nginx 덮어쓰기가 필수이고, 클라이언트가 보낸 `CF-Connecting-IP` 헤더는 에지가 403(error 1000)으로 거부한다. 정식 터널은 미확인 |
 | 시크릿 스캔 도구, `bun audit` 가용성 | 구현 단계 0 |
 | 컨테이너 비루트·읽기 전용 FS 의 Bun 호환 | 이미지 작성 시 시험 |
 | 세션 슬라이딩 갱신 여부 | [06](06-auth.md) |

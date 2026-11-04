@@ -1,0 +1,34 @@
+<section class="section">
+  <div class="wrap stack" style="--stack:2rem">
+    <div class="stack" style="--stack:.5rem">
+      <h1>운영 지표</h1>
+      <p class="lede">이 사이트가 지금 얼마나 잘 돌아가는지 공개 대시보드로 볼 수 있어요. 읽기 전용입니다.</p>
+    </div>
+
+    <div id="embed" class="embed" aria-live="polite">
+      <div class="embed-bar"><span class="mono xs subtle">grafana · 공개 대시보드 (iframe)</span><span class="badge badge-info">읽기 전용</span></div>
+      <div class="embed-body" id="embed-ok">
+        <div class="panels" aria-label="지표 패널 자리표시(예시 데이터)">
+          <figure class="panel"><figcaption class="small muted">요청 수 · 5분</figcaption><svg viewBox="0 0 200 60" aria-hidden="true"><polyline class="spark" points="0,44 20,38 40,40 60,30 80,34 100,22 120,26 140,18 160,24 180,14 200,16"/></svg><div class="big mono">184<span class="xs subtle"> /분</span></div></figure>
+          <figure class="panel"><figcaption class="small muted">응답 지연 p95</figcaption><svg viewBox="0 0 200 60" aria-hidden="true"><polyline class="spark" points="0,30 20,32 40,28 60,36 80,30 100,26 120,34 140,28 160,30 180,27 200,29"/></svg><div class="big mono">142<span class="xs subtle"> ms</span></div></figure>
+          <figure class="panel"><figcaption class="small muted">outbox 적체</figcaption><svg viewBox="0 0 200 60" aria-hidden="true"><polyline class="spark" points="0,48 20,48 40,46 60,48 80,47 100,48 120,45 140,48 160,48 180,47 200,48"/></svg><div class="big mono">0<span class="xs subtle"> 건</span></div></figure>
+          <figure class="panel"><figcaption class="small muted">WebSocket 연결</figcaption><svg viewBox="0 0 200 60" aria-hidden="true"><polyline class="spark" points="0,40 20,40 40,36 60,38 80,30 100,32 120,26 140,28 160,22 180,24 200,20"/></svg><div class="big mono">12</div></figure>
+        </div>
+        <p class="xs subtle" style="padding:0 1rem 1rem">이 영역은 자리표시입니다. 실제 화면에서는 Grafana 공개 대시보드가 들어옵니다. 숫자는 예시입니다.</p>
+      </div>
+      <div class="embed-fail" id="embed-fail" hidden role="alert">
+        <svg class="node node-error" style="width:2rem;height:2rem" aria-hidden="true"><use href="#n-error"/></svg>
+        <h2 style="font-size:var(--text-lg)">대시보드를 불러오지 못했습니다</h2>
+        <p class="muted small">지표 서버에 연결할 수 없어요. 사이트의 다른 기능에는 영향이 없습니다.</p>
+        <div class="row"><button class="btn btn-secondary" type="button" data-toast="다시 불러오는 중입니다." data-kind="info">다시 불러오기</button><a class="btn btn-ghost" href="#">새 탭에서 열기</a></div>
+      </div>
+    </div>
+
+    <section class="grid cols-2" aria-label="지표 안내">
+      <div class="card stack" style="--stack:.5rem"><h2 style="font-size:var(--text-base)">여기서 볼 수 있는 것</h2><ul class="small muted stack" style="--stack:.375rem"><li>요청 수와 응답 지연(p95)</li><li>outbox에 쌓인 이벤트 수와 가장 오래된 이벤트의 나이</li><li>WebSocket 연결 수와 전송 대기열</li><li>처리 오류와 재시도 횟수</li></ul></div>
+      <div class="card stack" style="--stack:.5rem"><h2 style="font-size:var(--text-base)">지표에 사람이 남지 않습니다</h2><p class="small muted">지표의 레이블에는 사용자, 세션, IP 같은 식별자를 쓰지 않습니다. 개수와 시간만 집계합니다.</p><a class="small" href="architecture.html">서버 기록 설계 보기</a></div>
+    </section>
+  </div>
+</section>
+
+<div class="mock-ctl" role="group" aria-label="목업 전용 컨트롤"><strong>목업 전용</strong><label>대시보드 상태 <select id="embed-select"><option value="ok">불러옴</option><option value="fail">불러오지 못함</option></select></label></div>

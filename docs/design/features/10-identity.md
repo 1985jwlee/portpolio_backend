@@ -1,6 +1,6 @@
-# F10. identity 모듈 상세 설계 (ID-01 ~ ID-10)
+# F10. identity 모듈 상세 설계 (ID-01 ~ ID-11)
 
-`modules/identity` 의 **모든 기능**을 클래스·시퀀스·순서도 수준으로 정의한다. 기능 ID·트리거·접근 테이블의 정본은 [F00 카탈로그](00-feature-catalog.md) §1, 계약은 [03 API](03-api-contract.md)·[06 인증](../06-auth.md), 기반 클래스·오류 체계는 [00](../00-system-overview.md) §4, 정책 근거는 ADR-008(신원)·ADR-021(동시성)·ADR-023(보관·IP 미저장)이다.
+`modules/identity` 의 **모든 기능**을 클래스·시퀀스·순서도 수준으로 정의한다. 기능 ID·트리거·접근 테이블의 정본은 [F00 카탈로그](00-feature-catalog.md) §1, 계약은 [03 API](../03-api-contract.md)·[06 인증](../06-auth.md), 기반 클래스·오류 체계는 [00](../00-system-overview.md) §4, 정책 근거는 ADR-008(신원)·ADR-021(동시성)·ADR-023(보관·IP 미저장)이다.
 
 > 쓰기 스키마는 `identity`(`user_account`, `session`, `request_key`) 하나이고 **읽기 스키마가 없다**(`identity_read` 없음, 이벤트 발행도 없다). 세션 조회는 매 요청에 일어나므로 §2.3 의 "인증 조회 예외"로 쓰기 테이블을 읽기 전용 포트로 읽는다(architecture.md §5 `GET /api/me` 설명과 같은 예외).
 
@@ -18,6 +18,7 @@
 | ID-08 | 표시 이름 변경 | §11 | 명령 |
 | ID-09 | 관리자 판정 | §12 | 순수 정책 |
 | ID-10 | 만료 세션 정리·익명화 | §13 | 잡(worker, 모듈 간 오케스트레이션) |
+| ID-11 | 세션 폐기(사고 대응) | §13.1 | 명령(worker CLI, 관리 작업) |
 
 ---
 
@@ -1356,6 +1357,105 @@ flowchart TD
 
 ---
 
+## 13.1 ID-11 세션 폐기 — `RevokeSessions` (ADR-028)
+
+**목적** 보안사고 때 세션을 즉시 무효화한다(대량 토큰 유출, 관리자 계정 탈취 — [design/13](../13-incident-response.md) §5·§6.1·§6.9). 행을 지우지 않고 `expires_at = now` 로 만들어, 삭제·익명화는 항상 ID-10 한 경로를 지나게 한다.
+
+**트리거** `worker admin revoke-sessions --all | --user <userId> | --session <sessionId>` (운영자 CLI, F16 §11). HTTP 엔드포인트는 만들지 않는다(공격 표면 최소화).
+
+| 구분 | 내용 |
+|---|---|
+| 사전 조건 | 운영 호스트에서 CLI 실행 권한, DB 접근. `--all` 은 확인 문구 또는 `--yes` 필요, `--dry-run` 으로 대상 수 미리 확인 |
+| 사후 조건 | 대상 세션 `expires_at = tx.now`, 감사 `admin.sessions_revoked`(`detail: {scope, count}`) 가 **같은 트랜잭션**에 남음. 이후 요청은 `ResolveSession` 이 `null` → 익명 세션 재발급. private 연결은 세션 캐시(≤30초) 만료 후 `4401` |
+| 접근 테이블 | `identity.session` W(`UPDATE … SET expires_at = :now WHERE expires_at > :now AND <범위>`), `events.audit_log` W(`AuditWriter`) |
+| 멱등성 | 이미 만료된 세션은 건드리지 않아(`expires_at > :now` 조건) 반복 실행해도 같다. 건수만 0 |
+
+```mermaid
+classDiagram
+    class RevokeSessions {
+        +execute(ctx, input RevokeInput) Result~RevokeResult~
+    }
+    class RevokeInput {
+        +scope RevokeScope
+        +dryRun bool
+    }
+    class RevokeScope {
+        <<abstract>>
+    }
+    class AllSessions
+    class UserSessions {
+        +userId UserId
+    }
+    class OneSession {
+        +sessionId SessionId
+    }
+    class RevokeResult {
+        +count int
+    }
+    class SessionRepository {
+        <<interface>>
+        +expireWhere(scope, now) int
+        +countActive(scope, now) int
+    }
+    class AuditWriter {
+        <<interface>>
+    }
+    RevokeScope <|-- AllSessions
+    RevokeScope <|-- UserSessions
+    RevokeScope <|-- OneSession
+    RevokeInput --> RevokeScope
+    RevokeSessions ..> SessionRepository
+    RevokeSessions ..> AuditWriter
+    RevokeSessions ..> RevokeInput
+    RevokeSessions ..> RevokeResult
+```
+
+```mermaid
+sequenceDiagram
+    participant O as 운영자
+    participant C as worker CLI
+    participant U as RevokeSessions
+    participant T as UnitOfWork
+    participant S as session
+    participant A as AuditWriter
+    O->>C: revoke-sessions --user U1
+    C->>U: execute({scope: UserSessions(U1)})
+    U->>T: run(tx)
+    T->>S: expireWhere(scope, tx.now)
+    S-->>T: count
+    alt 실패(DB 오류)
+        T-->>U: 롤백 (감사 행도 없음)
+        U-->>C: TransientError → 종료 코드 비0
+    else 성공
+        T->>A: record(admin.sessions_revoked, {scope, count})
+        T-->>U: 커밋
+        U-->>C: count
+    end
+```
+
+```mermaid
+flowchart TD
+    A["입력 검증"] --> B{"범위 지정이 정확히 하나인가"}
+    B -- "아니오" --> E["ValidationError (종료 코드 비0)"]
+    B -- "예" --> C{"--all 인가"}
+    C -- "예" --> D{"--yes 또는 확인 문구 입력?"}
+    D -- "아니오" --> X["중단 (아무것도 바꾸지 않음)"]
+    D -- "예" --> F
+    C -- "아니오" --> F{"--dry-run 인가"}
+    F -- "예" --> G["대상 수만 출력"]
+    F -- "아니오" --> H["uow.run: expireWhere + 감사 기록"]
+    H --> I["건수 출력, 타임라인 기록 안내"]
+```
+
+| 오류 | 클래스·코드 | 처리 |
+|---|---|---|
+| 범위 없음/중복 | `ValidationError` · `validation_failed` | 사용법 출력, 종료 코드 2 |
+| 사용자·세션이 없음 | 오류 아님 — `count = 0` | 경고 출력 |
+| DB 일시 오류 | `TransientError` · `unavailable` | 롤백, 재실행 안내 |
+
+**지표·로그** `pf_audit_records_total{category="admin",action="sessions_revoked",outcome}`. 로그에는 범위 종류와 건수만(사용자·세션 id 는 PSD 라 로그에 남기지 않는다).
+**시험(08 §2.0e)** 폐기 후 기존 쿠키 요청이 새 익명 세션으로 처리되고 private 연결이 `4401`, `--dry-run` 이 아무것도 바꾸지 않음, 이미 만료된 세션 재폐기 멱등, 트랜잭션 롤백 시 감사 행 부재.
+
 ## 14. 보안 점검 요약 (identity)
 
 | 위협 | 방어 | 관련 절 |
@@ -1380,6 +1480,7 @@ flowchart TD
 | 로그인 흐름 | 콜백 분기 전부(`GithubClient` 대역) | 모듈 통합 L3 | `.../login.test.ts` |
 | 동시 첫 로그인 | `github_id` 유일 키 | 동시성 L3 (08 §5 방식) | `.../login-race.test.ts` |
 | 정리·익명화 | ID-10 순서·멱등·중단 복구 | 장애 시험 L3 | `apps/worker/test/purge-sessions.test.ts` |
+| 세션 폐기 | ID-11 범위별 폐기·`--dry-run`·멱등·롤백 시 감사 행 부재 | 모듈 통합 L3 | `modules/identity/test/integration/revoke-sessions.test.ts` |
 | 구조 | 조회 usecase 가 쓰기 포트 불가, usecase 가 어댑터 임포트 불가 | 정적 L1 | dependency-cruiser B3·B6 |
 | 계약 | `GET /api/me` 응답, 쿠키 속성, 리다이렉트 | 계약 L2 | `packages/protocol/test/` |
 | E2E | 첫 진입 세션 발급, 로그인(대역 GitHub), 로그아웃 | E2E L3, 실제 GitHub L4 | `tests/e2e/` |

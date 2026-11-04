@@ -31,7 +31,15 @@
 | `site.repoUrl` | url | (저장소) | — | 예 |
 | `site.ciBadgeUrl` | url \| null | `null` | 배지 숨김. **값이 있으면 그 호스트가 CSP `img-src` 에 들어간다**([10](10-security.md) §2.2) | 아니오 |
 | `site.metricsEmbedUrl` | url \| null | `null` | 운영 지표 페이지가 임베드 대신 안내·링크를 보임. 값이 있으면 그 출처가 CSP `frame-src` 에 들어간다. Grafana 공개 대시보드 URL(프로비저닝으로 만들 수 없으면 수동 발급, G6) | 아니오 |
+| `site.securityNotice` | `{ko, en}` 문자열 \| null | `null` | 배너 없음. 값이 있으면 레이아웃 상단에 보안 공지 배너(제안, WB-01 셸). **빌드 시점 값이라 변경에는 재배포가 필요**하다 — 즉시 공지는 쓰기 잠금의 `reason` 을 쓴다([13](13-incident-response.md) §8) | 아니오 |
+| `site.seo.siteName` | string | (없음) | 비면 릴리스 빌드 실패. 페이지 title·OG·JSON-LD 의 사이트 이름([14](14-seo-and-error-pages.md)) | 예 |
+| `site.seo.description.{ko,en}` | string(70~160자) | `null` | 비면 페이지 설명 생략(자리표시 경고). 홈·공유 미리보기 설명 | 예 |
+| `site.seo.ogImage.mode` | `generated` \| `static` | `static` | `static` 이면 `og-ko.png`·`og-en.png` 가 `content/` 에 있어야 함 | 예 |
+| `site.seo.ogImage.staticPath` | `{ko, en}` 경로 \| null | `null` | `static` 모드에서 null 이면 OG 이미지 없음(경고) | `static` 일 때 |
+| `site.seo.twitterHandle` | string \| null | `null` | 트위터 카드의 `creator` 생략 | 아니오 |
+| `site.seo.indexDemoPages` | boolean | `false` | 데모 화면(방명록·흐름·지표)을 색인할지. 기본은 `noindex` | 아니오 |
 
+- **보안 공지 문구**: 템플릿(ko/en)은 [13](13-incident-response.md) §8 에 있고, 사고 때 `{date}`·`{what}`·`{scope}`·`{actions}` 를 채워 `site.securityNotice` 에 넣는다. `{contact}` 는 `privacy.deletionContact` 를 쓴다. 영향이 확정되기 전에는 "가능성"으로만 쓴다.
 - `profile.{ko,en}.yaml` 의 개인 정보(이름·소개·경력)도 같은 규칙이다: 비어 있으면 자리표시, 릴리스 빌드에서만 실패.
 - `privacy.cookieBanner` 는 쓰는 쿠키가 모두 **필수(세션·로그인 임시)** 라 기본 `false` 다. 추적·광고 쿠키를 도입하면 `true` 로 바꾸고 동의 UI 를 추가해야 한다.
 - 검사 명령: `bun run content:check`(경고 목록) / `CONTENT_STRICT=1 bun run content:check`(릴리스, 비어 있으면 실패). 릴리스 워크플로가 후자를 돌린다([09](09-ci-cd.md)).
@@ -238,3 +246,39 @@ flowchart TD
 | 쿠키 동의 배너 불요 판단의 타당성 | 사용자 확인 |
 | `apps/web/content` 경로 | 01 §1 에 반영됨(확정) |
 | 개인정보 문구 중 "외부 자원은 배지·지표 임베드를 켠 경우에만", "백업 외부 저장소" | 구현 후 사실 확인(G12 포함) |
+
+## 11. 사용자 제공 체크리스트
+
+사용자가 직접 정하거나 제공해야 하는 값의 전체 목록이다. **이 표가 비어 있어도 개발·미리보기는 진행된다**(자리표시). 릴리스 태그 빌드(`CONTENT_STRICT=1`)에서만 "릴리스 필수=예" 항목이 비면 실패한다. 값은 비밀이 아니다(공개된다).
+
+| # | 무엇을 | 형식 | 어디에(파일/변수) | 필수/선택 | 릴리스 필수 | 필요한 시점 |
+|---|---|---|---|---|---|---|
+| 1 | 이름(ko/en 각각) | 문자열 | `content/data/profile.{ko,en}.yaml` `name` | 필수 | 예 | S5-2 전 |
+| 2 | 한 줄 소개(60자 이내) | 문자열 | 같은 파일 `headline` | 필수 | 예 | S5-2 전 |
+| 3 | 요약(3~5문장) | 문자열 | 같은 파일 `summary` | 필수 | 예 | S5-2 전 |
+| 4 | 경력 항목(조직·직함·기간·한 줄 설명·성과) | 목록 | 같은 파일 `roles[]` | 필수 | 예 | S5-2 전 |
+| 5 | 기술 그룹(선택) | 목록 | 같은 파일 `skills[]` | 선택 | 아니오 | — |
+| 6 | 이메일을 공개할지 | 예/아니오 | `contact.emailVisible` | 필수(결정) | 예 | 릴리스 전 |
+| 7 | 공개 이메일 주소 | 문자열 | `contact.email` | `emailVisible` 일 때 | 조건부 | 릴리스 전 |
+| 8 | GitHub·LinkedIn·블로그 링크 | URL | `contact.links.*` | 선택 | 아니오 | — |
+| 9 | 개인정보 운영자 표기 | 문자열 | `privacy.operatorName` | 필수 | 예 | 릴리스 전 |
+| 10 | 삭제 요청 연락 수단 | 문자열 | `privacy.deletionContact` | 필수 | 예 | 릴리스 전 |
+| 11 | 삭제 요청 처리 목표 기간(일) | 정수 | `privacy.deletionResponseDays` | 선택 | 아니오 | — |
+| 12 | 쿠키 동의 배너 필요 여부(기본 불요: 필수 쿠키만) | 예/아니오 | `privacy.cookieBanner` | 필수(결정) | 예 | 릴리스 전 |
+| 13 | 저장소 URL | URL | `site.repoUrl` | 필수 | 예 | S5-2 전 |
+| 14 | CI 배지 URL | URL | `site.ciBadgeUrl` | 선택 | 아니오 | CI 구성 후 |
+| 15 | Grafana 공개 대시보드 URL | URL | `site.metricsEmbedUrl` | 선택(G6 후) | 아니오 | S7-3 후 |
+| 16 | 사이트 이름 | 문자열 | `site.seo.siteName` | 필수 | 예 | S5-1 전 |
+| 17 | 사이트 설명(ko/en, 70~160자) | 문자열 | `site.seo.description.{ko,en}` | 필수 | 예 | S5-1 전 |
+| 18 | 공유 미리보기 이미지 소재(1200×630 PNG, ko/en) 또는 `generated` 선택 | 파일 / 모드 | `site.seo.ogImage.*`, `content/og-{ko,en}.png` | 필수(결정) | 예 | 릴리스 전 |
+| 19 | 프로필 사진·로고(쓸 경우) | 이미지 | `content/` 아래 | 선택 | 아니오 | — |
+| 20 | 트위터/X 계정(쓸 경우) | 문자열 | `site.seo.twitterHandle` | 선택 | 아니오 | — |
+| 21 | 데모 화면 색인 허용 여부(기본 불허) | 예/아니오 | `site.seo.indexDemoPages` | 선택 | 아니오 | — |
+| 22 | 아키텍처 설명의 어조·분량 확인 | 검토 | `content/{ko,en}/architecture.mdx` | 필수(검토) | 예 | S5-2 후 |
+| 23 | 오류·점검 화면 확정 문구 | 검토 | `messages/{ko,en}.json` `errors.*` ([14](14-seo-and-error-pages.md) §5.2) | 필수(검토) | 예 | S5-1 후 |
+| 24 | 저작권 보유자 표기(`LICENSE` 의 이름) 확인 | 문자열 | `LICENSE` | 필수(확인) | 예 | 저장소 공개 전 |
+| 25 | 보안 공지 문구(사고 시에만) | `{ko, en}` | `site.securityNotice` | 평소 불필요 | 아니오 | 사고 시 |
+
+- "필요한 시점"은 [11](11-implementation-plan.md) 의 작업 ID 기준이다. 비어 있으면 자리표시로 개발은 계속되지만 **그 화면은 미완성**이다.
+- 에이전트나 기여자는 위 값을 **임의로 채우지 않는다**(§9). 제공이 늦어지면 릴리스가 미뤄질 뿐 설계는 영향이 없다.
+- 라이선스·콘텐츠 권리는 [CONTENT-LICENSE.md](../../CONTENT-LICENSE.md) 와 [ADR-029](../adr/ADR-029-license-and-content-rights.md).

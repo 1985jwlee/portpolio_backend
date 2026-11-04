@@ -416,7 +416,7 @@ classDiagram
 | 실패 격리 | prefetch 가 던져도 **페이지를 막지 않는다**(try/catch → 빈 상태로 렌더, 클라이언트가 곧바로 재조회). `console.error` 에 `traceId` 만 |
 | 클라이언트 | `useEntries` 가 하이드레이션된 데이터를 사용하고 `staleTime` 30초 안에는 재요청하지 않는다 |
 | 개인 필드 | SSR 시점에는 서버가 쿠키로 행위자를 알기 때문에 `myReactions/isMine/canEdit` 이 이미 채워진다(쿠키가 없으면 익명 기본값). 세션이 막 발급되는 첫 방문은 SSR 에서 익명 기본값이고, 클라이언트 `['me']` 확정 후 **재조회 1회**로 보정한다 |
-| 캐시 금지 | SSR 응답은 개인화되므로 `Cache-Control: private, no-store` (정적 4개 페이지만 ISR) |
+| 캐시 금지 | SSR 응답은 개인화되므로 `Cache-Control: private, no-store` (콘텐츠 4개 페이지도 동적 렌더이므로 `no-store` 로 둘 수 있다. CDN 캐시가 필요해지면 재검토) |
 
 ### 4.2 로케일 전환과 캐시
 
@@ -457,7 +457,7 @@ M1 에서는 **서버로 수집하지 않는다.** 이유: 수집 엔드포인�
 | 상태 | 서버: 로케일(경로), 테마(쿠키 `theme`). 클라이언트: 없음(Provider 가 보유) |
 | 데이터 | 로케일 사전(`messages/{ko,en}.json`), 쿠키 `NEXT_LOCALE`·`theme` |
 
-로케일 협상(`proxy.ts`, next-intl `localePrefix: 'always'`):
+로케일 협상(`proxy.ts`, next-intl `localePrefix: 'always'`). **matcher 는 `/healthz`·`/readyz`·`/metrics`·`/api`·`_next`·정적 파일을 제외해야 한다** — 제외하지 않으면 이 경로가 `/en/…` 으로 307 리다이렉트된 뒤 404 가 된다(G3 실측, 01 §8.5). 같은 `proxy.ts` 가 요청별 nonce 로 CSP 헤더를 설정하며, 이 때문에 콘텐츠 페이지도 동적 렌더다(10 §2):
 
 ```mermaid
 flowchart TD
@@ -494,7 +494,7 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 목적 | 한 줄 소개와 데모 4개(흐름·실시간·지표·아키텍처)로의 진입점 |
-| 경로·렌더링 | `/[locale]`, 정적(ISR 1h) — 정적 폴백 **포함** |
+| 경로·렌더링 | `/[locale]`, **동적 렌더**(nonce CSP, ISR 없음 — G3 실측) — 정적 폴백은 별도 산출물(`build:fallback`)로 **포함** |
 | 컴포넌트 | `HomePage`, `HeroSection`, `DemoCard × 4`, `RepoBadge`(WB-21) |
 | 데이터 | 사전과 `site-vars`(저장소 링크). **API 호출 없음** |
 | 지연 채움 | `AuthMenu`·`ConnectionBadge`·`BackendStatus` 섬만 클라이언트에서 채운다 |
@@ -1034,15 +1034,15 @@ sequenceDiagram
 | 데이터 | Grafana Public dashboards URL(사이트 변수 **`site.metricsEmbedUrl`**, 12 §1.1; 비어 있으면 안내·링크. 임베드 동작은 G6) |
 | 정적 폴백 | 제외("점검 중") |
 
-iframe 요건(관문 G6 에서 실측으로 확정, 아래는 **현재 가정**):
+iframe 요건(관문 G6 **로컬 실측으로 확정**, 2026-11-04):
 
 | 항목 | 값 |
 |---|---|
-| `sandbox` | `allow-scripts allow-same-origin` (Grafana 앱 실행에 필요). `allow-forms`·`allow-popups`·`allow-top-navigation` 은 주지 않는다 |
+| `sandbox` | `allow-scripts allow-same-origin` — **둘 다 필수**(실측: `allow-scripts` 만 주면 CORS(origin null)로 막혀 "Grafana has failed to load" 화면). `allow-forms`·`allow-popups`·`allow-top-navigation` 은 주지 않는다 |
 | `referrerpolicy` | `no-referrer` |
 | `loading` | `lazy`, 높이 고정(예: 720px)으로 CLS 방지 |
-| CSP `frame-src` | Grafana 공개 대시보드 출처(같은 출처 경로 프록시면 `'self'`, 별도 호스트면 해당 출처) — [10](../10-security.md) 헤더 표에 반영 필요(수정 요청) |
-| Grafana 쪽 | `allow_embedding`(설정), 공개 대시보드 편집·탐색 UI 비노출 확인(G6) |
+| CSP `frame-src` | Grafana 공개 대시보드 출처(같은 출처 경로 프록시면 `'self'`, 별도 호스트면 해당 출처) — [10](../10-security.md) 헤더 표에 반영됨 |
+| Grafana 쪽 | `GF_SECURITY_ALLOW_EMBEDDING=true`(기본은 `X-Frame-Options: deny`), `GF_AUTH_ANONYMOUS_ENABLED=false`. 실측: 공개 URL 에서 `/explore`·다른 대시보드·`/api/search`·`/api/datasources`·`/api/ds/query` 는 막히고 쿼리 API 는 저장된 패널 쿼리만 실행(임의 `expr` 무시). **후퇴안은 없다** — 임베드가 안 되면 `MetricsFallback`(링크/스크린샷)으로 대체한다 |
 
 ```mermaid
 flowchart TD

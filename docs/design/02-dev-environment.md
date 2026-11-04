@@ -166,7 +166,7 @@ classDiagram
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, 32바이트 이상) | `.env` (개발용 임의 값) | `secrets/oauth_state_secret` → `OAUTH_STATE_SECRET_FILE` | 없음 |
 | Cloudflare Tunnel 토큰 | (로컬 시험 시 일회용) | `secrets/tunnel_token` | 없음 |
 | Grafana 관리자 비밀번호 | `.env` | `secrets/grafana_admin_password` | 없음 |
-| 백업 암호화 키 | 개발에서는 미사용 | `secrets/backup_key` + **별도 오프라인 사본** | 없음 |
+| 백업 암호화 **공개키**(`BACKUP_AGE_RECIPIENT`, 비밀 아님) | 개발에서는 미사용 | 환경변수/설정(서버에는 공개키만, ADR-026). **개인키는 서버에 두지 않고** 사용자가 오프라인 보관(복구 시험 때만 사용) | 없음 |
 
 - `.env.example` 만 커밋한다. **비밀 항목은 값을 비워 두고**, 비밀이 아닌 항목(포트·기본값)은 개발용 값을 채운다. `.env`·`secrets/` 는 `.gitignore`.
 - 라이브는 compose 의 파일 기반 secrets 를 마운트하고, 앱은 `NAME_FILE` 규약(01 §7.1)으로 읽는다. 환경변수로 비밀을 넘기지 않는다(`docker inspect` 노출 방지).
@@ -227,7 +227,9 @@ sequenceDiagram
 
 ## 7. Cloudflare Tunnel 로컬 시험 (관문 G1)
 
-G1 의 두 가지를 확인한다: ① WebSocket 이 터널을 통과하는가 ② `CF-Connecting-IP` 가 붙어 nginx 에서 읽히는가. **통과 전에는 둘 다 가정이다.**
+G1 의 두 가지를 확인한다: ① WebSocket 이 터널을 통과하는가 ② `CF-Connecting-IP` 가 붙어 nginx 에서 읽히는가.
+
+**로컬 실측 결과(2026-11-04, trycloudflare 임시 터널·cloudflared 2026.10.7): 두 가지 모두 통과.** wss 업그레이드·64KB/512KB 에코·서버 close 1001/4408 이 사유까지 그대로 도달하고 `CF-Connecting-IP` 가 붙었다. 유휴 ping 이 없으면 약 126초에 1006 으로 끊기고 25초 `hb` 가 있으면 252초(관찰 상한)까지 유지된다. 에지는 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않고 `CF-Connecting-IP` 요청 헤더는 403(error 1000)으로 거부하므로 nginx 정규화 덮어쓰기가 필수다. **미확인**: 정식 Named Tunnel·Access·다중 커넥터(계정 필요).
 
 | 방식 | 용도 | 비고 |
 |---|---|---|
@@ -287,7 +289,7 @@ Postgres 는 클러스터 안 StatefulSet 이고, 마이그레이션은 Job 이�
 | 항목 | 결정 시점 |
 |---|---|
 | 호스트 포트 기본값(`55432`, `3030`, `8080`, `8081`) 확정 | 구현 시작 시 충돌 확인 |
-| 임시 터널의 WebSocket·제약 | 관문 G1 |
+| ~~임시 터널의 WebSocket·제약~~ | G1 로컬 통과. 정식 터널은 계정이 있어야 확인 |
 | nginx 이미지의 realip 포함 여부 | 관문 G7 |
 | `backup` 실행 형태(호스트 cron vs 컨테이너) | M1 후반 (ADR-023) |
-| k3d 클러스터 옵션 상세 | 관문 G8 |
+| ~~k3d 클러스터 옵션 상세~~ | G8 로컬 통과(F17 §16). 설치는 CRD 충돌 우회 필요(`--server-side` + `crds.enabled=false`) |

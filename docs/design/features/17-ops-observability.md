@@ -438,6 +438,7 @@ flowchart TD
 | `pf_retention_deleted_total` | C | `table` | 건 | RetentionRunner | 정보 |
 | `pf_ops_last_success_timestamp` | G | `job`(`backup`,`archive_logs`,`pull_deploy`) | 초(epoch) | StatusFileCollector (`status/<job>/last_run.json` 의 `last_success_at`) | `time()-x > 26h`(backup·archive_logs) |
 | `pf_ops_last_run_ok` | G | `job` | 0/1 | 위와 동일 (`ok`) | `==0` |
+| `pf_retention_paused` | G | `app` | 0/1 | 보관 정리 정지 여부(증거 보존 중, ADR-028). 정지 파일이 24시간 넘으면 `RetentionPaused` 경보 | EV-16 |
 | `pf_ops_status_age_seconds` | G | `job` | 초 | 위와 동일 (`now - finished_at`) | `pull_deploy` 15분 초과(타이머 정지) |
 | `pf_backup_last_size_bytes` | G | — | 바이트 | 위와 동일 (`detail.bytes`) | 급감(정보) |
 
@@ -934,20 +935,22 @@ sequenceDiagram
     Note over V,G: 임베드가 거절되면 (G6 실패) 링크 카드로 대체
 ```
 
-### 8.4 순서도 — 임베드 결정(G6)
+### 8.4 순서도 — 임베드 결정(G6, 로컬 실측 통과)
 
 ```mermaid
 flowchart TD
-    A["G6 실측 시작"] --> B{"Public dashboard 를 iframe 으로 임베드 가능?"}
-    B -- "예" --> C{"편집 · 탐색 UI 가 노출되지 않는가"}
-    C -- "예" --> OK["채택: Public dashboards"]
-    C -- "아니오" --> D["프록시 허용목록 강화 후 재시험"]
+    A["Public dashboard 생성 (익명 접근 off)"] --> B{"GF_SECURITY_ALLOW_EMBEDDING=true 로<br/>다른 오리진 iframe 임베드 가능?"}
+    B -- "예 (로컬 실측)" --> C{"편집 · 탐색 · 타 대시보드 UI/API 가 노출되지 않는가"}
+    C -- "예 (실측: 302/401)" --> OK["채택: Public dashboards"]
+    C -- "아니오" --> D["프록시 허용목록으로 경로 제한 후 재시험"]
     D --> C
-    B -- "아니오" --> E["익명 Viewer + 프로비저닝 대시보드로 후퇴 (ADR-007)"]
-    E --> F{"임베드 가능?"}
-    F -- "예" --> OK2["채택: 익명 읽기 전용 뷰"]
-    F -- "아니오" --> L["iframe 포기: 링크 카드 + 정적 스크린샷"]
+    B -- "아니오" --> E["후퇴안 없음: iframe 포기, 링크 카드 + 정적 스크린샷"]
 ```
+
+**후퇴안이 없는 이유(G6 실측)**: 익명 Viewer + 프로비저닝 대시보드 안은 `POST /api/ds/query` 로 임의 PromQL(`count({__name__=~".+"})`)이 200 으로 실행되고 `/api/search`·데이터 소스 목록·다른 대시보드가 열려 Prometheus 전체가 공개되는 것과 같다. 따라서 Public dashboards 가 안 될 때의 대안으로도 쓰지 않는다.
+
+**실측 요약**: `GF_SECURITY_ALLOW_EMBEDDING=true`(기본은 `X-Frame-Options: deny`), 익명 접근 off, iframe `sandbox="allow-scripts allow-same-origin"`(둘 다 필수), 사이트 CSP `frame-src` 에 Grafana 공개 출처 1개. 공개 URL 에서 `/explore`·`/d/<다른>`·`/dashboard/new`·`/connections`·`/profile` 은 302(로그인), `/api/search`·`/api/datasources`·`/api/dashboards/uid/*`·`/api/ds/query` 는 401, 쿼리 API 는 `/api/public/dashboards/<토큰>/panels/<id>/query` 만 열려 있고 본문의 임의 `expr` 은 무시된다. 시간 선택을 끄면 클라이언트 범위를 무시하고 대시보드 기본값으로 조회(켜면 클라이언트 범위를 따르고 서버 측 상한은 없음).
+**주의**: ① 공개 페이지 HTML 부트스트랩에 데이터 소스 이름·uid·type·`jsonData` URL(내부 주소)이 들어간다 — 데이터 소스 URL 에 자격 증명·비밀 경로를 두지 않는다. ② Grafana 포트의 `/metrics` 가 무인증으로 열려 있으므로 프록시에서 차단한다(외부 노출 금지). ③ 공개 토큰이 곧 자격이다 — 유출 시 공개를 해제하고 재발급한다.
 
 ### 8.5 오류·경보
 
@@ -1012,8 +1015,14 @@ log_format pf_json escape=json
 limit_req_zone  $binary_remote_addr zone=pf_write:10m rate=5r/s;
 limit_req_zone  $binary_remote_addr zone=pf_read:10m  rate=20r/s;
 limit_conn_zone $binary_remote_addr zone=pf_ws:10m;
+limit_req_zone  $binary_remote_addr zone=pf_me:1m   rate=30r/m;   # GET /api/me 세션 발급 남용 방지 (03 §1.1)
+limit_req_zone  $binary_remote_addr zone=pf_auth:1m rate=10r/m;   # /api/auth/ 로그인 시작·콜백
+limit_req_zone  $binary_remote_addr zone=pf_wsup:1m  rate=30r/m;  # /ws/ 업그레이드 재접속 폭주
 
-# 40-realip-cf.conf  (집 PC 경로; G1·G7 확인 전까지 미검증)
+# 40-realip-cf.conf  (집 PC 경로; G1·G7 로컬 실측 통과 — 임시 터널, 정식 터널은 미확인)
+# G1 실측: 에지는 클라이언트의 X-Forwarded-For·True-Client-IP 를 지우지 않고(위조 값이 그대로 도달),
+#   클라이언트가 보낸 CF-Connecting-IP 요청 헤더는 403(error 1000)으로 거부한다.
+#   → 아래 realip 로 치환한 뒤 proxy_set_header 로 덮어쓰는 정규화가 필수다. cloudflared 가 같은 호스트면 set_real_ip_from 127.0.0.1 로 동작 확인.
 set_real_ip_from  <cloudflared 컨테이너 네트워크 대역>;
 real_ip_header    CF-Connecting-IP;
 real_ip_recursive off;
@@ -1030,7 +1039,24 @@ server {
   location ~* ^/(healthz|readyz|metrics)(/|$) { return 404; }   # 대소문자 무시·후행 슬래시 포함(G7 실측: `location =` 정확 일치는 /healthz/ 와 /HEALTHZ 를 못 막는다)
   location = /nginx-health { access_log off; return 200; }
 
+  location = /api/me {
+    limit_req zone=pf_me burst=10 nodelay;
+    proxy_pass http://api;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For "";
+    add_header X-Robots-Tag "noindex" always;
+  }
+
+  location /api/auth/ {
+    limit_req zone=pf_auth burst=5 nodelay;
+    proxy_pass http://api;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For "";
+    add_header X-Robots-Tag "noindex" always;
+  }
+
   location /api/ {
+    add_header X-Robots-Tag "noindex" always;    # 14 SEO: API 는 색인 제외
     limit_req zone=pf_write burst=10 nodelay;   # 메서드별 분기는 map 으로 (아래 참고)
     proxy_pass http://api;
     proxy_set_header X-Real-IP $remote_addr;    # realip 이후의 단일 정규화 값. 클라이언트 값은 덮어쓴다
@@ -1040,12 +1066,13 @@ server {
   }
 
   location /ws/ {
+    limit_req zone=pf_wsup burst=20 nodelay;     # 업그레이드 재접속 폭주 방지 (03 §1.1)
     limit_conn pf_ws 20;                         # 탭당 소켓 2 × 여러 탭 (제안)
     proxy_pass http://ws;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
-    proxy_read_timeout 150s;                     # 서버 idle 120초 · hb 25초보다 길게
+    proxy_read_timeout 150s;                     # 서버 idle 120초 · hb 25초보다 길게. G1 실측: Cloudflare 임시 터널은 ping 없는 유휴 WS 를 약 126초에 1006 으로 끊는다 → hb 25초 필수
     proxy_send_timeout 150s;
     proxy_buffering off;
   }
@@ -1735,7 +1762,13 @@ flowchart TD
 
 **트리거.** `bun run k3d:up` (02 §8). 롤링 시험은 수동/스크립트.
 
-> Gateway API v1.7 + Envoy Gateway 의 WebSocket 라우팅·타임아웃 동작은 **미확인(G8)**. 아래는 구성안이며 실측으로 확정한다.
+> **G8 로컬 실측 통과**(k3d v5.9.0·k3s v1.35.5, Envoy Gateway v1.9.3, Gateway API v1.7.0 표준 채널, 2026-11-04). 아래는 실측으로 확정한 구성과 절차다. **미확인**: 호스트 실 클라이언트 IP(k3d serverlb 가 L4), WS 업그레이드 요청에서의 헤더 정규화 적용, `sectionName` 단위 정책.
+
+**설치 절차(CRD 충돌 우회)**: EG 차트(`crds.enabled=true`)는 Gateway API v1.6.1 CRD 를 내장해, 먼저 v1.7.0 을 적용하면 helm 이 server-side apply 충돌로 실패한다.
+1. `kubectl apply --server-side -f <gateway-api v1.7.0 standard-install.yaml>`
+2. EG 차트의 `crds/generated` 에 든 EG 전용 CRD 만 별도로 `kubectl apply --server-side`
+3. `helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.9.3 --set crds.enabled=false`
+리소스: 컨트롤 플레인 40~84Mi, Envoy 프록시 17~54Mi(shutdown-manager 19Mi), 노드 컨테이너(k3d-pf-server-0) 약 1.25GiB.
 
 ### 16.1 구성 (제안)
 
@@ -1763,8 +1796,9 @@ infra/k8s/
 | `web` | replicas 1~2, readinessProbe `/readyz` |
 | `postgres` | StatefulSet 1, PVC |
 | `migrate` Job | 배포 전 실행, 실패 시 롤아웃 보류(수동 순서) |
-| `Gateway` / `HTTPRoute` | `GatewayClass`(Envoy Gateway), 규칙: `/api` → api:3001, `/ws/` → ws-gateway:3002, `/` → web:3000. **운영 경로는 라우트에 없다**(루트 `/healthz` 등은 전달되지 않음) |
-| 타임아웃 | WS 경로의 유휴/요청 타임아웃을 Envoy Gateway 정책 리소스로 150초 이상(정책 리소스 이름·필드는 **미확인 G8**) |
+| `Gateway` / `HTTPRoute` | `GatewayClass`(Envoy Gateway), 규칙: `/api` → api:3001, `/ws/` → ws-gateway:3002, `/` → web:3000. **운영 경로 노출 주의(실측)**: catch-all `/` → web 규칙이 있으면 `/healthz`·`/readyz`·`/metrics` 도 web 으로 나간다. `HTTPRouteFilter`(`directResponse` 404) + 정확 일치 `HTTPRoute` 로 세 경로를 404 로 막는다(시험 완료: `/` 와 `/api/me` 는 200 유지) |
+| 타임아웃 | **기본값은 유휴 무제한**(504초 유지 확인, `config_dump` 에 `stream_idle_timeout` 없음). 제한을 두려면 `ClientTrafficPolicy` 또는 `BackendTrafficPolicy` 의 `spec.timeout.http.streamIdleTimeout`(20초 설정 → 22.6초에 1006, 10초 간격 하트비트면 45초 이상 유지). `requestTimeout`·`connectionIdleTimeout` 은 WS 를 끊지 못했다. 150초 이상은 필수가 아니며 정책을 건 경우 `hb` 25초보다 길게 둔다. 정책 추가 시 이미 한도를 넘긴 유휴 연결은 즉시 끊긴다 |
+| 주소 헤더 정규화 | 기본은 Envoy 가 `X-Forwarded-For` 에 피어 주소를 덧붙이고 위조 값을 그대로 통과시킨다. `ClientTrafficPolicy` `headers.earlyRequestHeaders`: `remove: [x-forwarded-for, cf-connecting-ip]`, `set: [{name: x-real-ip, value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"}]` (위조 헤더가 모두 사라지고 피어 주소만 남음). **`x-real-ip` 를 `remove` 와 `set` 에 동시에 넣으면 헤더가 사라진다 → `set` 만 쓴다**. nginx 의 `proxy_set_header … $remote_addr` 덮어쓰기에 해당 |
 | 속도 제한 | nginx 가 없으므로 `limit_req` 상당은 **k3d 에서는 시험 범위 밖**(앱 세션 제한만). 정책으로 대체 가능한지 미확인 |
 
 - 02 §8 의 "라우팅 확인" 은 `/api/healthz` 를 예로 들었으나 **업무 경로 `/api/**` 아래에 `healthz` 는 없다**(§0.2). 라우팅 확인에는 `GET /api/me` 같은 실제 업무 경로를 쓴다 (02 §8 에 반영됨).
@@ -1791,6 +1825,16 @@ sequenceDiagram
     Note over C,P: 유실 0 · 중복 0 (08 §6)
 ```
 
+**롤링 중 WS 실측(G8)**: 파드 `ws-gateway` 롤링 업데이트에서 연결 40개로 시험했다.
+
+| 구성 | 종료 코드 | 연결 종료 | 재접속 | 새 연결 프로브 실패 |
+|---|---|---|---|---|
+| 우아한 종료 없음, preStop 없음 | 143 | 41건 1006 | 첫 시도 41/41 성공(최대 15ms) | 2/1320 |
+| 우아한 종료 + preStop `sleep 5` | 0 | 40건 `bye`+1001 | 첫 시도 40/40 성공(최대 23ms) | **0/1156** |
+| 우아한 종료만(preStop 없음) | 0 | 57건 1001 (드레이닝 중인 파드에 다시 붙음) | 첫 시도 29/57, 최대 18회 시도 | **26/837** |
+
+readiness 이탈은 0.5초 이내이고, Envoy 는 엔드포인트를 지우지 않고 `draining` 으로 표시해 새 연결은 가지 않지만 열린 WS 12개는 유지됐다. 결론: **preStop `sleep 5` + readyz 503 + `bye`/1001 조합이 필요**하다(없으면 새 연결 실패 3%).
+
 ### 16.3 순서도 — 검증 절차
 
 ```mermaid
@@ -1800,7 +1844,7 @@ flowchart TD
     B -- "예" --> C["HTTPRoute 적용"]
     C --> D{"/api · /ws/public · / 응답?"}
     D -- "아니오" --> X
-    D -- "예" --> E["WebSocket 끊김 없이 유지 (유휴 150초 이상)"]
+    D -- "예" --> E["WebSocket 이 hb 25초 간격으로 유지 (기본 유휴 타임아웃은 무제한, 정책을 걸었다면 그 한도보다 hb 가 짧은지)"]
     E --> F{"유지?"}
     F -- "아니오" --> T["타임아웃 정책 조정 후 재시험"]
     F -- "예" --> G["ws-gateway 롤링 + 재접속 시험"]
@@ -1845,8 +1889,10 @@ flowchart TD
     W --> G["gzip + chmod 0640"]
     G --> N{"다음 서비스?"}
     N -- "예" --> S
-    N -- "아니오" --> P["7일 지난 날짜 디렉터리 삭제"]
-    P --> T["status/archive_logs/last_run.json 갱신 (원자적 rename)"]
+    N -- "아니오" --> Q{"retention 정지 파일 있음?"}
+    Q -- "예 (증거 보존 중)" --> T["status/archive_logs/last_run.json 갱신 (원자적 rename)"]
+    Q -- "아니오" --> P["7일 지난 날짜 디렉터리 삭제"]
+    P --> T
     T --> M["worker StatusFileCollector 가 pf_ops_* 지표로 노출 (OB-16)"]
 ```
 
@@ -2145,6 +2191,7 @@ flowchart TD
 | DeployFailed | `pf_ops_last_run_ok{job="pull_deploy"} == 0` | 0 | critical | 배포 롤백됨/실패 |
 | PullDeployTimerStopped | `pf_ops_status_age_seconds{job="pull_deploy"} > 900` | 0 | warn | 배포 타이머 정지(5분 주기의 3배) |
 | OpsJobStale | `time()-pf_ops_last_success_timestamp{job=~"backup\|archive_logs"} > 26*3600` | 0 | critical | 백업·아카이브 26시간 초과 정체(24h + 유예 2h) |
+| RetentionPaused | `pf_retention_paused == 1` (24시간 이상 지속은 `for: 24h`) | 24h | warning | 증거 보존용 보관 정지가 해제되지 않음(ADR-028). 정지는 24시간 후 자동 해제되므로 이 경보는 해제 실패 또는 재정지를 뜻함 |
 | OpsRunFailed | `pf_ops_last_run_ok{job=~"backup\|archive_logs"} == 0` | 0 | warn | 마지막 실행 실패 |
 | OpsStatusMissing | `absent(pf_ops_last_success_timestamp{job="backup"})` | 30m | warn | 상태 파일 없음(타이머 미설치 등) |
 | OutboxStuck | `max(pf_outbox_oldest_age_seconds{status="new"}) > 60` | 2m | warn | 디스패처/리더 문제 |
@@ -2177,7 +2224,7 @@ flowchart TD
 | 지표 라이브러리(Bun 호환), `AsyncLocalStorage` 호환 | G5 |
 | Public dashboards 프로비저닝 가능 여부, 임베드 허용 설정, 프록시 허용목록 정확한 경로 | G6 |
 | nginx 이미지의 `realip` 포함, Oracle 경로 TLS 자동화 | G7 |
-| Envoy Gateway 의 WebSocket 타임아웃 정책 리소스 | G8 |
+| ~~Envoy Gateway 의 WebSocket 타임아웃 정책 리소스~~ | G8 로컬 통과(`streamIdleTimeout`). 실 클라이언트 IP·업그레이드 경로 헤더 정규화·`sectionName` 정책은 실서버/S8-5 |
 | Cloudflare 정적 미러 수단과 무료 한도 | G11 |
 | 무료 외부 백업 저장소, 암호화 도구(`age` 가용성) | G12 |
 | Grafana 프로비저닝의 `$__file{}` 시크릿 확장·Discord 연락처 동작, `gen-grafana-alerts.ts` 생성 방식 | S7-6 (미검증) |

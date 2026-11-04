@@ -56,9 +56,10 @@ flowchart TD
     U --> INT["integration test<br/>postgres 서비스 컨테이너"]
     INT --> MIG["migration reproduce<br/>빈 DB 에 처음부터 적용 (G10)"]
     I --> AUD["dependency audit<br/>bun audit"]
+    I --> SS["secret-scan<br/>(도구 미확인)"]
     I --> WB["web build<br/>next build standalone"]
     I --> CFG["설정 검사<br/>nginx -t · promtool · 대시보드 lint<br/>compose config · shellcheck · 매니페스트 검증"]
-    MIG & WB & AUD & CFG --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]
+    MIG & WB & AUD & CFG & SS --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]
     DB --> OK["필수 상태 검사 통과 → 머지 가능"]
 ```
 
@@ -69,8 +70,12 @@ flowchart TD
 | `unit` | `bun test` (DB 없음, L2) | |
 | `integration` | PostgreSQL 18 서비스 컨테이너로 `test:integration` (outbox/inbox 동시성, 08) | |
 | `migration reproduce` | 빈 DB 에서 마이그레이션 전부 적용 + 스키마 대조 (G10) | |
+| (로컬) pre-commit 훅 | 커밋 전에 같은 스캐너를 돌린다: `.githooks/pre-commit` + `git config core.hooksPath .githooks`(저장소가 안내만 하고 강제하지 않는다 → CI `secret-scan` 이 최종 방어) | |
 | `audit` | `bun audit --audit-level=high --prod` — Bun 1.4.4 에서 존재·동작 실측 확인. 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
-| `web build` | Next 빌드가 Bun 에서 성공 (G3 지속 확인) | |
+| `secret-scan` | 저장소 이력·변경분에서 비밀 패턴 검출(도구 `gitleaks` 8.30.1 로컬 확인: 이력 9커밋 누출 0. CI 는 `gitleaks git` 모드, 로컬 pre-commit 은 `gitleaks git --staged`. **기본 규칙에 Discord 웹훅이 없어 `.gitleaks.toml` 사용자 규칙이 필요**하고 추가하면 합성 비밀 3건을 모두 검출한다. 작업 트리 `dir` 모드는 `.claude/skills/*/references/secrets.md` 예제를 오탐하므로 쓰지 않는다. S1-15). 검출 시 머지 불가. 시험용 패턴 파일로 검출 동작을 검증한다 | 비밀이면 회전이 먼저([13](13-incident-response.md) §6.10) |
+| `web build` | Next 빌드가 Bun 에서 성공 (G3 로컬 통과: `bun --bun next build` 약 6초). 종료 코드 143 은 SIGTERM 정상 종료이므로 compose `restart`·CI 가 비정상으로 보지 않게 한다 | |
+| `e2e` 도구 | **Playwright 1.64.1**(`bunx playwright install chromium`, 브라우저 약 150MB를 캐시). Bun 에서 동작 확인(G3·도구 실측) | |
+| 통합 시험 DB | Testcontainers 는 `bun test --parallel` 에서 워커마다 컨테이너를 띄우므로 **래퍼가 컨테이너 1개를 띄우고 `DATABASE_URL` env 로 공유**한다(08 §2). `beforeAll` 타임아웃 60초. 대안: 서비스 컨테이너 Postgres + 템플릿 DB 복제 | |
 | `config check` | 운영 설정·스크립트 정적 검사: `nginx -t`(공식 nginx 이미지로 설정 검증), `promtool check config/rules`, Grafana 대시보드 JSON 문법 lint, `docker compose config`(각 오버라이드 조합), `shellcheck`(`infra/scripts/*.sh`), k8s 매니페스트 검증(`kubeconform` 등) — **도구명은 모두 미검증**, 도입 시 확인 | 머지 불가 |
 | `docker build smoke` | 이미지가 빌드되고 `--help`/설정 검증이 동작 | |
 

@@ -9,6 +9,8 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-04 | [ADR-029](ADR-029-license-and-content-rights.md) | 라이선스: 코드·설계 문서는 MIT, 개인 콘텐츠는 저작권 유보(CONTENT-LICENSE) | Accepted |
+| 2026-11-04 | [ADR-028](ADR-028-incident-response.md) | 보안사고 대응: 심각도 S1~S3, 증거 보존 우선, 비상 스위치 사다리, 자산별 런북, 비밀 스캔·회전 리허설 | Accepted |
 | 2026-11-04 | [ADR-027](ADR-027-server-logs.md) | 서버 기록: 로그 4종(앱·접근·감사·운영 상태), 파일 회전 7일 보관, Postgres 감사 테이블(행위와 같은 tx) | Accepted |
 | 2026-11-04 | [ADR-026](ADR-026-data-protection.md) | 데이터 보호: 5등급 분류, 전송·해시·서명·백업(age)·시크릿, 필드 암호화는 report.note 만(AES-256-GCM, 키 ID·회전) | Accepted |
 | 2026-11-04 | [ADR-025](ADR-025-query-layer.md) | 쿼리 계층: Drizzle 빌더 기본, 같은 tx 의 sql 템플릿(T1), 트랜잭션 밖 별도 연결(T2), raw 레지스트리 | Accepted |

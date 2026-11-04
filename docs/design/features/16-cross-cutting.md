@@ -1221,7 +1221,9 @@ M1 에서는 `redis` 분기가 구현되지 않는다(분기 자리만 문서화
 | `worker admin write-lock on\|off` | 〃 | 긴급 쓰기 잠금(GB-10) | 예 | `--reason` |
 | `worker rotate-field-keys` | 〃 | 필드 암호화 키 회전: 옛 키로 암호화된 행을 `active` 키로 배치 재암호화(멱등, 배치마다 짧은 tx, ADR-026) | 예 | `--field report.note`, `--batch`, `--dry-run` |
 | `worker audit:list` | 〃 | 감사 로그 조회(EV-15): 읽기 전용, 감사 기록 없음 | 아니오 | `--category`, `--action`, `--since`, `--limit` |
-| `worker retention:run` | 〃 | 정리 규칙 즉시 1회 실행(EV-10, 점검용) | 예 | `--once`, `--dry-run` |
+| `worker admin revoke-sessions` | 〃 | 세션 폐기(ID-11, 사고 대응): `expires_at = now`, 감사 `admin.sessions_revoked` | 예 | `--all`\|`--user <id>`\|`--session <id>`, `--dry-run`, `--yes` |
+| `worker retention:pause` / `retention:resume` | 〃 | 보관 정리 일시 정지/해제(EV-16, 증거 보존). 정지는 24시간 뒤 자동 해제, 감사 `system.retention_paused` | 예 | `--reason`, `--ttl 24h` |
+| `worker retention:run` | 〃 | 정리 규칙 즉시 1회 실행(EV-10, 점검용). 정지 중이면 거부 | 예 | `--once`, `--dry-run` |
 | `content:check` | `scripts/content-check.ts` | 사이트 변수·프로필 검사(12 §1.1) | 예(CI 릴리스) | `CONTENT_STRICT=1` |
 | `db:migrate` | `packages/db` 실행기 | 마이그레이션 적용(CM-05) | 예(배포 전) | — |
 
