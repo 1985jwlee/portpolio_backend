@@ -21,4 +21,6 @@ portpolio_backend — 포트폴리오 백엔드 저장소. 상세는 `README.md`
 | `architecture.md` | 구성·경계·흐름·신뢰 경계·배포. 모듈 추가·의존 변경 전 |
 | `database-schema.md` | 테이블·제약·보관 정책. 마이그레이션 작성 전 |
 
+구현 수준의 설계(저장소 골격, API·WS·이벤트 계약, 인증, 프론트, 시험, CI/CD, 보안, 구현 계획, 콘텐츠)는 `docs/design/` 이고 출발점은 `00-system-overview.md` 다.
+
 결정의 근거는 `docs/adr/` 이다.

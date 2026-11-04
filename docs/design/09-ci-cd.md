@@ -1,0 +1,198 @@
+# 09. CI/CD
+
+워크플로 구성, 브랜치·릴리스 규칙, 이미지 태그, 배포 트리거를 고정한다.
+근거: ADR-002(Compose 라이브) · ADR-014(무중단·pull 배포) · ADR-022(GitHub Actions, 네이티브 러너) · [tech-stack.md](../domains/tech-stack.md) §7 · [01](01-repository-structure.md)(`check` 스크립트).
+
+> 다이어그램 해당 여부 — 순서도: PR 검사 파이프라인(§2), 워크플로 호출 구조(§1) / 시퀀스: 릴리스·배포(§6) / 클래스·상속: **해당 없음** — 워크플로는 선언형 YAML 이라 클래스가 없다. 대신 재사용 단위(composite action)의 포함 관계를 §1 순서도로 나타낸다.
+
+---
+
+## 1. 워크플로 구성
+
+| 파일 | 트리거 | 하는 일 | 권한 |
+|---|---|---|---|
+| `ci.yml` | `pull_request`, `push`(main 제외 브랜치는 PR 로 검사) | 검사 전부(§2). **이미지 푸시 없음** | `contents: read` |
+| `build.yml` | `push` to `main`, 수동 | 이미지 빌드(amd64·arm64 네이티브) → GHCR 푸시 → 매니페스트 병합 | `contents: read`, `packages: write` |
+| `release.yml` | `push` 태그 `v*.*.*` | 이미 빌드된 이미지에 버전 태그를 붙이고 `stable` 이동, GitHub Release 생성 | `contents: write`, `packages: write` |
+| `schedule.yml` | 주 1회 cron | 의존성 점검(`bun audit`), 베이스 이미지 갱신 확인 | `contents: read`, `issues: write` |
+
+```mermaid
+flowchart TB
+    subgraph actions["재사용 단위 (.github/actions/)"]
+        SETUP["setup-bun<br/>Bun 1.4.4 고정 + 캐시"]
+        DKR["docker-build-arch<br/>단일 아키텍처 빌드·푸시(digest)"]
+    end
+    subgraph wf["워크플로"]
+        CI["ci.yml"]
+        BLD["build.yml"]
+        REL["release.yml"]
+        SCH["schedule.yml"]
+    end
+    CI --> SETUP
+    BLD --> SETUP
+    BLD --> DKR
+    SCH --> SETUP
+    REL -.->|"이미지 재빌드 없음<br/>태그만 부착"| BLD
+```
+
+공통 규칙:
+
+- **액션은 커밋 SHA 로 고정**한다(태그가 아니라). 갱신은 Dependabot 이 PR 로 제안(10 §6).
+- `permissions` 는 워크플로 최상단에서 `contents: read` 로 시작하고, 필요한 잡만 올린다.
+- `concurrency`: PR 검사는 같은 PR 의 이전 실행을 취소(`cancel-in-progress: true`), `build.yml` 은 **취소하지 않고 대기**(이미지 일관성).
+- 저장소는 **공개**다(arm 러너 무료, A-003). 비밀을 쓰는 외부 서비스가 없으므로 CI 는 `GITHUB_TOKEN` 만 쓴다. 포크 PR 에는 비밀이 주어지지 않는다.
+- 설치는 항상 `bun install --frozen-lockfile`.
+
+## 2. PR 검사 (`ci.yml`)
+
+```mermaid
+flowchart TD
+    T["pull_request"] --> I["install<br/>frozen-lockfile · 캐시"]
+    I --> L["lint<br/>biome check"]
+    I --> TC["typecheck<br/>tsc -b --noEmit"]
+    I --> AR["arch<br/>dependency-cruiser · check-purity"]
+    I --> GS["gen:schema --check<br/>protocol 스키마 최신"]
+    L & TC & AR & GS --> U["unit test<br/>bun test"]
+    U --> INT["integration test<br/>postgres 서비스 컨테이너"]
+    INT --> MIG["migration reproduce<br/>빈 DB 에 처음부터 적용 (G10)"]
+    I --> AUD["dependency audit<br/>bun audit"]
+    I --> WB["web build<br/>next build standalone"]
+    MIG & WB & AUD --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]
+    DB --> OK["필수 상태 검사 통과 → 머지 가능"]
+```
+
+| 잡 | 내용 | 실패 시 |
+|---|---|---|
+| `lint` · `typecheck` · `arch` | [01](01-repository-structure.md) §5·§6 과 같은 명령 | 머지 불가 |
+| `gen:schema --check` | 커밋된 JSON Schema 가 `@pf/protocol` 정의와 다르면 실패 | 재생성 후 커밋 |
+| `unit` | `bun test` (DB 없음, L2) | |
+| `integration` | PostgreSQL 18 서비스 컨테이너로 `test:integration` (outbox/inbox 동시성, 08) | |
+| `migration reproduce` | 빈 DB 에서 마이그레이션 전부 적용 + 스키마 대조 (G10) | |
+| `audit` | `bun audit` — 사용 가능 여부는 구현 시 확인(**미확인**). 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
+| `web build` | Next 빌드가 Bun 에서 성공 (G3 지속 확인) | |
+| `docker build smoke` | 이미지가 빌드되고 `--help`/설정 검증이 동작 | |
+
+- E2E·재접속·부하 시험은 PR 마다 돌리지 않는다. **main 머지 후 야간/수동** 워크플로(`e2e` 잡)로 분리해 PR 시간을 지킨다(08 에서 범위 확정).
+- 필수 상태 검사(branch protection)는 `lint`·`typecheck`·`arch`·`gen:schema`·`unit`·`integration`·`migration`·`web build` 로 한다.
+
+## 3. 이미지 빌드와 매니페스트 병합 (`build.yml`)
+
+이미지는 **둘**이다(00 §7 "같은 이미지" = 환경 간 동일, 서버 세 엔트리포인트는 이미지 하나).
+
+| 이미지 | 내용 | 실행 방법 |
+|---|---|---|
+| `ghcr.io/<owner>/pf-server` | api · ws-gateway · worker (모듈 포함) | 컨테이너 명령으로 엔트리 선택: `bun apps/api/src/main.ts` 등 |
+| `ghcr.io/<owner>/pf-web` | Next `standalone` | `bun server.js` (G3 실패 시 Node 22 LTS 베이스로 교체) |
+| `ghcr.io/<owner>/pf-proxy` | **조건부** — 공식 nginx 이미지에 `realip` 가 없을 때만 직접 빌드 (G7) | |
+
+`<owner>` 는 저장소 소유자로 채운다(미정).
+
+```mermaid
+sequenceDiagram
+    participant GH as push to main
+    participant A as job amd64<br/>ubuntu-24.04
+    participant R as job arm64<br/>ubuntu-24.04-arm
+    participant REG as GHCR
+    participant M as job merge
+    GH->>A: 시작
+    GH->>R: 시작 (병렬)
+    A->>A: docker build --platform linux/amd64
+    R->>R: docker build --platform linux/arm64
+    A->>REG: push by digest (태그 없음)
+    R->>REG: push by digest (태그 없음)
+    A-->>M: digest 아티팩트
+    R-->>M: digest 아티팩트
+    M->>REG: imagetools create → 멀티 아키텍처 매니페스트<br/>태그 sha-<7자>, main
+    M->>M: 매니페스트 검사 (두 플랫폼 존재)
+```
+
+- 각 아키텍처를 **네이티브 러너**에서 빌드한다(에뮬레이션 안 함). 러너 라벨은 구현 시점에 확인한다(**미확인**: 공개 저장소 arm 러너 라벨 이름).
+- 빌드는 레이어 캐시(GitHub Actions 캐시 또는 레지스트리 캐시)를 쓴다. 의존성 레이어를 소스보다 앞에 둔다.
+- 푸시 전에 `pf-server` 로 설정 검증 명령(`--check-config`)을 컨테이너에서 실행해 기동 가능성을 확인한다.
+
+## 4. 브랜치·커밋·릴리스 규칙
+
+| 항목 | 규칙 |
+|---|---|
+| 모델 | **trunk-based**: `main` 이 항상 배포 가능. 단명 브랜치 → PR → **squash merge** |
+| 브랜치 이름 | `feat/<짧은-설명>`, `fix/…`, `docs/…`, `chore/…`, `spike/g<번호>-…`(관문 시험) |
+| `main` 보호 | 직접 푸시 금지, 필수 상태 검사(§2), 선형 이력 |
+| 커밋 메시지 | 한국어 서술형 한 줄 제목(무엇을·왜), 본문은 선택. 기존 이력의 스타일을 따른다 |
+| 버전 | SemVer 태그 `vMAJOR.MINOR.PATCH`. **M1 완료 전은 `v0.x`**, M1 DoD 통과 시 `v0.1.0` 이후 마일스톤마다 마이너 증가 |
+| 릴리스 단위 | 태그 = 라이브에 올릴 후보. 태그는 `main` 의 커밋에만 붙인다. **릴리스 태그 빌드는 `CONTENT_STRICT=1 bun run content:check` 를 통과해야 한다**(공개 변수가 비어 있으면 실패, 12 §1.1) |
+| DB 마이그레이션 | 앞으로 호환(forward-only) — 새 버전 코드는 이전 스키마에서, 이전 코드는 새 스키마에서 **한 버전 동안** 동작해야 한다(롤백 가능성, ADR-014). 컬럼 삭제·이름 변경은 두 릴리스에 걸쳐 |
+| 핫픽스 | `fix/` → PR → main → 새 PATCH 태그. 릴리스 브랜치는 만들지 않는다 |
+
+## 5. 이미지 태그 규칙
+
+| 태그 | 부여 시점 | 용도 | 변하는가 |
+|---|---|---|---|
+| `sha-<7자>` | main 빌드마다 | 추적·롤백 기준 | 불변 |
+| `main` | main 빌드마다 | 최신 빌드 | 이동 |
+| `vX.Y.Z` | 릴리스 태그 | 릴리스 불변 참조 | 불변 |
+| `X.Y` | 릴리스 태그 | 마이너 계열 최신 | 이동 |
+| `stable` | 릴리스 후 **수동/자동 승격** | **라이브 호스트가 따라가는 태그** | 이동 |
+
+- 라이브 compose 는 `stable` 이 아니라 **다이제스트로 고정한 값을 배포 스크립트가 기록**한다(어느 다이제스트가 떠 있는지 항상 알 수 있고 롤백 대상이 명확하다).
+- `latest` 태그는 쓰지 않는다.
+
+## 6. 릴리스와 pull 배포
+
+push 배포(CI 가 호스트로 접속)는 집 PC 가 외부 접속을 받아야 하므로 쓰지 않는다(ADR-014). **호스트가 가져간다.**
+
+```mermaid
+sequenceDiagram
+    actor Dev as 개발자
+    participant GH as GitHub
+    participant REG as GHCR
+    participant H as 호스트(pull-deploy)
+    participant C as compose 서비스
+    Dev->>GH: PR 머지 → main
+    GH->>REG: build.yml: sha-xxxx, main 푸시
+    Dev->>GH: git tag vX.Y.Z (검증 후)
+    GH->>REG: release.yml: vX.Y.Z · X.Y 부착, stable 이동
+    loop 호스트 주기 확인 (제안: 5분)
+        H->>REG: stable 다이제스트 조회
+        alt 현재와 다름
+            H->>H: 현재 다이제스트를 롤백 기록으로 저장
+            H->>REG: 새 이미지 pull
+            H->>C: 마이그레이션 실행 (일회성 컨테이너)
+            H->>C: worker → api → ws-gateway → web 순 교체
+            C-->>H: /readyz 통과?
+            alt 통과
+                H->>H: 새 다이제스트를 현재로 기록
+            else 실패
+                H->>C: 직전 다이제스트로 되돌림
+                H->>H: 실패 기록 (지표 갱신)
+            end
+        end
+    end
+```
+
+| 항목 | 내용 | 상태 |
+|---|---|---|
+| 확인 주기 | 5분 간격 폴링(systemd timer 또는 cron) | **제안** — 가져오는 주기·트리거는 tech-stack.md §7 에서 미결. 웹훅은 집 PC 가 수신해야 하므로 제외 |
+| 교체 순서 | worker(소비자) → api → ws-gateway → web. ws-gateway 교체 시 단절이 생기며 클라이언트가 재접속·복구 (ADR-014: Compose 는 "짧은 단절 후 복구") | 확정(ADR-014) |
+| 마이그레이션 | 교체 전 일회성 컨테이너로 `db:migrate`. 실패하면 교체하지 않는다 | 확정 |
+| 헬스 게이트 | 서비스별 `/readyz` 통과 후 다음 서비스 | 확정 |
+| 롤백 | 직전 다이제스트로 되돌림. 마이그레이션은 되돌리지 않는다(앞으로 호환 규칙으로 흡수, §4) | 확정 |
+| 스크립트 위치 | `infra/scripts/pull-deploy.sh` (구현 시 작성) | 미작성 |
+
+## 7. 시험 환경과 관문
+
+| 단계 | CI 에서 하는 일 |
+|---|---|
+| G3 지속 확인 | `web build` 가 Bun 으로 성공하는지 매 PR |
+| G10 | `migration reproduce` 잡 |
+| G2·G1·G8 | CI 가 아니라 **로컬/수동 스파이크**(`spike/g…` 브랜치). 결과는 ADR-022 에 기록 |
+| 야간 `e2e` | main 의 최신 이미지로 compose 를 띄워 재접속·동시성 시험(08) |
+
+## 8. 미결
+
+| 항목 | 결정 시점 |
+|---|---|
+| GHCR 소유자 이름, 공개 저장소 arm 러너 라벨 | 저장소 공개 시 |
+| `bun audit` 사용 가능 여부와 실패 기준 | 구현 단계 0 |
+| 배포 확인 주기(5분 제안)와 `stable` 승격 자동/수동 | 첫 라이브 배포 전 |
+| `pf-proxy` 이미지 필요 여부 | 관문 G7 |
+| 야간 `e2e` 범위 | [08](08-test-strategy.md) 확정 후 |

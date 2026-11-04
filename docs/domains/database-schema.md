@@ -127,6 +127,18 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 
 **`inbox_message`** — 이 모듈이 받는 메시지(§4-5 공통 형태). 소비자: `guestbook-projector`.
 
+**`request_key`** — 멱등 키 저장(`guestbook`·`identity` 각각, [design/03](../design/03-api-contract.md) §3)
+
+| 컬럼 | 설명 |
+|---|---|
+| `actor_key`, `key` | PK. 행위자와 클라이언트 `Idempotency-Key` |
+| `request_hash` | 요청 본문 해시(같은 키·다른 요청 감지) |
+| `status` | `in_progress` / `done` |
+| `response_status`, `response_body` | 재생용 원 응답(작은 jsonb) |
+| `created_at` | 24시간 후 삭제 |
+
+명령과 **같은 트랜잭션**에서 선점·기록한다.
+
 ### 4-3. `events` (쓰기)
 **`outbox_event`** — 전달 대기열(ADR-005)
 
@@ -185,6 +197,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `entry_id` | uuid PK |
 | `display_name`, `body` | 표시용 |
 | `status` | `visible` / `hidden` |
+| `author_user_id` | uuid, NULL 가능. `isMine`·`canEdit` 계산용, **응답에 노출하지 않음** |
 | `reactions` | jsonb. 이모지별 개수 (예: `{"👍": 3}`) |
 | `created_at`, `updated_at` | |
 | `last_seq` | 반영한 마지막 이벤트 순번 |
@@ -199,6 +212,15 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `entry_excerpt` | 본문 앞부분(길이 제한) |
 | `reason`, `status`, `created_at` | |
 | `last_seq` | |
+
+**`my_reaction`** — 행위자별 눌림 표시(`myReactions`)
+
+| 컬럼 | 설명 |
+|---|---|
+| `entry_id`, `actor_key`, `emoji` | PK. `reaction.changed`(행위자는 봉투 `ownerKey`)로 갱신 |
+| `last_seq` | 반영한 마지막 이벤트 순번 |
+
+세션 삭제 시 `actor_key` 의 `session:` 값은 정리 작업이 삭제한다(§9).
 
 ### 5-2. `events_read`
 **`flow_counter`** — 전체 방문자 익명 요약(FR-041). `trace_step` 을 **주기 집계**해서 채운다(이벤트 구동이 아닌 **배치 프로젝션**).
@@ -284,8 +306,10 @@ flowchart LR
 | `entry.author_session_id` | 세션 삭제 시 NULL | 같은 작업이 익명화 |
 | `reaction.actor_key` (`session:`) | 세션 삭제 시 행마다 무작위 값으로 교체 | 집계는 유지, 행위자 식별은 불가 |
 | `outbox_event`(`published`), `inbox_message`(`processed`), `trace_step`, `flow_counter` | 7일 | 정리 작업 |
-| `outbox_event`·`inbox_message` (`dead`) | 7일, 조사 중 연장 가능 | 정책 확정 미결 |
-| `realtime_read.change_log` | 짧게(값은 측정 후, 현재 수치 없음) | 정리 작업 |
+| `request_key` | 24시간 | 정리 작업 |
+| `my_reaction` (`session:` 행위자) | 세션 삭제 시 함께 | 정리 작업 |
+| `outbox_event`·`inbox_message` (`dead`) | 30일, 테이블당 1만 건 상한 | ADR-023 |
+| `realtime_read.change_log` | 1시간 또는 채널당 1만 행 중 먼저 닿는 쪽 | 정리 작업(ADR-023) |
 
 정리 작업은 **한 번에 큰 삭제를 하지 않는다**(배치 크기 제한).
 
@@ -311,12 +335,9 @@ flowchart LR
 
 ## 12. 미결
 
+ADR-023 이 규칙과 초기값을 정했다. 남은 것은 측정 후 조정뿐이다.
+
 | 항목 | 결정 시점 |
 |---|---|
-| Postgres 버전, 마이그레이션 도구, 쿼리 계층(ORM 여부) | 구현 시작 시 |
-| 글 본문·표시 이름 길이 상한 | 구현 시 설정값, A-011 |
-| 임대 길이(outbox·inbox 선점) | 처리 시간 측정 후 |
-| `change_log` 보관 기간 | 재접속 시험 후 |
-| `dead` 보관 연장 정책 | M1 후반 |
-| 접속 주소 해시 저장 여부 | 악용 방어 구현 시(ADR-008 미결) |
-| 읽기 모델 재구성 절차의 운영 방식(점검 모드 여부) | 프로젝터 구현 시 |
+| 임대 길이·백오프·배치 크기 조정 | 처리 시간 측정 후 |
+| 스키마 반영: `available_at`(재시도 시각), `projection_state`(재구성 상태), 글·이름 `CHECK` 길이 | 마이그레이션 작성 시 |

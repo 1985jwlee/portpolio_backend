@@ -134,6 +134,8 @@
 | **G8** | Envoy Gateway on k3d | HTTPRoute 로 `/api`, `/ws`(WebSocket), `/` 가 라우팅됨 | 다른 구현체 |
 | **G9** | Testcontainers on Bun | (선택) Bun 에서 동작 | compose 서비스 유지 |
 | **G10** | Drizzle 마이그레이션 | `generate --custom` raw SQL 이 부분 인덱스·어드바이저리 락 보조 객체를 만들고, 빈 DB 에서 처음부터 적용·재현됨 | 마이그레이션 SQL 직접 관리 |
+| **G11** | Cloudflare 정적 미러 | 원본을 내렸을 때 무료 한도 안에서 정적 페이지 응답(ADR-023) | nginx 폴백만 유지 |
+| **G12** | 무료 외부 백업 저장소 | 카드 없이 가입·업로드·복원 가능(ADR-023) | 로컬만, 수동 반출 절차 |
 
 ## 12. 버전 고정 정책
 
@@ -153,4 +155,4 @@
 | Redis vs Valkey, 클라이언트 | ADR-006 측정(Phase 2) |
 | E2E 도구 | E2E 시작 시 |
 | 3D·게임 관련 라이브러리 | Phase 1 |
-| 백업 도구 | M1 후반 |
+| 백업 실행 도구(cron/컨테이너)·암호화 도구 | M1 후반(방식은 ADR-023) |

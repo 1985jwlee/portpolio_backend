@@ -78,6 +78,7 @@ Go(coder/websocket)·C#(.NET 10 Kestrel 순수 WebSocket)·Bun(Elysia)로 같은
 | G8 | Envoy Gateway 의 k3d WebSocket 라우팅 |
 | G9 | Testcontainers on Bun (선택) |
 | G10 | Drizzle raw SQL 마이그레이션 재현 |
+| G11·G12 | Cloudflare 정적 미러 · 무료 외부 백업 저장소 (ADR-023 에서 추가) |
 
 관문 중 **G1·G2 가 설계를 바꿀 수 있는 크기**다(G1 실패 → 실시간 방식, G2 실패 → ws-gateway 언어). 나머지는 도구 교체로 흡수된다.
 
