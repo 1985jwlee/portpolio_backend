@@ -62,6 +62,10 @@ flowchart TB
 | 브라우저 구동, k6 | 서브프로세스·네트워크 | L3 |
 | 터널 경유 측정 | 실환경 | L4 |
 
+### 2.1 포트 계약 시험 스위트 (ADR-024)
+
+`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport` 각각에 **어댑터 공용 시험 스위트**(`packages/infra/test/contract/*`)를 하나씩 둔다. 모든 어댑터(메모리·Postgres, 도입 후 Redis)가 같은 스위트를 통과해야 한다. Redis 어댑터가 추가될 때 Redis 컨테이너를 L3 환경에 넣는다.
+
 ## 3. 시험 지원 코드 (`packages/testkit`)
 
 ### 3.1 클래스 구조

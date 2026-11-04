@@ -3,6 +3,8 @@
 - 날짜: 2026-11-03
 - 근거: 원 계획안 모순 #6, Phase 2·3 / 명세 Out of Scope, FR-030 / 인터뷰 R6-Q1, R9-Q1
 
+> 도입 이음새·기준·장애 거동은 [ADR-024](ADR-024-redis-seam.md). 이 ADR 의 전달 인터페이스가 그곳의 `EventTransport` 포트다.
+
 ## 맥락
 - 명세 M1 은 브로커 없이 Postgres outbox 폴링/NOTIFY 를 쓴다(근거: 무료 자원에서 메모리 최소).
 - 원 계획안은 Outbox → Kafka → 멱등 Consumer 이고, KataGo 워커 토픽(`game.review.requested`)과 타임딜 차감이 이를 쓴다.

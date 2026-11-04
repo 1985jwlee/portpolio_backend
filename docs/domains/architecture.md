@@ -266,7 +266,7 @@ flowchart LR
 |---|---|---|
 | Phase 1 | `game` 모듈, 룸·대국 채널 | `ws-gateway` 에 비공개 채널, 서버 권위 상태머신(`version` 조건 갱신), `game_read` |
 | Phase 2 | KataGo 분석 워커, `ledger` | `worker` 계열이 분석 워커로 분화(선점→트랜잭션 밖 분석→토큰 완료), 전달 계층 결정(ADR-006) |
-| Phase 3 | `deal`, Redis | `api` 에 재고 선점 경로(ADR-010), Redis 컨테이너 |
+| Phase 3 | `deal`, Redis(이음새는 ADR-024) | `api` 에 재고 선점 경로(ADR-010), Redis 컨테이너 |
 | Phase 5 | `payment`, `pricefeed`, 웹훅 | 웹훅은 inbox 로 수신, 시세 수집 작업 |
 
 **바뀌지 않는 것**: 모듈 경계 규칙, domain·service·usecase 의존 방향, CQRS(조회는 읽기 모델만), outbox/inbox 규약, 선점 규약, 프록시 + 경로 라우팅, 같은 이미지 원칙.

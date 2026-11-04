@@ -22,7 +22,7 @@
 | `postgres` | O | 볼륨 필수 |
 | `prometheus`, `grafana` | O | ADR-007, 컨테이너 2개 추가 |
 | `cloudflared` | 집 PC | Cloudflare Tunnel (ADR-003) |
-| `redis` | 후속 | 재고 선점·전달 계층 후보 (ADR-006·010) |
+| `redis` | 후속(compose 프로필 `redis` 로 정의만, ADR-024) | 재고 선점·전달 계층 후보 (ADR-006·010) |
 
 파일 구성(제안): `compose.yml`(공통) + `compose.home.yml` + `compose.oracle.yml`(Arm 플랫폼·리소스 차이).
 

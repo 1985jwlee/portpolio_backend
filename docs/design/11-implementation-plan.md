@@ -68,6 +68,7 @@ flowchart LR
 | S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만 |
 | S1-5 | `.dependency-cruiser.cjs` B1~B9 규칙, `check-purity` | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강 |
+| S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 | ADR-024 |
 | S1-7 | 로컬 compose(02): postgres, 개발 모드 기동 | S1-4 | `bun run dev` 로 api·worker 기동, `/readyz` 성공 |
 
 ### S2 — identity

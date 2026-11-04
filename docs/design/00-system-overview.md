@@ -232,6 +232,20 @@ classDiagram
         +claim(consumer, n) InboxMessage[]
         +complete(id, token) bool
     }
+    class RateLimiter {
+        <<interface>>
+        +hit(key, limit) Decision
+    }
+    class PresenceCounter {
+        <<interface>>
+    }
+    class KeyValueCache {
+        <<interface>>
+    }
+    class EventTransport {
+        <<interface>>
+        +publish(envelope) void
+    }
     class Clock {
         <<interface>>
     }
@@ -255,6 +269,7 @@ classDiagram
 
 - **`CommandHandler` 는 `ReadRepository` 를, `QueryHandler` 는 `WriteRepository` 를 주입받을 수 없다**(타입으로 분리 + dependency-cruiser 규칙). 이것이 구조적 CQRS 강제다.
 - 포트 구현(`adapter/postgres`)은 엔트리포인트의 조립 단계에서만 연결한다.
+- `RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport` 는 **M1 에서 메모리/Postgres 어댑터**(`packages/infra`)이고, Redis 어댑터는 도입 기준 충족 시 포트 구현만 추가한다([ADR-024](../adr/ADR-024-redis-seam.md)).
 
 ### 4.3 오류 계층 (상속 구조)
 

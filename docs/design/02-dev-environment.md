@@ -44,6 +44,7 @@ flowchart TD
 |---|---|---|---|---|
 | `postgres` | `postgres:18-alpine` | 5432 → **55432** | `pgdata` | `pg_isready` |
 | `proxy` | nginx (realip 포함 여부 G7) | 8080 → **8080** | `infra/nginx` 읽기 전용 마운트 | `GET /nginx-health` |
+| `redis` (프로필 `redis`, **기본 기동 제외**) | 도입 시 결정(Redis/Valkey, ADR-024) | — | — | — |
 | `prometheus` | `prom/prometheus` 3.15.x | 9090 → 9090 | `prometheus-data` | `/-/ready` |
 | `grafana` | `grafana/grafana` 13.3.x | 3000 → **3030** (web 과 충돌 회피) | `grafana-data`, 프로비저닝 마운트 | `/api/health` |
 | `web` · `api` · `ws-gateway` · `worker` | `ghcr.io/<owner>/pf-web` · `pf-server` | 3000 · 3001 · 3002 · 3003 | — | `/readyz` (worker 는 `/healthz`) |

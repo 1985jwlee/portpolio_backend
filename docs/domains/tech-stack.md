@@ -50,7 +50,7 @@
 | 마이그레이션 방식 | forward-only, 표현 불가 기능은 `generate --custom` raw SQL | — | 확정 | 부분 인덱스·확장 등 |
 | DB 드라이버 | 후보: postgres.js / Bun.sql / node-postgres | — | **스파이크 G4** | 기준: Drizzle 호환, 트랜잭션, **LISTEN/NOTIFY 전용 연결**, `FOR UPDATE SKIP LOCKED`, 안정성 |
 | 기본키 | uuid v7 | — | 확정 | 앱 생성(outbox 이벤트 id 를 트랜잭션 전에 알아야 함, ADR-017). DB 내장 `uuidv7()` 은 보조 |
-| 캐시·스트림 | Redis 또는 Valkey | Redis 8.10 / Valkey 9.1 | **M1 에서 쓰지 않음** | Phase 2·3 에서 ADR-006 측정 후 선택. 클라이언트 후보 ioredis 등은 그때 |
+| 캐시·스트림 | Redis 또는 Valkey | Redis 8.10 / Valkey 9.1 | **M1 에서 쓰지 않음**(포트 뒤 이음새만, ADR-024) | Phase 2·3 에서 ADR-006 측정 후 선택. 클라이언트 후보 ioredis 등은 그때 |
 
 ## 5. 프론트엔드
 
