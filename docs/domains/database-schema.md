@@ -523,14 +523,18 @@ flowchart LR
 
 ## 11. 후속 Phase 윤곽 (확정 아님)
 
-| 스키마 | 테이블 | 핵심 제약 |
-|---|---|---|
-| `game` | `room`, `game`, `move`, `chat_message` | `move` (`game_id`, 순번) 유일. 상태 정본은 DB. 대국 진행은 `version` 조건 갱신 |
-| `game_read` | `lobby_view`, `game_view` | 로비 목록·관전용 투영 |
-| `ledger` | `account`, `ledger_entry`, `reward` | 원장 **추가 전용·복식**. `reward.status` = `PENDING`/`CONFIRMED`/`FLAGGED`/`REVOKED` + 분석 선점 `processing`(ADR-009·021) |
-| `deal` | `deal`, `stock`, `purchase_order`, `reservation` | 확정+예약 ≤ 총량 `CHECK`. 예약: `active`→`confirming`→`confirmed`/`expired`(ADR-010) |
-| `pricefeed` | `price_snapshot` | (통화쌍, 수집 시각) 유일 |
-| `payment` | `quote`, `payment`, `escrow`, `settlement`, `audit_log`, `inbox_message`(웹훅) | 사용된 환율 스냅샷 id 고정, 감사 로그 추가 전용 |
+영역별 설계가 스키마 윤곽의 정본이다([phases/00](../design/phases/00-platform-evolution.md) §2·§9, 01~04). 아래는 모듈↔스키마 요약이며 컬럼 전수는 구현 시 이 문서 §4~§9.1 형식으로 반영한다.
+
+| Phase | 스키마(쓰기 / 읽기) | 핵심 제약 | 상세 |
+|---|---|---|---|
+| 1 | `game` / `game_read`, `chat` / `chat_read` | `game_event` 대국별 `seq` 추가 전용, `UNIQUE (game_id, move_id)`, `chat.room.last_seq` 조건부 UPDATE 로 방별 순번, `UNIQUE (room, sender, client_msg_id)` | [P1](../design/phases/01-baduk.md) §11, [P4](../design/phases/04-chat.md) §11 |
+| 2 | `analysis`, `ledger` / `ledger_read` | `analysis_job` `UNIQUE (game_id)` + 선점/임대, 원장 `journal`/`posting` 추가 전용·자산별 차변=대변(지연 제약 트리거), `reward` `UNIQUE (game_id, user_id)` | [P1](../design/phases/01-baduk.md) §10~11, ADR-037·040 |
+| 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
+| 5 | `pricefeed`, `payment`, `escrow`, `settlement` (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
+| 6 | `inventory`, `fulfillment`, `support` (+`_read`) | `sku_position` CHECK `allocated + earmarked ≤ available`, 물리 재고 이동 원장 추가 전용, `recipient_enc`·CS `body_enc`(ENC) | [P3](../design/phases/03-fulfillment.md) §10, [P4](../design/phases/04-chat.md) §11 |
+| 공통 | `security.data_key`(Phase 5 KEK/DEK 상향), `realtime_read.room_log`·`room_seq` | 봉투 `v2.<dekId>.…` | [P0](../design/phases/00-platform-evolution.md) §9.3·§6 |
+
+ENC 필드 통합표와 보관 기간은 [phases/00 §9.5](../design/phases/00-platform-evolution.md).
 
 ## 12. 미결
 

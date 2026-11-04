@@ -1,0 +1,53 @@
+# ADR-036: KataGo 분석 워커 — 별도 프로세스, 2단계 분석, 선점·임대 큐
+- 상태: **Proposed** (사용자 확정 대기)
+- 날짜: 2026-11-04
+- 근거: ADR-009(사후 분석)·006(전달 계층)·021(선점·임대)·024(Redis 이음새)·023(백오프) / KataGo 공식 문서 조사(2026-11-04)
+- 관련 문서: [phases/01-baduk.md](../design/phases/01-baduk.md) §9
+
+## 맥락
+승패는 룰 엔진이 즉시 판정하고(ADR-009), KataGo 는 부정행위 의심을 사후에 분석해 **보상 상태만** 바꾼다. 무료 호스팅의 CPU·메모리에서 현실적으로 돌려야 한다.
+
+조사(2026-11-04, 공식 저장소·문서): KataGo 는 MIT 라이선스이고 분리된 프로세스로 쓸 수 있다. **Analysis Engine** 은 표준 입력에 JSON 한 줄씩 질의를 받고 결과를 표준 출력에 비동기로 낸다(질의: `id`, `moves`, `rules`, `komi`, `boardXSize/YSize`, `analyzeTurns`, `maxVisits`; 응답: `moveInfos[]`(`move`·`order`·`winrate`·`scoreLead`·`prior`·`pv`), `rootInfo`). 순수 CPU 빌드(`-DUSE_BACKEND=EIGEN`, AVX2 변형 있음)와 작은 신경망이 있다. **CPU 에서의 초당 방문 수는 문서에 없어 미확인** — 스파이크로 측정한다.
+
+## 결정 (제안)
+1. **KataGo 워커는 별도 프로세스(컨테이너)** 로 분리한다 — 이 시스템의 첫 번째 서비스 분리. 언어/런타임은 KataGo 바이너리 + 얇은 TS 어댑터(분석 엔진 stdin/stdout 프로세스 관리).
+2. **큐는 Postgres inbox 선점(DB 큐)이다**(P0 D4·D6·D23, [ADR-031](ADR-031-event-transport-streams.md)). 소비 순서는 **의존 체인**이다: `game.finished` → `ledger` 의 `reward-settler` 가 `EligibilityPolicy`(ledger 소유)로 자격을 판정해 통과하면 reward `PENDING` 을 만들고 `reward.pending_created {gameId, rewards[{rewardId,userId,color}]}` 를 발행 → **`analysis` 의 소비자가 이 이벤트로 `analysis_job`(`UNIQUE (game_id)`)을 멱등 생성**한다. 자격 미달 대국은 보상이 없으므로 분석하지 않고, 분석 작업은 reward 행이 이미 존재할 때만 생기므로 "분석이 보상보다 먼저 끝나는" 순서 의존이 없다. `game.review.requested` 는 폐기(ADR-009 개정).
+3. **분석은 트랜잭션 밖**에서: 선점(`processing`, `claim_token`, `lease_until`) → 분석 → 토큰 일치 조건으로 **색별 결과 저장 + 색별 보상 전이를 한 트랜잭션**에서 한다. 판정 단위는 **색(참가자)** 이다 — `analysis_result` 는 `(game_id, color)`, 보상은 자기 색의 판정으로 `ledger.ConfirmRewardInTx`/`FlagRewardInTx`(**`rewardId` 키**, B12 허용 쌍 #6, `analysis`→`ledger`)를 호출한다. 분석이 길어 **임대는 토큰 조건으로 연장**한다(ADR-021 의 적용이며 ADR-023 의 예외가 아니다): 연장 간격은 임대의 1/3, ADR-023 의 "임대 ≥ p99×10, 핸들러 제한시간 ≤ 임대/2" 는 연장 간격과 한 번의 연장 단위에 적용하고 총 분석 시간에는 적용하지 않는다. 2단계 후에도 `INCONCLUSIVE` 이면 `CLEAN` 취급으로 `CONFIRMED`(감사·지표 기록).
+4. **2단계 분석**: 1단계 정책 일치율(전 수 `maxVisits` 매우 작게, 신경망 한 번 평가) → 의심 구간만 2단계(방문 수 확대). 비용을 줄이고 CPU 에서도 현실적으로 만든다. 방문 수·분석 수 범위는 스파이크 후 결정(미확인).
+5. **의심도**는 일치율·승률 손실 분포 등 여러 지표로 계산하고, 임계값은 실제 데이터로 보정하기 전까지 **자동 박탈 없음** — `FLAGGED` 까지만(ADR-009).
+6. **자원 상한**: 워커 컨테이너 CPU 코어·메모리 제한을 두고, 분석은 대국 종료 후 큐 순서대로 **하나씩(동시 1, ADR-033 정본; 스파이크에서 CPU 여유가 확인되면 2 로 상향 검토)**. 메모리 한도는 P0 자원 추정(0.5–3GiB, 가정 1.5GiB)과 S0 스파이크 결과로 확정한다(잠정 2GB 는 OOM 여지가 있음). 분석 워커의 DB 권한은 `analysis` 스키마와 B12 쌍 #6 을 통한 `ledger` 전이에 한정하고, 이미지는 서버 래퍼 이미지와 분리된 `pf-analysis` 다. 실패·지연은 보상 `PENDING` 유지(자동 확정 유예는 두지 않음).
+
+## 설계 상세
+모듈 이름은 `analysis`(P0 §2.1)다. 초기 초안의 `review` 모듈·`review.requested` 이벤트·`review.completed/failed` 는 각각 `analysis`·(없음)·`analysis.completed/failed` 로 통일했다.
+
+상태 머신(`analysis_job`), 의심도, 결과 포맷, 지표는 [phases/01-baduk.md](../design/phases/01-baduk.md) §9 가 정본이다.
+
+## 대안과 기각 이유
+- **룰 엔진/WS 서버와 같은 프로세스**: 분석이 CPU 를 점유해 실시간 지연을 해친다.
+- **GPU 전제**: 무료 호스팅에서 불가. 선택 사항으로만 남긴다.
+- **외부 분석 서비스(SaaS)**: 외부 의존·비용(ADR-015 무료 원칙).
+- **분석 없이 휴리스틱만**: 서사와 ADR-009 의 취지를 잃는다. 대안으로 1단계만 쓰는 축소 운영은 허용.
+
+## 결과
+- 얻는 것: 실시간 경로와 분리된 CPU 격리. Phase 2 는 Redis 없이 Postgres 만으로 end-to-end 가 닫힌다.
+- 치르는 것: 컨테이너·모델 파일(수십 MB~수백 MB, 미확인) 관리, 방문 수 튜닝, 모의 데이터로는 임계값 보정 불가.
+
+## 위험과 완화
+| 위험 | 완화 |
+|---|---|
+| CPU 에서 너무 느림 | 2단계 분석, 분석 수 제한, 작은 신경망, 스파이크로 사전 측정 |
+| ARM(Oracle) 에서 최적 빌드 부재 | 집 PC(AVX2) 우선, ARM 은 측정 후 판단(미확인) |
+| 모델 파일 라이선스·크기 | 모델 출처·라이선스 확인 후 저장소 밖(볼륨)에 보관 |
+| 임계값 오탐 | 자동 박탈 금지, 수동 검토 |
+
+## 검증 방법
+S0 스파이크: 후보 신경망별 초당 방문 수, 250수 대국 정책 일치율 소요 시간, 메모리. 선점·임대·재시도 카오스(워커 강제 종료 후 회수).
+
+## 실서비스라면
+GPU 분석 풀과 분석 결과 캐시, 모델 버전 관리, 이의 제기 절차를 둔다.
+
+## 재검토 조건
+스파이크에서 CPU 분석이 비현실적일 때(분석 범위 축소 또는 외부 GPU 옵션). 임계값 보정 데이터가 쌓였을 때.
+
+## 관련 ADR
+ADR-006, ADR-009, ADR-020, ADR-021, ADR-023, ADR-024, ADR-035, ADR-037

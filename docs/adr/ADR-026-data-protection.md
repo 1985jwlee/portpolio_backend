@@ -109,5 +109,8 @@ KMS/HSM 으로 KEK 를 관리하고, DB 는 TDE/볼륨 암호화, 키 접근 감
 ## 재검토 조건
 암호화 필드가 3개 이상으로 늘 때(KEK/DEK 로 상향). 개인정보(이메일 등)를 수집하게 될 때. Oracle 볼륨 암호화가 기본 제공이 아님이 확인될 때.
 
+### 메모 (2026-11-04, Phase 설계 반영)
+Phase 1~6 영역 설계가 ENC 필드를 **M1 의 1개에서 7개 논리 필드(9개 컬럼)로** 늘린다 — `report.note_enc`(M1), `order.shipping_address_enc`(Phase 3), `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(Phase 5), `fulfillment_order.recipient_enc`·`chat.message.body_enc`(+읽기 사본)·`chat.report.snapshot_enc`(Phase 6). 위 재검토 조건("3개 이상")이 충족되므로 **KEK/DEK 상향은 Phase 5 착수 전**에 한다. 통합표·상향 작업 항목·PII 이벤트 지침은 [phases/00 §9.3~9.6](../design/phases/00-platform-evolution.md). 결정(U14)은 사용자 확정 대기.
+
 ## 관련 ADR
 ADR-008, ADR-022, ADR-023, ADR-024, ADR-025

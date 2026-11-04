@@ -22,7 +22,7 @@ M1 은 Redis 를 쓰지 않는다(ADR-022). 그런데 그 자리를 무엇이 �
 | `PresenceCounter` | 접속자 수 집계(근사) | gateway 메모리 | 집합/카운터 + TTL |
 | `KeyValueCache` | 짧은 TTL 캐시(세션 검증 결과 등) | 프로세스 메모리 | `GET`/`SET EX` |
 | `EventTransport` | outbox 이벤트를 구독 모듈로 전달 | Postgres 폴링 + `NOTIFY` | Redis Streams(소비자 그룹) — ADR-006 |
-| `StockReservation` (Phase 3) | 재고 원자 선점 | — | Lua 스크립트(ADR-010) |
+| `StockReservation` (Phase 3) | 재고 원자 선점 — 연산 `reserve`·`release`·`confirm`·`restock`·`peek`(phases/00 §5.4, 영역 문서에서 `StockStore` 라 부르던 것과 같은 포트) | — | Lua 스크립트(ADR-010), 단일 Redis 인스턴스(P0 D6) |
 
 - `EventTransport` 는 **ADR-006 의 전달 인터페이스와 같은 것**이다. 구독 쪽은 항상 `ReceiveMessage` → inbox 저장이라 전달 계층이 바뀌어도 소비자는 안 바뀐다(ADR-020).
 - 포트는 `kernel` 에, 구현은 `packages/infra/{memory,postgres,redis}` 에 둔다. 의존 규칙: **`domain`/`service`/`usecase` 는 구현 패키지를 임포트할 수 없다**(경계 규칙에 추가, design/01).

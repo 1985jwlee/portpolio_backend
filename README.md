@@ -42,12 +42,12 @@ Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) +
 |---|---|---|---|
 | Phase 0 | 모노레포, 모듈 경계, ADR 템플릿, CI, 로컬 k3d + Gateway API 최소 배포 | `git push` → CI 통과 → 로컬 K8s 에 hello 서비스 배포 | ADR-001·002 |
 | **M1** (Phase 0~1 사이) | 사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지표 대시보드 + 정적 폴백 | 명세의 인수 기준 AC-001~014 통과, 라이브 URL | [명세](specs/portfolio-site.spec.md), ADR-003~008·013 |
-| Phase 1 | 바둑 실시간 코어. 1-A 서버·프로토콜(룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF) → 1-B three.js 3D 클라이언트 | 두 브라우저에서 3D 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, 데모 영상 | ADR-004·012·014 |
-| Phase 2 | KataGo 워커 + 모의 포인트 원장 (보상 `PENDING → CONFIRMED/FLAGGED`) | 대국 종료 → 비동기 분석 → 보상 확정 end-to-end, 실패·재시도 확인 | ADR-006·009 |
-| Phase 3 | 타임딜: Redis Lua 재고 선점 → outbox → 멱등 소비 → Postgres, k6 부하 시험 | 초과 판매 0건 + 부하 결과표 | ADR-010·013 |
-| Phase 4 🎯 | 프로덕션화: 워크로드 분리, HPA·probe·PDB, 롤링 배포 시 소켓 재접속, 관측, CD, 에셋 캐시, 패키징 | README + 영상만으로 "무엇을·왜·얼마나 잘" 이해 가능 | ADR-002·007·014 |
-| Phase 5 | 결제·정산(모의): PG 테스트 모드, 에스크로 흐름, 시세 피드 | 결제 → 에스크로 → 정산 재현, 환율 고정 시점 기록 | ADR-011·016 |
-| Phase 6 | 확장(순서대로, 중단 가능): CS 채팅 → Passkey → WMS → Solana USDC 에스크로(devnet) → 마작 | 항목별 독립 DoD | ADR-016 |
+| Phase 1 | 바둑 실시간 코어. 1-A 서버·프로토콜(룰 엔진, 룸·대국·관전, 재접속, 채팅, SGF) → 1-B three.js 3D 클라이언트. **대국 명령은 REST, WS 는 push 전용(`/ws/room`)** | 두 브라우저에서 3D 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **대국 채팅(끊김 후 순서대로 복구 · 중복 전송은 한 건 · 관전자 방은 대국 중 플레이어에게 비공개)**, 데모 영상 | ADR-004·012·014, [설계 P1](docs/design/phases/01-baduk.md)·[P4](docs/design/phases/04-chat.md)·[P0](docs/design/phases/00-platform-evolution.md), ADR-032·034·035·045 |
+| Phase 2 | KataGo 워커 + 모의 포인트 원장 (보상 `PENDING → CONFIRMED/FLAGGED`). **분석 큐는 Postgres inbox 선점(Redis 없음)** | 대국 종료 → 비동기 분석 → 보상 확정 end-to-end, 실패·재시도 확인 | ADR-009, [설계 P1](docs/design/phases/01-baduk.md) §9~10, ADR-036·037 |
+| Phase 3 | 타임딜: Redis Lua 재고 선점(빠른 게이트) + Postgres CHECK(하드 게이트) → outbox → 멱등 소비, k6 부하 시험. **Redis 도입과 Streams 채택 판정은 이 단계** | 초과 판매 0건 + 부하 결과표 | ADR-010·013, [설계 P2](docs/design/phases/02-commerce.md), ADR-031·038 |
+| Phase 4 🎯 | 프로덕션화: 워크로드 분리, HPA·probe·PDB, 롤링 배포 시 소켓 재접속, 관측, CD, 에셋 캐시, 패키징 | README + 영상만으로 "무엇을·왜·얼마나 잘" 이해 가능 | ADR-002·007·014, [설계 P0](docs/design/phases/00-platform-evolution.md) §10, ADR-033 |
+| Phase 5 | 결제·정산(모의): PG 테스트 모드, 에스크로 흐름, 시세 피드. **착수 전 필드 암호화를 KEK/DEK 로 상향** | 결제 → 에스크로 → 정산 재현, 환율 고정 시점 기록 | ADR-011·016, [설계 P2](docs/design/phases/02-commerce.md), ADR-039~041 |
+| Phase 6 | 확장(순서대로, 중단 가능): CS 채팅 → Passkey → WMS → Solana USDC 에스크로(devnet) → 마작 | 항목별 독립 DoD | ADR-016, [설계 P4](docs/design/phases/04-chat.md)·[P3](docs/design/phases/03-fulfillment.md), ADR-042~047 |
 
 ## 저장소 안내
 

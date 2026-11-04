@@ -9,6 +9,24 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-04 | [ADR-047](ADR-047-chat-data-protection-retention.md) | 채팅 데이터 보호·보관: 방 종류별 등급, CS 본문 암호화 | Proposed |
+| 2026-11-04 | [ADR-046](ADR-046-cs-ticket-and-agent-assignment.md) | CS 티켓과 상담원 배정: 상태 머신, CAS+임대 | Proposed |
+| 2026-11-04 | [ADR-045](ADR-045-chat-message-delivery.md) | 채팅 메시지 전달: REST 쓰기, 방별 순번, 멱등, 재개 | Proposed |
+| 2026-11-04 | [ADR-044](ADR-044-carrier-adapter-and-tracking.md) | 배송사 어댑터와 추적 모델 | Proposed |
+| 2026-11-04 | [ADR-043](ADR-043-outbound-saga-and-compensation.md) | 주문→출고 사가: 하이브리드 조정과 보상 | Proposed |
+| 2026-11-04 | [ADR-042](ADR-042-dual-ledger-and-allocation.md) | 이중 원장(판매 재고/물리 재고)과 2단계 할당 | Proposed |
+| 2026-11-04 | [ADR-041](ADR-041-price-feed-and-quote.md) | 시세 피드와 견적: 소스 교차 검증, fail-closed | Proposed |
+| 2026-11-04 | [ADR-040](ADR-040-escrow-settlement-and-ledger.md) | 에스크로·정산 상태 머신과 복식 원장 | Proposed |
+| 2026-11-04 | [ADR-039](ADR-039-payment-adapter-and-webhook-idempotency.md) | 결제 어댑터와 웹훅 멱등: 포트, 상태 머신, 승인은 트랜잭션 밖 | Proposed |
+| 2026-11-04 | [ADR-038](ADR-038-stock-reservation-and-redis-role.md) | 재고 선점과 Redis 역할: 두 게이트(Redis 빠른 게이트 + DB CHECK 하드 게이트) | Proposed |
+| 2026-11-04 | [ADR-037](ADR-037-simulated-points-ledger.md) | 모의 포인트 원장: 복식·추가 전용, 보상 PENDING→확정/박탈 | Proposed |
+| 2026-11-04 | [ADR-036](ADR-036-katago-analysis-worker.md) | KataGo 분석 워커: 별도 프로세스, 2단계 분석, 선점·임대 큐 | Proposed |
+| 2026-11-04 | [ADR-035](ADR-035-game-state-and-realtime-protocol.md) | 대국 상태 머신·서버 권위·재접속: 이벤트 로그가 진실, 명령은 REST, push 는 NOTIFY | Proposed |
+| 2026-11-04 | [ADR-034](ADR-034-baduk-rules-engine.md) | 바둑 룰 엔진: 공유 TS 패키지 직접 구현, 라이브러리는 차분 시험 기준 (ADR-012 선정 절차 수행) | Proposed |
+| 2026-11-04 | [ADR-033](ADR-033-resource-budget-and-deploy-units.md) | 자원 예산과 배포 단위: 상시 60% 이하, CPU 예산 분리 | Proposed |
+| 2026-11-04 | [ADR-032](ADR-032-room-channel-model.md) | 룸 실시간 채널: /ws/room 세 번째 연결, push 전용 | Proposed |
+| 2026-11-04 | [ADR-031](ADR-031-event-transport-streams.md) | 이벤트 전달 계층: Postgres 정본, Redis Streams 는 Phase 3 에서 판정 (확정 시 ADR-006 대체) | Proposed |
+| 2026-11-04 | [ADR-030](ADR-030-service-boundary-criteria.md) | 서비스 경계 기준: 모놀리스 유지, 5축 판정, KataGo 만 분리 | Proposed |
 | 2026-11-04 | [ADR-029](ADR-029-license-and-content-rights.md) | 라이선스: 코드·설계 문서는 MIT, 개인 콘텐츠는 저작권 유보(CONTENT-LICENSE) | Accepted |
 | 2026-11-04 | [ADR-028](ADR-028-incident-response.md) | 보안사고 대응: 심각도 S1~S3, 증거 보존 우선, 비상 스위치 사다리, 자산별 런북, 비밀 스캔·회전 리허설 | Accepted |
 | 2026-11-04 | [ADR-027](ADR-027-server-logs.md) | 서버 기록: 로그 4종(앱·접근·감사·운영 상태), 파일 회전 7일 보관, Postgres 감사 테이블(행위와 같은 tx) | Accepted |

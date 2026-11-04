@@ -266,14 +266,18 @@ flowchart LR
 
 ## 12. 확장 지점 (Phase 별)
 
-| 단계 | 추가되는 것 | 이 구조에서 바뀌는 곳 |
-|---|---|---|
-| Phase 1 | `game` 모듈, 룸·대국 채널 | `ws-gateway` 에 비공개 채널, 서버 권위 상태머신(`version` 조건 갱신), `game_read` |
-| Phase 2 | KataGo 분석 워커, `ledger` | `worker` 계열이 분석 워커로 분화(선점→트랜잭션 밖 분석→토큰 완료), 전달 계층 결정(ADR-006) |
-| Phase 3 | `deal`, Redis(이음새는 ADR-024) | `api` 에 재고 선점 경로(ADR-010), Redis 컨테이너 |
-| Phase 5 | `payment`, `pricefeed`, 웹훅 | 웹훅은 inbox 로 수신, 시세 수집 작업 |
+Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evolution.md) 가 정본이다(공통 진화 P0 + 바둑·상거래·풀필먼트·채팅). 여기는 요약과 포인터만 둔다. ADR-030~047 은 **Proposed**(사용자 확정 대기).
 
-**바뀌지 않는 것**: 모듈 경계 규칙, domain·service·usecase 의존 방향, CQRS(조회는 읽기 모델만), outbox/inbox 규약, 선점 규약, 프록시 + 경로 라우팅, 같은 이미지 원칙.
+| 단계 | 추가되는 것 | 이 구조에서 바뀌는 곳 | 상세 |
+|---|---|---|---|
+| Phase 1 | `game`, `chat` 모듈, `/ws/room` 연결 | 대국 명령은 **REST**(WS 는 push 전용), `game_event` 로그 + NOTIFY fast lane, `realtime` 이 룸 포트·presence 소유 | [P1](../design/phases/01-baduk.md), [P4](../design/phases/04-chat.md), ADR-032·034·035·045 |
+| Phase 2 | `analysis`(KataGo 별도 프로세스), `ledger` | 분석 큐는 **Postgres inbox 선점**(Redis 없음), 보상 전이는 B12 `InTx` | [P1](../design/phases/01-baduk.md) §9~10, ADR-036·037 |
+| Phase 3 | `catalog`, `deal`, `order`, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정은 B12 `InTx` 쌍, Streams 판정 | [P2](../design/phases/02-commerce.md), ADR-031·038 |
+| Phase 4 | 워크로드 분리 | `ws-gateway` 사이트/룸 분화, HPA·PDB, M1 G8 롤링 패턴 | [P0](../design/phases/00-platform-evolution.md) §10, ADR-033 |
+| Phase 5 | `payment`, `escrow`, `settlement`, `pricefeed` | 웹훅 inbox, 모의 결제 어댑터, 복식 원장, KEK/DEK 상향 | [P2](../design/phases/02-commerce.md), ADR-039~041 |
+| Phase 6 | `inventory`, `fulfillment`, `support` | 이중 재고 원장, 출고 사가, CS 티켓, 허용목록 역할(`agent`·`operator`) | [P3](../design/phases/03-fulfillment.md), [P4](../design/phases/04-chat.md), ADR-042~047 |
+
+**바뀌지 않는 것**: 모듈 경계 규칙(+ **B12**: 층 규칙과 `InTx` 허용 쌍, P0 §2.4), domain·service·usecase 의존 방향, CQRS(조회는 읽기 모델만), outbox/inbox 규약, 선점 규약, 프록시 + 경로 라우팅, 같은 이미지 원칙, 모든 쓰기는 트랜잭션.
 
 ## 13. 미결
 

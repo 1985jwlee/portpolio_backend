@@ -1,5 +1,5 @@
 # ADR-010: 재고 정합성 — Lua 원자 선점 + 예약 TTL + outbox + 멱등 소비
-- 상태: Accepted
+- 상태: Accepted (**일부 [ADR-038](ADR-038-stock-reservation-and-redis-role.md) 에 의해 조정됨** — 확정 수량을 outbox 소비자가 비동기로 차감하는 부분은 구매 확정 트랜잭션 안의 동기 갱신으로 바뀌었고, Redis 스크립트는 `restock` 이 추가된 4종이다. 정본은 ADR-038)
 - 날짜: 2026-11-03
 - 근거: 원 계획안 모순 #11, Phase 3 / 데이터 구조는 [database-schema.md](../domains/database-schema.md) §10
 
