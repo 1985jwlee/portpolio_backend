@@ -9,6 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-04 | [ADR-022](ADR-022-tech-stack-definition.md) | 전체 기술 스택 확정, 추천에서 바뀐 곳(web=Bun, nginx), 구현 초기 관문 G1~G10 | Accepted |
 | 2026-11-03 | [ADR-021](ADR-021-concurrency-control.md) | 동시성: 처리 전 `processing` 선점(CAS) + 임대 + 토큰 + 낙관적 버전 | Accepted |
 | 2026-11-03 | [ADR-020](ADR-020-inbox.md) | Inbox: 수신 메시지를 먼저 저장하고 선점해서 한 번만 처리 | Accepted |
 | 2026-11-03 | [ADR-019](ADR-019-layered-architecture.md) | 모듈 내부 구조: domain · service · usecase (usecase → service → domain) | Accepted |

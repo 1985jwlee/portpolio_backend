@@ -17,6 +17,7 @@ portpolio_backend — 포트폴리오 백엔드 저장소. 상세는 `README.md`
 
 | 문서 (`docs/domains/`) | 언제 펼치는가 |
 |---|---|
+| `tech-stack.md` | 스택·버전·도구·구현 초기 관문. 의존성 추가·교체 전 |
 | `architecture.md` | 구성·경계·흐름·신뢰 경계·배포. 모듈 추가·의존 변경 전 |
 | `database-schema.md` | 테이블·제약·보관 정책. 마이그레이션 작성 전 |
 

@@ -16,7 +16,7 @@
 ### Compose 구성(라이브)
 | 서비스 | M1 | 비고 |
 |---|---|---|
-| `proxy` | O | **경로 라우팅(`/`, `/api`, `/ws`, `/grafana`), TLS 종료(Oracle 경로), 원 접속 주소 정규화.** 제품 선정은 구현 시(미결). 집 PC 경로에서는 `cloudflared` 가 이 컨테이너를 가리킨다. K8s 검증본에서는 Gateway API 가 이 역할을 대신한다 |
+| `proxy` | O | **경로 라우팅(`/`, `/api`, `/ws`, `/grafana`), TLS 종료(Oracle 경로), 원 접속 주소 정규화.** 제품은 **nginx**(ADR-022, 관문 G7: `realip` 포함 이미지 확인·헤더 정규화·Oracle 경로 TLS 방식). 집 PC 경로에서는 `cloudflared` 가 이 컨테이너를 가리킨다. K8s 검증본에서는 Gateway API 가 이 역할을 대신한다 |
 | `web` | O | Next.js |
 | `api`, `ws-gateway`, `worker` | O | ADR-001, 같은 이미지 |
 | `postgres` | O | 볼륨 필수 |
@@ -28,7 +28,7 @@
 
 ### K8s 검증본(k3d)
 - 매니페스트 디렉토리를 별도로 두고 `Deployment` 를 엔트리포인트별로 분리한다.
-- 진입: `Gateway` + `HTTPRoute`(`/api`, `/ws`, `/` → web). 사용하는 Gateway API 구현체는 구현 시 선정한다(미결).
+- 진입: `Gateway` + `HTTPRoute`(`/api`, `/ws`, `/` → web). 구현체는 **Envoy Gateway**(Gateway API v1.7)로 하고 k3d 에서의 WebSocket 라우팅을 실측한다(관문 G8).
 - 검증 항목: readiness/liveness probe, `PodDisruptionBudget`, 롤링 업데이트 중 소켓 재접속(ADR-014), HPA 동작.
 - 이 환경은 **검증용**이다. README 는 라이브가 K8s 위에서 도는 것처럼 쓰지 않는다.
 

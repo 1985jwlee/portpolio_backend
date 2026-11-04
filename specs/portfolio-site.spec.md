@@ -12,7 +12,7 @@
 | 독자 | 채용 담당자·방문자(공개) |
 | 성격 | 이 사이트 자체가 백엔드 작품. **외부 프로젝트(다른 저장소)는 구현 과정에서 참고하지 않는다.** 에이전트 파이프라인은 공개하지 않는다 |
 | 플랫폼 | 웹 전용, 한국어+영어 |
-| 스택 | 백엔드 TypeScript(Bun + Elysia), 프론트엔드 Next.js(App Router), DB Postgres |
+| 스택 | 전체 표는 [tech-stack.md](../docs/domains/tech-stack.md). 백엔드 TypeScript(Bun + Elysia), 프론트엔드 Next.js(App Router), DB PostgreSQL 18 + Drizzle |
 | 이벤트 | Postgres outbox + 브로커 없이 직접 폴링/NOTIFY |
 | 지표 | Prometheus + Grafana 임베드 |
 | 호스팅 | 별도 개인 도메인, Docker Compose 한 벌이 집 PC(+Cloudflare Tunnel)와 Oracle Always Free 양쪽에서 뜨는 구조. 1차는 집 PC |
@@ -56,7 +56,7 @@
 
 ### 운영 지표 대시보드
 **FR-060 지표 수집** — The system shall 요청 수·지연·에러·outbox 적체·WebSocket 연결 수를 Prometheus 형식으로 노출한다.
-**FR-061 공개 임베드** — The system shall Grafana 를 **읽기 전용 익명 뷰**로 사이트에 임베드한다.
+**FR-061 공개 임베드** — The system shall Grafana 를 **읽기 전용 공개 대시보드(Public dashboards, 불가 시 익명 읽기 전용 뷰)** 로 사이트에 임베드한다.
 
 ### 가용성
 **FR-070 정적 폴백** — If 백엔드가 응답하지 않으면, the system shall 자기소개·아키텍처 페이지를 정적 폴백으로 계속 제공하고 데모 영역에만 '점검 중'을 표시한다.
@@ -77,7 +77,7 @@
 - 인가: 관리자는 본인 GitHub ID 허용목록 1명
 - 입력: 모든 공개 입력은 길이·속도 제한, 출력은 이스케이프(XSS 방지)
 - 비밀값(OAuth 시크릿 등)은 저장소에 두지 않는다
-- Grafana 는 읽기 전용 익명, 편집·데이터소스 접근 불가
+- Grafana 는 읽기 전용 공개(Public dashboards 우선), 편집·데이터소스 접근 불가
 - 개인정보 최소 보관: IP·세션은 7일 후 삭제
 
 ### Scalability / 자원
@@ -211,7 +211,7 @@ Then 읽기 모델은 정본에서 계산한 값과 일치한다.
 
 ### 3. 실시간·관측
 - [ ] WebSocket(재연결 복구·백프레셔)
-- [ ] Prometheus 지표 노출, Prometheus·Grafana 컨테이너, 읽기 전용 익명 대시보드
+- [ ] Prometheus 지표 노출, Prometheus·Grafana 컨테이너, 읽기 전용 공개 대시보드
 
 ### 4. Frontend
 - [ ] Next.js App Router 뼈대 · ko/en 전환
@@ -246,7 +246,7 @@ Then 읽기 모델은 정본에서 계산한 값과 일치한다.
 | A-002 | CI 는 GitHub Actions → GHCR 빌드, 호스트가 pull | 사용자 확정(R7-Q4), 무료 조건 | 배포 파이프라인 |
 | A-003 | 소스 저장소는 공개 | CI 배지·저장소 링크 선택(R5-Q2)이 전제 | 배지·링크 노출 방식 |
 | A-004 | 자기소개 문구(경력·연락처)는 사용자가 제공 | 외부 프로젝트 참고 금지(R3), 채울 근거 없음 | FR-001 콘텐츠 |
-| A-005 | Grafana 는 읽기 전용 익명 뷰 | 사용자 확정(R7-Q4) | 공개 노출 범위 |
+| A-005 | Grafana 는 읽기 전용 공개 대시보드(Public dashboards 우선, 임베드 실패 시 익명 읽기 전용 뷰) | 사용자 확정(R7-Q4), 조사·R11 로 개정 | 공개 노출 범위 |
 | A-006 | 개인 도메인의 DNS 를 Cloudflare 무료 DNS 로 둘 수 있다 | 호스팅 조사(Tunnel 은 Cloudflare DNS 전제) | 도메인 연결 방식 재검토 |
 | A-007 | 도메인은 사용자가 이미 소유한다 | R3 답변 "별도 개인 도메인을 사용" | 도메인 구매 항목 추가 |
 | A-008 | 정적 폴백은 Cloudflare 무료 기능으로 제공한다 | 조사: 무료 플랜 존재, 단 구현 방식은 미확정 | FR-070 구현 방법 |
@@ -254,6 +254,11 @@ Then 읽기 모델은 정본에서 계산한 값과 일치한다.
 | A-010 | 관측 지표 중 outbox 적체·WebSocket 연결 수는 자체 노출한다 | Prometheus 선택(R6-Q2), 표준 항목 | 대시보드 구성 |
 | A-011 | 방명록 글 길이·속도 제한의 구체 수치는 구현 단계에서 정한다 | 수치를 정할 근거(트래픽)가 아직 없음 | AC-007 수치 |
 | A-012 | 동시 접속 50, p95 300ms 는 터널 경유 측정으로 판정한다 | R8-Q2 추천 근거 | AC-013 측정 방법 |
+| A-013 | web(Next.js)은 Bun 으로 실행한다 | 사용자 선택(R11-Q2, **추천은 Node**). Next 공식 보증 없음 → 관문 G3 | 실패 시 web 만 Node 22 LTS |
+| A-014 | 프록시는 nginx. `realip` 모듈 포함 이미지와 Oracle 경로 TLS 자동화 방식을 구현 초기에 확정한다 | 사용자 선택(R11-Q5, **추천은 Caddy**). 관문 G7 | 이미지 직접 빌드 또는 인증서 발급 컨테이너 분리 |
+| A-015 | ws-gateway 는 Elysia(Bun). 다수 연결 장시간 안정성은 부하 시험으로 확정한다 | 인터뷰 R11-Q1. 관문 G2 | 실패 시 Go 로 교체(프로토콜은 언어 중립 스키마) |
+| A-016 | 저장소는 공개이고 GitHub arm 러너를 무료로 쓴다 | A-003 과 일치, 조사: arm 러너는 공개 저장소에서 무료 | 비공개면 arm 빌드가 과금 → QEMU 에뮬레이션 또는 Oracle 단독 빌드 |
+| A-017 | Postgres 18 을 쓰고 DB 드라이버·지표/로깅 라이브러리는 구현 초기 스파이크로 고른다 | 조사가 결론을 못 냄. 관문 G4·G5 | 후보 순서대로 교체 |
 
 ## Decision Log
 라운드 순서대로. "바뀜" 열이 Y 인 행은 추천이 반박된 곳 — 의도가 가장 많이 드러난 자리다.
@@ -296,6 +301,14 @@ Then 읽기 모델은 정본에서 계산한 값과 일치한다.
 | R10-Q1 | CQRS 수준 | 논리 분리 + 프로젝션 테이블 | 동일 | N |
 | R10-Q2 | 계층 의존 방향 | usecase → service → domain | 동일 | N |
 | R10-Q3 | 동시성 방식 | 상태 선점(CAS) + 엔티티별 낙관적 버전 | 동일 | N |
+| (지시) | 명세 확정 전 | — | **전체 기술 스택을 먼저 정의** → tech-stack.md, ADR-022 | Y |
+| R11-Q1 | ws-gateway 언어 | Elysia(Bun) + 부하 시험 관문 | 동일 | N |
+| R11-Q2 | web 실행 런타임 | **Node 22 LTS**(빌드·패키지는 Bun) | **Bun 으로 실행** | Y — 관문 G3, 실패 시 Node |
+| R11-Q3 | OAuth | 직접 구현 | 동일 | N |
+| R11-Q4 | Drizzle 버전 | 안정판 0.45.x 고정 | 동일 | N |
+| R11-Q5 | 리버스 프록시 | **Caddy** | **nginx** | Y — 관문 G7 |
+| R11-Q6 | Grafana 공개 방식 | Public dashboards 우선, 임베드 실측 | 동일 | N |
+| R11-Q7 | 일괄 항목 10건(모노레포·경계 검사·린트·테스트·i18n·UI·WS 클라·Gateway·CI·Postgres/스파이크) | 모두 확정 | 모두 확정 | N |
 
 ## Open Questions
 - [ ] (명세 밖) 개인 도메인 이름과 현재 DNS 위치 — A-006·A-007 확인용, 구현 시작 시 필요

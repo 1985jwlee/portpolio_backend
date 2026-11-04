@@ -32,7 +32,7 @@
 
 ## 기술 스택
 
-Bun + ElysiaJS (TypeScript) · Postgres · Next.js (App Router) + three.js (React Three Fiber) · WebSocket · Prometheus + Grafana · Docker Compose (라이브) / k3d + Gateway API (검증). 이유는 [ADR-004](docs/adr/ADR-004-tech-stack.md).
+Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) + three.js (React Three Fiber) · WebSocket · nginx · Prometheus + Grafana · Docker Compose (라이브) / k3d + Gateway API (검증). 버전·도구 전체는 [tech-stack.md](docs/domains/tech-stack.md), 이유는 [ADR-022](docs/adr/ADR-022-tech-stack-definition.md).
 
 ## 로드맵
 
@@ -55,5 +55,5 @@ Bun + ElysiaJS (TypeScript) · Postgres · Next.js (App Router) + three.js (Reac
 |---|---|
 | `docs/adr/` | 결정 기록 (인덱스: `docs/adr/README.md`) |
 | `specs/portfolio-site.spec.md` | M1 요구사항(EARS)·인수 기준·가정·결정 로그 |
-| `docs/domains/` | 도메인 문서 정본: [아키텍처](docs/domains/architecture.md), [데이터베이스 구조](docs/domains/database-schema.md) |
+| `docs/domains/` | 도메인 문서 정본: [기술 스택](docs/domains/tech-stack.md), [아키텍처](docs/domains/architecture.md), [데이터베이스 구조](docs/domains/database-schema.md) |
 | `.claude/`(일부), `CLAUDE.md` | 개발용 에이전트 시스템의 진입점·설정·검증 데이터만 추적한다. 에이전트·스킬 등 엔진 본체와 `.codex/`, `.agents/` 는 추적하지 않으며(`.gitignore`) 클론 후 다른 프로젝트에서 흡수한다 |
