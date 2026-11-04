@@ -40,6 +40,7 @@
 | `code` | 00 §4.3 표의 코드. 클라이언트 분기는 **`code` 로만** 한다 |
 | `message` | 사람이 읽는 문장. 요청 `Accept-Language`(ko/en)에 맞춤. 클라이언트는 표시용으로만 사용 |
 | `details` | 코드별 구조: `validation_failed` → `fields: [{path, rule}]`, `version_conflict` → `current`, `rate_limited` → `retryAfterSeconds` |
+| 코드 보강 | 00 §4.3 의 코드에 더해 모듈 코드: `guestbook.write_locked`(→ 응답 `code` 는 `write_locked`, 503 + `Retry-After`), `entry_hidden`(409, 이미 숨김), `entry_not_hidden`(409), `request_in_progress`(409), `idempotency_key_reuse`(422), `origin_mismatch`(403) |
 | 5xx | `message` 는 일반 문구, **내부 정보·스택을 담지 않는다** |
 
 ## 3. 멱등 키
@@ -66,7 +67,7 @@ type EntryView = {
   displayName: string;
   body: string;               // 텍스트로만 렌더 (HTML 해석 없음)
   authorKind: 'anonymous' | 'user';
-  status: 'visible';          // hidden 은 공개 목록에 나오지 않음
+  status: 'visible';          // hidden·deleted 는 공개 목록에 나오지 않는다 (deleted 는 묘비로만 존재, 목록·조회에 노출 안 함)
   reactions: Record<Emoji, number>;   // 예: { "👍": 3 }
   myReactions: Emoji[];       // 현재 행위자가 누른 것
   isMine: boolean;            // 현재 행위자의 글인가
@@ -77,6 +78,24 @@ type EntryView = {
 };
 type Emoji = '👍' | '❤️' | '🎉' | '😂' | '🤔' | '👀';   // ADR-023 의 고정 6종 (목록은 protocol 상수)
 type Page<T> = { items: T[]; nextCursor: string | null };
+type ReasonCode = 'spam' | 'abuse' | 'personal_info' | 'off_topic' | 'other';   // 열거 목록은 protocol 상수 — 최종 목록은 미확인(F11)
+type ReportView = {
+  id: string;
+  entryId: string;
+  entryVersion: number;       // 관리자 hide/unhide 시 expectedVersion 으로 사용
+  entryExcerpt: string;       // 본문 앞부분(길이 제한), 관리자 큐 전용
+  reasonCode: ReasonCode;
+  status: 'open' | 'resolved';
+  createdAt: string;
+};
+type Me = {
+  kind: 'anonymous' | 'user';
+  userId?: string;
+  displayName: string;
+  isAdmin: boolean;
+  writeLocked: boolean;       // 쓰기 잠금 중이면 true — 클라이언트는 작성 UI 를 비활성화한다
+  locale?: 'ko' | 'en';
+};
 ```
 
 ### 4.2 명령
@@ -89,12 +108,16 @@ type Page<T> = { items: T[]; nextCursor: string | null };
 | `PUT /api/entries/{id}/reactions/{emoji}` | 익명 허용 | (없음) | `200` `{ count, mine: true, traceId }` | 404, 429. **이미 눌렀어도 200**(멱등) |
 | `DELETE /api/entries/{id}/reactions/{emoji}` | 익명 허용 | (없음) | `200` `{ count, mine: false, traceId }` | 404 |
 | `POST /api/entries/{id}/reports` | 익명 허용 | `{ reasonCode, note? }` | `202` `{ traceId }` | 404, 429 |
-| `POST /api/admin/entries/{id}/hide` · `/unhide` | 관리자 | `{ expectedVersion }` | `200` `{ traceId }` | 403, 409 |
+| `POST /api/admin/entries/{id}/hide` · `/unhide` | 관리자 | `{ expectedVersion }` | `200` `{ traceId }` | 403, 404, 409 (`version_conflict`, 이미 숨김이면 `entry_hidden`, 숨김이 아니면 `entry_not_hidden`) |
 | `POST /api/admin/reports/{id}/resolve` | 관리자 | `{ resolution }` | `200` `{ traceId }` | 404, 409(이미 처리됨) |
+| `POST /api/admin/write-lock` | 관리자 | `{ locked: boolean, reason?: string }` | `200` `{ writeLocked: boolean }` | 403, 400 |
 | `PUT /api/me/profile` | 로그인 | `{ displayName }` | `200` `{ me }` | 400 |
 
 - **표시 이름**: 익명이 글 작성 시 `displayName` 을 생략하면 서버가 `손님-xxxx`(세션 해시 4자리)를 부여한다. 로그인 사용자는 프로필 이름이 기본.
+- **반응 중복은 오류가 아니다**: 이미 누른 반응에 `PUT`, 누르지 않은 반응에 `DELETE` 는 모두 `200` 이다(유일 키가 심판, 멱등). 409 를 쓰지 않는다.
 - 반응 `count` 는 **쓰기 모델 기준 변경 후 총개수**이며 이벤트(`reaction.changed.count`)와 같은 값이다.
+- **쓰기 잠금**(`POST /api/admin/write-lock` 으로 켠 상태)에서는 `POST /api/entries`, `PATCH`, 반응, 신고 같은 일반 쓰기가 `503` `write_locked` + `Retry-After` 로 거절된다. 삭제·관리자 조치·로그인 흐름은 잠금 대상이 아니다. 상태는 `GET /api/me` 의 `writeLocked` 로 알 수 있다.
+- **흐름 시각화 화면의 "보내기"**([07](07-frontend.md))는 별도 엔드포인트 없이 `POST /api/entries` 를 쓴다. 즉 **방명록에 실제 공개 글이 생기며**, 기본 문구(i18n 키)로 채워지고 같은 길이 제한·세션 속도 제한·쓰기 잠금을 받는다.
 - 수정·삭제·숨김은 **조건부 갱신**이다. `expectedVersion` 불일치는 `409` + 최신 뷰(읽기 모델이 아닌 명령 쪽 조회로 만든 것)를 `details.current` 에 담는다.
 
 ### 4.3 조회
@@ -102,13 +125,13 @@ type Page<T> = { items: T[]; nextCursor: string | null };
 | 메서드·경로 | 인증 | 쿼리 | 성공 응답 |
 |---|---|---|---|
 | `GET /api/entries` | 익명 허용 | `limit`(1~50, 기본 20), `cursor` | `200` `Page<EntryView>` |
-| `GET /api/me` | 익명 허용 | — | `200` `{ kind:'anonymous'\|'user', userId?, displayName, isAdmin, locale? }` |
+| `GET /api/me` | 익명 허용 | — | `200` `Me` — `{ kind:'anonymous'\|'user', userId?, displayName, isAdmin, writeLocked, locale? }` |
 | `GET /api/admin/reports` | 관리자 | `status`, `limit`, `cursor` | `200` `Page<ReportView>` |
 | `GET /api/flow/summary` | 익명 허용 | `window`(`5m`\|`1h`) | `200` `{ buckets: [{ at, step, count }] }` — **개수만**, 식별자·내용 없음 |
 | `GET /api/flow/trace/{traceId}` | 행위자 본인 | — | `200` `{ steps: [{ step, at, detail? }] }` — 본인 `ownerKey` 일 때만, 아니면 404 |
 | `GET /healthz` · `/readyz` · `/metrics` | **내부 전용** | — | 프록시가 외부 차단 |
 
-- `GET /api/entries` 는 `guestbook_read.entry_view` 만 읽는다. `myReactions`·`isMine`·`canEdit` 는 행위자 컨텍스트로 **읽기 모델의 보조 테이블**(`my_reaction`, `author_user_id`, §9)에서 채운다.
+- `GET /api/entries` 는 `guestbook_read.entry_view` 만 읽는다. `myReactions`·`isMine`·`canEdit` 는 행위자 컨텍스트로 **읽기 모델의 보조 테이블**(`my_reaction`, `entry_view.author_actor_key`, §9)에서 채운다.
 - `/api/me` 는 세션 없이 호출돼도 **익명 세션을 발급**한다(첫 접속).
 
 ## 5. 페이지네이션
@@ -136,7 +159,7 @@ sequenceDiagram
     B->>X: POST /api/entries (Idempotency-Key, Origin, 쿠키)
     X->>X: limit_req (IP)
     X->>R: 정규화된 헤더로 전달
-    R->>G: 세션 · Origin · 세션 속도 제한 · 스키마 검증
+    R->>G: Origin · 세션 · 세션 속도 제한 · 스키마 검증
     G-->>R: 행위자 컨텍스트
     R->>H: execute(ctx, input)
     H->>DB: tx 시작 → request_key 선점(INSERT)
@@ -177,17 +200,18 @@ sequenceDiagram
 flowchart TD
     A["요청 도착"] --> N{"nginx limit_req<br/>(IP, 메모리)"}
     N -- "초과" --> R1["429"]
-    N -- "통과" --> S{"세션 쿠키 유효?"}
-    S -- "없음/만료" --> S2["익명 세션 발급 (GET /api/me 등) 또는 401"]
-    S -- "유효" --> C{"쓰기? Origin 일치·JSON?"}
-    C -- "불일치" --> R2["403 forbidden"]
-    C -- "일치/읽기" --> L{"세션 속도 제한(앱)"}
+    N -- "통과" --> C{"쓰기? Origin 일치·JSON?"}
+    C -- "불일치" --> R2["403 origin_mismatch<br/>(세션 조회 전에 거절)"]
+    C -- "일치/읽기" --> S{"세션 쿠키 유효?"}
+    S -- "없음/만료" --> S2["익명 세션 발급 (GET /api/me) 또는 401"]
+    S -- "유효" --> L{"세션 속도 제한(앱)"}
+    S2 --> L
     L -- "초과" --> R1
     L -- "통과" --> V{"스키마·길이 검증"}
     V -- "실패" --> R3["400 validation_failed"]
-    V -- "통과" --> P{"권한 (본인/관리자)"}
+    V -- "통과" --> P{"역할 (관리자/로그인)"}
     P -- "불가" --> R4["403"]
-    P -- "가능" --> U["usecase 실행"]
+    P -- "가능" --> U["usecase 실행<br/>(본인 여부는 OwnerPolicy 가 usecase 안에서)"]
 ```
 
 ### 7.2 멱등 키 판정
@@ -233,6 +257,8 @@ classDiagram
     class ActorContext {
         +kind string
         +actorKey string
+        +sessionId Uuid
+        +displayName string
         +userId Uuid?
         +isAdmin bool
         +traceId Uuid
@@ -264,7 +290,6 @@ classDiagram
         #allows(actor, resource) bool
     }
     class RequireLogin
-    class RequireOwner
     class RequireAdmin
     Guard <|.. SessionGuard
     Guard <|.. OriginGuard
@@ -272,11 +297,12 @@ classDiagram
     Guard <|.. SchemaGuard
     Guard <|.. AuthorizationGuard
     AuthorizationGuard <|-- RequireLogin
-    AuthorizationGuard <|-- RequireOwner
     AuthorizationGuard <|-- RequireAdmin
 ```
 
-실행 순서: `Session(10) → Origin(20) → SessionRateLimit(30) → Schema(40) → Authorization(50)`. 순서는 §7.1 순서도와 같다.
+실행 순서: `Origin(10) → Session(20) → SessionRateLimit(30) → Schema(40) → Authorization(50)`. 순서는 §7.1 순서도와 같다. **Origin 을 세션보다 앞에 두는 이유**: 출처가 틀린 쓰기 요청은 세션 조회(DB·캐시) 전에 값싸게 거절한다.
+
+`Authorization` 가드는 **역할**(로그인 필요, 관리자)만 판정한다. "이 글의 작성자인가"는 가드가 아니라 usecase 안의 도메인 서비스 **`OwnerPolicy`** 가 판정한다([10 §4](10-security.md), ADR-019) — 소유 규칙이 엔트리포인트에 새지 않게 한다.
 
 ## 9. 스키마 반영 필요 (이 문서가 요구하는 DB 추가)
 
@@ -284,10 +310,10 @@ classDiagram
 |---|---|---|
 | `request_key` | `guestbook`·`identity` 쓰기 스키마 | 멱등 키 저장(§3). PK (`actor_key`, `key`), `request_hash`, `status`, `response_status`, `response_body`, `created_at`. 보관 24시간 |
 | `my_reaction` | `guestbook_read` | 행위자별 눌림 표시(`myReactions`). PK (`entry_id`, `actor_key`, `emoji`), `reaction.changed` 로 갱신(행위자는 봉투 `ownerKey`) |
-| `entry_view.author_user_id` | `guestbook_read` | `isMine`/`canEdit` 계산. 응답에는 노출하지 않는다 |
+| `entry_view.author_actor_key` | `guestbook_read` | `isMine`/`canEdit` 계산(익명 포함). 응답에는 노출하지 않는다 |
 | `entry.posted.authorUserId` | 이벤트 | 위 컬럼의 출처 (05 반영됨, 공개 변환에서 제거) |
 
-이 항목은 [database-schema.md](../domains/database-schema.md) 반영이 필요하다.
+위 항목은 [database-schema.md](../domains/database-schema.md) 에 반영되어 있다.
 
 ## 10. 미결
 

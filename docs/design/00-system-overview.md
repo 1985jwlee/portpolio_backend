@@ -18,6 +18,7 @@
 | [10](10-security.md) | CSP·보안 헤더, 시크릿, 의존성 점검 |
 | [11](11-implementation-plan.md) | M1 작업 분할, 단계 0 관문, 완료 기준 |
 | [12](12-content.md) | 자기소개·개인정보 안내 문구 구조 |
+| [features/](features/00-feature-catalog.md) | **기능 104개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
 
 각 문서는 해당하는 만큼 **시퀀스 · 순서도 · 클래스 · 상속 구조** 다이어그램을 갖는다. 해당 없는 종류는 이유를 한 줄로 적는다.
 
@@ -309,12 +310,25 @@ classDiagram
     DomainError <|-- RateLimitedError
     ConflictError <|-- DuplicateRequestError
 
+    class RequestInProgressError
+    class IdempotencyKeyReuseError
+    class WriteLockedError
+    ConflictError <|-- RequestInProgressError
+    DomainError <|-- IdempotencyKeyReuseError
+    DomainError <|-- WriteLockedError
+
     class TransientError
     class PermanentError
     class LeaseLostError
+    class GithubUpstreamError
+    class ConfigError
+    class MigrationBehindError
     InfraError <|-- TransientError
     InfraError <|-- PermanentError
     TransientError <|-- LeaseLostError
+    InfraError <|-- GithubUpstreamError
+    PermanentError <|-- ConfigError
+    PermanentError <|-- MigrationBehindError
 ```
 
 | 클래스 | HTTP | 코드(예) | 재시도 |
@@ -325,11 +339,18 @@ classDiagram
 | `NotFoundError` | 404 | `not_found` | 아니오 |
 | `ConflictError` / `VersionConflictError` | 409 | `conflict` / `version_conflict` | 클라이언트가 재조회 후 |
 | `DuplicateRequestError` | (같은 결과 재생) | `duplicate_request` | — |
+| `RequestInProgressError` | 409 | `request_in_progress` (+`Retry-After: 1`) | 같은 키로 잠시 후 |
+| `IdempotencyKeyReuseError` | 422 | `idempotency_key_reuse` | 아니오(새 키로) |
+| `WriteLockedError` | 503 | `guestbook.write_locked` (+`Retry-After`) | 잠금 해제 후 |
 | `RateLimitedError` | 429 | `rate_limited` | `Retry-After` 후 |
 | `TransientError` | 503 | `unavailable` | 예 (백오프, ADR-023) |
 | `PermanentError` | 500 | `internal` | 아니오 → `dead` |
+| `GithubUpstreamError` | 502 | `github_unavailable`(일시, 재시도 가능) / `github_rejected`(코드 거부, 재시도 불가) | 사용자가 로그인 재시작 |
+| `ConfigError` | (기동 실패) | `config_invalid` | 아니오 — 프로세스 종료 |
+| `MigrationBehindError` | (readyz 실패) | `migration_behind` | 마이그레이션 적용 후 |
 | `LeaseLostError` | — | `lease_lost` | 처리 중단(결과 폐기) |
 
+- `WriteLockedError` 는 `DomainError` 지만 상태 503 이다(서비스가 일부러 쓰기를 닫은 상태라 클라이언트는 `Retry-After` 를 따른다). `GithubUpstreamError` 는 인프라 계열이며 `retryable` 은 코드에 따른다.
 - 오류는 **던지지 않고 `Result<T, AppError>` 로 돌려준다**(usecase 경계). 예상 밖 예외만 `PermanentError` 로 감싼다.
 - 엔트리포인트의 오류 매핑은 한 곳(`errorToResponse`)이다. 규칙은 [03](03-api-contract.md).
 
@@ -345,6 +366,7 @@ classDiagram
 | 오류 코드 | 소문자 스네이크. 모듈 전용 코드는 `<module>.<code>`(예: `guestbook.entry_hidden`) |
 | 모듈 경계 | 다른 모듈은 `index` 의 usecase 와 `protocol` 타입만 참조 |
 | 파일 이름 | usecase 하나 = 파일 하나, `kebab-case`: `post-entry.ts`. 클래스/타입은 `PascalCase` |
+| 행위자 컨텍스트 | 모든 요청은 `ActorContext` 를 만든다: `kind`(`anonymous`\|`user`), `actorKey`(`session:<sessionId>`\|`user:<userId>`), `sessionId`, `userId?`, `displayName`(익명은 자동 이름), `isAdmin`, `traceId`, `idempotencyKey?`. usecase 는 이 값으로 `ownerKey`·소유 판정을 한다 |
 | 설정 | `process.env` 직접 접근 금지 → `packages/config` 가 검증한 객체만([01](01-repository-structure.md)) |
 | 로그 | 구조화(JSON), 필드 `trace_id`·`module`·`usecase`. **IP·본문·토큰은 기록하지 않는다** |
 

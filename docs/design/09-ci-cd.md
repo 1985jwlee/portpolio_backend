@@ -57,7 +57,8 @@ flowchart TD
     INT --> MIG["migration reproduce<br/>빈 DB 에 처음부터 적용 (G10)"]
     I --> AUD["dependency audit<br/>bun audit"]
     I --> WB["web build<br/>next build standalone"]
-    MIG & WB & AUD --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]
+    I --> CFG["설정 검사<br/>nginx -t · promtool · 대시보드 lint<br/>compose config · shellcheck · 매니페스트 검증"]
+    MIG & WB & AUD & CFG --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]
     DB --> OK["필수 상태 검사 통과 → 머지 가능"]
 ```
 
@@ -70,10 +71,11 @@ flowchart TD
 | `migration reproduce` | 빈 DB 에서 마이그레이션 전부 적용 + 스키마 대조 (G10) | |
 | `audit` | `bun audit` — 사용 가능 여부는 구현 시 확인(**미확인**). 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
 | `web build` | Next 빌드가 Bun 에서 성공 (G3 지속 확인) | |
+| `config check` | 운영 설정·스크립트 정적 검사: `nginx -t`(공식 nginx 이미지로 설정 검증), `promtool check config/rules`, Grafana 대시보드 JSON 문법 lint, `docker compose config`(각 오버라이드 조합), `shellcheck`(`infra/scripts/*.sh`), k8s 매니페스트 검증(`kubeconform` 등) — **도구명은 모두 미검증**, 도입 시 확인 | 머지 불가 |
 | `docker build smoke` | 이미지가 빌드되고 `--help`/설정 검증이 동작 | |
 
 - E2E·재접속·부하 시험은 PR 마다 돌리지 않는다. **main 머지 후 야간/수동** 워크플로(`e2e` 잡)로 분리해 PR 시간을 지킨다(08 에서 범위 확정).
-- 필수 상태 검사(branch protection)는 `lint`·`typecheck`·`arch`·`gen:schema`·`unit`·`integration`·`migration`·`web build` 로 한다.
+- 필수 상태 검사(branch protection)는 `lint`·`typecheck`·`arch`·`gen:schema`·`unit`·`integration`·`migration`·`web build`·`config check` 로 한다.
 
 ## 3. 이미지 빌드와 매니페스트 병합 (`build.yml`)
 

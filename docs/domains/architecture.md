@@ -252,13 +252,14 @@ flowchart LR
 
 ## 11. 측정할 것 (지표 지도)
 
-| 영역 | 지표 |
+| 영역 | 지표 (`pf_` 접두, 카탈로그 정본: [design/features/17](../design/features/17-ops-observability.md)) |
 |---|---|
-| 명령/조회 | `http_request_duration_seconds`, 에러율 |
-| outbox | `outbox_new`, `outbox_dead_total`, `oldest_processing_age_seconds` |
-| inbox / 읽기 모델 | `inbox_depth`, `inbox_oldest_age_seconds`, `projection_lag_seconds`, `projection_drift` |
-| 동시성 | 선점 실패 수, 임대 만료 회수 수, 409(버전 충돌) 수 |
-| 실시간 | `ws_connections`, `ws_reconnects_total` |
+| 명령/조회 | `pf_http_request_duration_seconds`, `pf_http_requests_total`(상태 분류별 에러율), `pf_errors_total` |
+| outbox | `pf_outbox_depth{status}`, `pf_outbox_dead_total`, `pf_outbox_oldest_age_seconds` |
+| inbox / 읽기 모델 | `pf_inbox_depth`, `pf_inbox_oldest_age_seconds`, `pf_projection_lag_seconds`, `pf_projection_drift` |
+| 동시성 | `pf_claim_attempts_total{result}`(선점 실패 수), `pf_lease_reclaimed_total`(임대 만료 회수 수), `pf_version_conflicts_total`(409), `pf_lease_lost_total`(fencing 거절) |
+| 실시간 | `pf_ws_connections{channel}`, `pf_ws_resume_total`, `pf_ws_queue_overflow_total` |
+| 쓰기 잠금·멱등 | `pf_write_locked_total`, `pf_idempotent_replays_total` |
 
 ## 12. 확장 지점 (Phase 별)
 

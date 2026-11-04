@@ -26,6 +26,8 @@ flowchart TD
     WH --> RT["realtime<br/>구독 권한(private 은 본인만)"]
 ```
 
+가드 순서는 [03 §8.2](03-api-contract.md) 와 같다: **Origin → Session → RateLimit → (Schema) → Authorization**. 출처가 틀린 쓰기 요청을 세션 조회 전에 거절한다.
+
 방어는 겹쳐서 둔다: **프록시가 막지 못한 것을 앱이, 앱이 놓친 것을 DB 제약이 막는다**(예: 길이 상한은 앱 `EntryBody` + DB `CHECK` 2배, ADR-023).
 
 ## 2. 보안 헤더
@@ -51,10 +53,10 @@ flowchart TD
 | `default-src` | `'self'` | 기본 차단 |
 | `script-src` | `'self' 'nonce-<요청별>' 'strict-dynamic'` | 인라인 스크립트는 nonce 가 있는 것만. Next 의 nonce 지원 동작은 G3 에서 확인 |
 | `style-src` | `'self'` (+ 필요 시 `'nonce-<요청별>'`) | Tailwind 는 정적 CSS. 인라인 스타일이 필요해지면 nonce 로 해결하고 `'unsafe-inline'` 은 쓰지 않는다. Next 가 요구하는지 **미확인(G3)** |
-| `img-src` | `'self' data:` | 외부 이미지 없음 (표시 이름만, 아바타 미사용) |
+| `img-src` | `'self' data:` + **CI 배지 호스트 1개** | 외부 이미지는 CI 상태 배지(FR-003)뿐이다. 호스트는 `site.ciBadgeUrl`([12](12-content.md) §1.1)에서 빌드 시 뽑아 넣고, 변수가 `null` 이면 이 값을 넣지 않는다. 배지의 실제 호스트·리다이렉트(예: GitHub Actions 배지가 다른 호스트로 넘기는지)는 **미확인** — 구현 시 브라우저 콘솔 위반 보고로 확정. 아바타는 쓰지 않는다 |
 | `font-src` | `'self'` | 폰트는 자체 호스팅 |
 | `connect-src` | `'self' wss://<PUBLIC_HOST>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
-| `frame-src` | Grafana 공개 대시보드 출처 1개 | G6 로 확정. 임베드가 안 되면 링크로 대체해 이 값을 제거 |
+| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1) | G6 로 확정. 임베드가 안 되면 링크로 대체해 이 값을 제거 |
 | `frame-ancestors` | `'none'` | 클릭재킹 방지 |
 | `base-uri` | `'self'` | |
 | `form-action` | `'self'` | |

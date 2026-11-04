@@ -38,7 +38,7 @@
 | `max_attempts` | 8 → 초과 시 `dead` |
 | 배치 크기 | 50 (`SKIP LOCKED`) |
 
-재시도 시각은 `available_at` 컬럼으로 표현한다(스키마 반영 필요).
+재시도 시각은 `next_attempt_at` 컬럼으로 표현한다(database-schema 반영됨).
 
 ### 2. 길이 상한 (가정 A-011 확정)
 | 대상 | 상한 | 비고 |

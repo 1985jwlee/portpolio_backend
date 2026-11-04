@@ -259,7 +259,7 @@ flowchart TD
 |---|---|
 | 클러스터 | `kubectl get nodes` 정상, 호스트 `8081` 이 클러스터로 닿음 |
 | Gateway | `GatewayClass`·`Gateway` 가 Accepted/Programmed |
-| 라우팅 | `/api/healthz`·`/`·`wss:///ws/public` 모두 응답 (HTTPRoute 로 WebSocket 동작은 **실측**) |
+| 라우팅 | `GET /api/me`(업무 경로)·`/`·`wss:///ws/public` 모두 응답 (HTTPRoute 로 WebSocket 동작은 **실측**). 운영 경로 `/healthz`·`/readyz` 는 앱 루트에 있고 프록시가 외부에 전달하지 않으므로 라우팅 확인에 쓰지 않는다(probe 는 클러스터 내부에서) |
 | 롤링 | `ws-gateway` 롤링 중 클라이언트가 재접속·복구(ADR-014), 유실·중복 없음 |
 | 정리 | `bun run k3d:down` 으로 완전 삭제, 재생성이 재현됨 |
 

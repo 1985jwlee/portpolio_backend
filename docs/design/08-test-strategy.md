@@ -216,7 +216,7 @@ sequenceDiagram
 | 2 | `FakeClock.advance(lease+1s)` 후 reaper 실행 → `received` 로 회수 |
 | 3 | 워커 B 가 선점(토큰 b)하고 처리·`processed` |
 | 4 | A 의 게이트를 `release()` → A 가 완료 시도 |
-| 기대 | A 의 완료는 **0행 갱신으로 거절**(`LeaseLostError`), A 트랜잭션 롤백, 효과 1회, 최종 토큰 b |
+| 기대 | A 의 완료 UPDATE 는 **0행 갱신으로 거절**(`LeaseLostError`)되고 A 의 트랜잭션은 롤백된다. 완료 UPDATE 를 핸들러 효과보다 먼저 실행하는 설계(F13 T5)이므로 **늦은 러너는 핸들러를 호출하지 않는다** → 검증 항목: ① 읽기 모델·`last_seq` 에 A 의 효과가 **반영되지 않음**(행 수·값 불변) ② 핸들러 호출 횟수 0(스파이) ③ 최종 토큰 b, 효과 1회. `inbox.beforeComplete` 훅은 완료 UPDATE 직전 지점이라 이 시나리오에 여전히 유효하다 |
 
 ```mermaid
 sequenceDiagram

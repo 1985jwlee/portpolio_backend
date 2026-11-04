@@ -20,10 +20,10 @@
 | 쿠키 이름 | 운영 `__Host-sid`, 개발 `sid` (`SESSION_COOKIE_NAME`; `__Host-` 는 `Secure`·`Path=/`·`Domain` 없음을 요구하므로 http 로컬에서는 쓰지 않는다) |
 | 쿠키 속성 | `HttpOnly`, `Secure`(운영), `SameSite=Lax`, `Path=/`, `Max-Age=7일` |
 | 토큰 | 32바이트 난수(CSPRNG), base64url. DB 에는 `token_hash`(SHA-256) 유일 |
-| 수명 | 만료 = `last_seen_at + 7일`. `last_seen_at` 은 **1시간에 한 번만** 갱신(쓰기 폭주 방지). 만료 후 삭제(보관 정책 7일) |
+| 수명 | 만료 = `last_seen_at + 7일`. `last_seen_at` 은 **1시간에 한 번만** 갱신(쓰기 폭주 방지). 만료 후 정리 잡(ID-10)이 익명화·삭제(보관 정책 7일) |
 | 종류 | 익명(`user_id` NULL) / 로그인(`user_id` 있음) — 같은 표 |
-| 회전 | 로그인 시 **새 세션을 발급**하고 이전 익명 세션은 폐기(세션 고정 방지). 이전 익명 글의 귀속은 하지 않는다(ADR-008 기본값) |
-| 폐기 | 로그아웃 = 해당 세션 행 삭제 + 쿠키 만료. 관리자 즉시 폐기는 행 삭제 |
+| 회전 | 로그인 시 **새 세션을 발급**하고 이전 익명 세션은 **즉시 만료 처리**(`expires_at = now`, 세션 고정 방지). 이전 익명 글의 귀속은 하지 않는다(ADR-008 기본값) |
+| 폐기 | 로그아웃·회전·관리자 즉시 폐기 = 행을 **지우지 않고 `expires_at = now` 로 즉시 만료 처리** + 쿠키 만료. 실제 삭제와 익명화(`entry.author_session_id` NULL, `reaction.actor_key` 교체, `my_reaction` 삭제)는 정리 잡 ID-10 한 경로만 지난다 |
 | 개수 | 행위자당 활성 세션 수 제한은 두지 않는다(익명은 쿠키 단위) |
 
 익명 세션 발급은 `GET /api/me` 가 쿠키 없이 호출될 때 일어난다(첫 화면 진입). 남용은 nginx `limit_req` 로 막는다(ADR-008).
@@ -35,7 +35,7 @@
 | 익명 | `session:<sessionId>` |
 | 로그인 | `user:<userId>` |
 
-반응의 유일 키·멱등 키 범위가 이 값을 쓴다. 세션이 삭제되면 `reaction.actor_key` 는 무작위 값으로 교체되어 집계만 남는다(database-schema §11).
+반응의 유일 키·멱등 키 범위가 이 값을 쓴다. **이벤트 봉투의 `ownerKey` 도 이 값 그대로**(`session:<id>`/`user:<id>`)이며, 별도 해시·HMAC 변환을 하지 않는다. 공개 채널 변환에서는 항상 제거된다([05 §1](05-event-catalog.md)). 세션이 삭제되면 `reaction.actor_key` 는 무작위 값으로 교체되어 집계만 남는다(database-schema §11).
 
 ## 3. GitHub 로그인 (인가 코드 + PKCE)
 
@@ -60,7 +60,7 @@ sequenceDiagram
     A->>GH: GET /user (Bearer)
     GH-->>A: id, login, avatar_url
     A->>A: access_token 폐기 (저장 안 함)
-    A->>A: user_account upsert(github_id) · 새 세션 발급 · 이전 익명 세션 폐기
+    A->>A: user_account upsert(github_id) · 새 세션 발급 · 이전 익명 세션 즉시 만료
     A-->>B: 302 → returnTo, Set-Cookie 세션, oauth 쿠키 삭제
 ```
 
@@ -234,12 +234,12 @@ classDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> anonymous : GET /api/me (쿠키 없음)
-    anonymous --> authenticated : 로그인 (새 세션 발급, 익명은 폐기)
+    anonymous --> authenticated : 로그인 (새 세션 발급, 익명은 즉시 만료)
     anonymous --> expired : 7일 무활동
     authenticated --> expired : 7일 무활동
     authenticated --> revoked : 로그아웃
-    expired --> deleted : 정리 작업
-    revoked --> deleted : 행 삭제
+    expired --> deleted : 정리 잡(ID-10)이 익명화 후 삭제
+    revoked --> deleted : 정리 잡(ID-10)이 익명화 후 삭제
     deleted --> [*]
 ```
 

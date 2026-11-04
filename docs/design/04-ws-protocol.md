@@ -45,7 +45,8 @@
 | `v` | int | 프로토콜 버전(현재 1). 모르는 높은 버전은 `4400` |
 | `t` | string | 메시지 종류 (§3) |
 | `ch` | `public` \| `private` \| `sys` | 채널. 연결마다 정해져 있다(`/ws/public` 은 `public`+`sys`, `/ws/private` 은 `private`+`sys`). `sys` 는 연결 관리 메시지 |
-| `seq` | int64? | **채널 순번**. `public` 채널의 변경 메시지에만 있다(§5) |
+| `seq` | int64? | **채널 순번**. `public` 채널의 변경 메시지(`SequencedMessage`)에만 있다(§5). `presence`·`flow.summary`·`snapshot` 같은 순번 없는 메시지에는 없다 |
+| `sk` | int64[]? | **건너뛴 순번 목록**(선택). 서버가 큐에서 `reaction.updated` 를 합치느라(§6) 보내지 않은 `seq` 들. 있으면 클라이언트가 gap 으로 오인하지 않는다(§5) |
 | `ts` | ISO 8601 | 서버 송신 시각 |
 | `d` | object | 본문 |
 
@@ -70,11 +71,12 @@
 | `snapshot` | public | `{ entries: PublicEntryView[], flow: FlowBuckets, head: seq }` | 재개 불가일 때 전체 상태. 이후 `head+1` 부터 이어진다 |
 | `replay.end` | sys | `{ count }` | `mode: 'replay'` 일 때 놓친 변경 재생이 끝남 |
 | `entry.created` | public | `{ entry: PublicEntryView }` | 새 글 |
-| `entry.updated` | public | `{ entry: PublicEntryView }` | 본문 수정 |
-| `entry.removed` | public | `{ entryId, reason: 'deleted'\|'hidden' }` | 삭제·숨김(`hidden` 해제는 `entry.created` 로 재등장) |
+| `entry.updated` | public | `{ entryId, body, updatedAt, version }` | 본문 **부분 갱신**(전체 뷰가 아니다). 클라이언트는 같은 `entryId` 의 캐시에 덮어쓴다 |
+| `entry.removed` | public | `{ entryId, reason: 'deleted'\|'hidden' }` | 삭제·숨김. 목록에서 제거 |
+| `entry.restored` | public | `{ entryId }` | **숨김 해제**. 변환기가 DB 를 읽지 않아 본문을 만들 수 없으므로 id 만 보내고, 클라이언트가 `GET /api/entries` 로 해당 글을 다시 가져오거나 다음 스냅샷으로 복원한다 |
 | `reaction.updated` | public | `{ entryId, emoji, count }` | **총개수로 덮어쓴다**(05의 `count` 와 동일) |
-| `flow.summary` | public | `{ buckets: FlowBucket[] }` | **익명 요약**. 개수만 |
-| `presence` | public | `{ count }` | 접속자 수(근사) |
+| `flow.summary` | public | `{ window: '5m', buckets: FlowBucket[] }` | **익명 요약**. 개수만. **순번 없음(휘발성)**. 푸시는 `window` 고정(5분), 1시간 등은 REST(`GET /api/flow/summary`) |
+| `presence` | public | `{ count }` | 접속자 수(근사). **순번 없음(휘발성)** |
 | `flow.step` | private | `{ traceId, step, at, detail? }` | **내 흐름 상세**(단계 값은 05 §2.2) |
 | `hb` | sys | public: `{ head: seq }` / private: `{}` | 하트비트 + (public 만) 채널 머리 번호(누락 감지) |
 | `pong` | sys | `{ n }` | `ping` 응답 |
@@ -107,8 +109,10 @@ type FlowBucket = { at: string; step: Step; count: number };                    
 | 항목 | 규칙 |
 |---|---|
 | 범위 | **`public` 채널 단일 순번**. `realtime_read.change_log (channel, seq)` 가 정본 |
-| 연속성 | 클라이언트는 `seq` 가 직전+1 인지 검사한다. 건너뛰면 **누락** → `resume` 로 재연결 |
+| 연속성 | 클라이언트는 `seq` 가 직전+1 인지 검사한다(서버가 합쳐서 건너뛴 번호는 `sk` 로 알려 준다). 그 외에 건너뛰면 **누락** → `resume` 로 재연결 |
 | `private` 연결 | 순번이 없다(best-effort). 놓친 흐름은 REST `GET /api/flow/trace/{traceId}` 로 보충한다(클라이언트가 진행 중인 `traceId` 를 안다) |
+| 건너뛴 순번(`sk`) | 서버는 큐에서 합친 `reaction.updated` 의 순번을 다음 메시지의 `sk` 에 담는다. 클라이언트 `SeqTracker` 는 `seq` 가 `last + 1` 이 아니어도 **`last+1 … seq-1` 이 전부 `sk` 에 있으면 gap 이 아니다**(`last = seq`). 하나라도 빠졌으면 gap → 재연결(`resume`) |
+| 휘발성 메시지 | `presence`·`flow.summary` 는 순번이 없고 `change_log` 에도 없다. 재개(replay) 중에는 보내지 않고, `live` 전환 뒤 최신값 하나만 보낸다 |
 | 중복 제거 | 클라이언트는 `entry.created` 를 `entry.id` 로, `reaction.updated` 는 덮어쓰기라 중복에 안전 |
 | 내 쓰기 | REST 응답으로 받은 뷰를 먼저 표시하고, 같은 `id` 의 `entry.created` 가 오면 **병합**(교체)한다(ADR-018) |
 | 재개 가능 조건 | `resume` ≥ `change_log` 최소 seq − 1 (보관은 1시간·채널당 1만 행, ADR-023) |
@@ -121,7 +125,7 @@ type FlowBucket = { at: string; step: Step; count: number };                    
 | 연결별 송신 큐 | 메시지 **64건** 또는 **256KB** 중 먼저 닿는 쪽이 상한 |
 | 초과 시 | `4408` 종료. 그 연결만 영향받고 다른 연결은 막히지 않는다 |
 | 구현 | **Elysia 기본 `backpressureLimit` 에 기대지 않는다**(ADR-022 측정: 라우트 옵션 무시, 최상위 옵션은 지연 악화). 앱 코드에서 큐 길이를 직접 관리하고 `ws.send` 의 반환값(`-1` 버퍼링/`0` 드롭)을 확인한다. **관문 G2에서 이 동작을 시험** |
-| 합치기 | 같은 `entryId` 의 `reaction.updated` 가 큐에 쌓이면 **최신 것만 남긴다**(덮어쓰기 의미라 안전) |
+| 합치기 | 같은 `entryId`+`emoji` 의 `reaction.updated` 가 큐에 쌓이면 **최신 것만 남긴다**(덮어쓰기 의미라 안전). 버린 메시지의 `seq` 는 다음에 나가는 메시지의 `sk` 에 실어 gap 으로 오인되지 않게 한다(§5) |
 
 ## 7. 시퀀스
 
@@ -378,10 +382,14 @@ classDiagram
         <<abstract>>
         +seq int64
     }
+    class VolatileMessage {
+        <<abstract>>
+    }
     class Snapshot
     class EntryCreated
     class EntryUpdated
     class EntryRemoved
+    class EntryRestored
     class ReactionUpdated
     class FlowSummary
     class Presence
@@ -401,18 +409,20 @@ classDiagram
     SysMessage <|-- ErrorMsg
     SysMessage <|-- ReplayEnd
     ServerMessage <|-- SequencedMessage
-    SequencedMessage <|-- Snapshot
+    ServerMessage <|-- Snapshot
     SequencedMessage <|-- EntryCreated
     SequencedMessage <|-- EntryUpdated
     SequencedMessage <|-- EntryRemoved
+    SequencedMessage <|-- EntryRestored
     SequencedMessage <|-- ReactionUpdated
-    SequencedMessage <|-- FlowSummary
-    SequencedMessage <|-- Presence
+    ServerMessage <|-- VolatileMessage
+    VolatileMessage <|-- FlowSummary
+    VolatileMessage <|-- Presence
     ServerMessage <|-- PrivateMessage
     PrivateMessage <|-- FlowStep
 ```
 
-- `SequencedMessage`(public 변경)만 `seq` 를 갖고 `change_log` 에 남는다. `Presence`·`FlowSummary` 처럼 **휘발성이 맞는 것**은 `change_log` 에 쓰지 않고 재개 시 최신값만 보낸다(구현 시 확정, §11).
+- `SequencedMessage`(public 변경)만 `seq` 를 갖고 `change_log` 에 남는다. `VolatileMessage`(`Presence`·`FlowSummary`)는 순번이 없고 `change_log` 에 쓰지 않으며, 재개 시 최신값 하나만 보낸다. `Snapshot` 은 순번을 갖지 않고 `head` 만 싣는다.
 
 ### 9.3 클라이언트 구성
 
@@ -444,6 +454,7 @@ classDiagram
     class SeqTracker {
         +last int64
         +accept(msg) ok | gap
+        +skip(sk) void
     }
     class MessageRouter {
         +on(type, handler)
@@ -481,7 +492,6 @@ classDiagram
 
 | 항목 | 결정 시점 |
 |---|---|
-| `presence`·`flow.summary` 를 `change_log` 에 쓸지(휘발) | 프로젝터/브로드캐스터 구현 시 |
 | 숨김 탭에서 연결을 닫는 시간 | 프론트 구현 시 |
 | `hb` 주기·유휴 시간 조정, 큐 상한 조정 | G2 소크 시험 후 |
 | 세션 검증 캐시 30초와 로그아웃/회전 반영 지연 | [06](06-auth.md) 구현 시 |

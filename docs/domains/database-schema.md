@@ -9,7 +9,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | 원칙 | 내용 |
 |---|---|
 | 스키마가 모듈 경계 | 모듈은 **쓰기 스키마 `<m>` 과 읽기 스키마 `<m>_read`** 를 단독 소유한다. 남의 테이블을 읽지 않는다 |
-| 쓰기/읽기 분리 (CQRS) | 명령은 `<m>` 만, 조회는 `<m>_read` 만 다룬다. **읽기 모델은 명령이 직접 쓰지 않는다** — 이벤트(inbox 경유)나 집계 작업만 갱신 |
+| 쓰기/읽기 분리 (CQRS) | 명령은 `<m>` 만, 조회는 `<m>_read` 만 다룬다. **읽기 모델은 명령이 직접 쓰지 않는다** — 이벤트(inbox 경유)나 집계 작업만 갱신. **예외는 셋뿐**이고 §9·§10 에 명시한다: ① 보관 정리가 이벤트 없이 읽기 모델 일부를 직접 쓴다(익명화) ② 재구성 잡이 그림자 테이블을 채운다 ③ 충돌 응답용 `LoadEntryForConflict` 가 쓰기 스키마를 **읽는다**(명령 쪽 보조 조회) |
 | outbox + inbox | 보내는 쪽은 쓰기와 같은 트랜잭션에 outbox 기록, 받는 쪽은 inbox 에 저장 후 선점해 처리 |
 | 선점 후 처리 | "한 번만" 필요한 항목은 조건부 UPDATE 로 `processing` 선점, 임대·토큰으로 보호 |
 | 스키마 간 FK 없음 | 다른 모듈의 행은 **id 값으로만 참조** |
@@ -25,7 +25,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | 시각 | 전부 `timestamptz`, UTC |
 | 열거형 | `enum` 타입 대신 `text` + `CHECK` |
 | 금액·수량 | 정수 최소 단위, 환율만 `numeric` |
-| 삭제 | 사용자 콘텐츠는 상태 변경(`hidden`), 물리 삭제는 보관 정책 작업만 |
+| 삭제 | 사용자 콘텐츠는 상태 변경(`hidden`, `deleted` 묘비), 물리 삭제는 보관 정책 작업만 |
 | 감사 | 관리자 행위·원장·감사 로그는 추가 전용 |
 | 마이그레이션 | 앞으로만(forward-only). **Drizzle(`drizzle-kit`) 0.45.x**, 표현 불가 기능은 `generate --custom` raw SQL(관문 G10) |
 | 격리 수준 | READ COMMITTED 기본. 정합성은 선점·버전·유일 제약으로 확보(ADR-021) |
@@ -90,10 +90,10 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `author_session_id` | uuid | NULL 가능, FK 없음(타 스키마). 세션 만료 시 익명화로 NULL |
 | `author_user_id` | uuid | NULL = 익명 글. FK 없음 |
 | `display_name` | text | NOT NULL. 작성 시점 스냅샷 |
-| `body` | text | NOT NULL, 길이 `CHECK`(상한은 설정값, 가정 A-011) |
-| `status` | text | `visible` / `hidden` |
+| `body` | text | NOT NULL. 길이 `CHECK (status = 'deleted' OR char_length(body) BETWEEN 1 AND 1000)` — 앱 상한 500자의 2배(ADR-023). 삭제된 글은 본문을 비울 수 있다 |
+| `status` | text | `visible` / `hidden` / `deleted`(soft delete, 묘비) |
 | **`version`** | int | NOT NULL, 기본 1. 수정·숨김마다 +1. **낙관적 버전**(ADR-021) |
-| `created_at`, `updated_at`, `hidden_at` | timestamptz | |
+| `created_at`, `updated_at`, `hidden_at`, `deleted_at` | timestamptz | |
 
 **`reaction`** — 이모지 반응(정본)
 
@@ -103,15 +103,18 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `actor_key` | `user:<uuid>` 또는 `session:<uuid>` |
 | `emoji` | 허용 목록은 앱의 고정 값, DB 는 길이 `CHECK` |
 | `created_at` | |
-| 키 | **PK (`entry_id`, `actor_key`, `emoji`)** — 동시 중복 추가는 한 건만 성공, 나머지 409 |
+| 키 | **PK (`entry_id`, `actor_key`, `emoji`)** — 동시 중복 추가는 한 건만 성공, 나머지는 `ON CONFLICT DO NOTHING` 으로 **200 멱등**(03 계약, 409 아님) |
 
 **`report`** — 신고
 
 | 컬럼 | 설명 |
 |---|---|
 | `id` PK, `entry_id` FK, `reporter_key` | UNIQUE (`entry_id`, `reporter_key`) |
-| `reason` | 길이 제한 |
+| `reason_code` | `ReasonCode` 열거(앱 고정 값, DB 는 길이 `CHECK`) |
+| `note` | 신고자 메모, 길이 ≤ 200. **이벤트에 싣지 않는다**(05) |
 | `status` | `open` / `resolved`. `open → resolved` 는 **조건부 UPDATE**(동시 처리 시 한 명만 성공) |
+| `resolution` | `dismissed` / `entry_hidden` (`resolved` 일 때) |
+| `resolved_by` | uuid, 관리자 `user_id`, FK 없음 |
 | `created_at`, `resolved_at` | |
 
 **`moderation_action`** — 관리자 조치 이력(추가 전용)
@@ -125,6 +128,19 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 
 숨김은 `entry` 의 `version` 조건 갱신 + `moderation_action` 추가 + **outbox 기록**이 **한 트랜잭션**이다.
 
+**`write_lock`** — 관리자 쓰기 잠금 스위치(단일 행, ADR-008·023, GB-10/11)
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `id` | smallint | PK, `CHECK (id = 1)` — 항상 한 행(마이그레이션이 `locked=false` 로 삽입) |
+| `locked` | boolean | NOT NULL, 기본 false |
+| `reason` | text | 길이 ≤ 200, 표시용 |
+| `changed_by` | uuid | 관리자 `user_id`, FK 없음 |
+| `changed_at` | timestamptz | |
+| `version` | int | NOT NULL, 기본 1. 낙관적 버전 |
+
+이벤트를 발행하지 않는다. 변경 이력은 감사 로그로 남기며 이력 테이블은 두지 않는다.
+
 **`inbox_message`** — 이 모듈이 받는 메시지(§4-5 공통 형태). 소비자: `guestbook-projector`.
 
 **`request_key`** — 멱등 키 저장(`guestbook`·`identity` 각각, [design/03](../design/03-api-contract.md) §3)
@@ -133,7 +149,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 |---|---|
 | `actor_key`, `key` | PK. 행위자와 클라이언트 `Idempotency-Key` |
 | `request_hash` | 요청 본문 해시(같은 키·다른 요청 감지) |
-| `status` | `in_progress` / `done` |
+| `status` | `in_progress` / `done`. **영속되는 값은 `done` 뿐이다** — 선점·기록은 명령과 같은 트랜잭션이라 `in_progress` 행은 커밋 시점에 존재하지 않는다(동시 요청은 행 잠금 대기/`lock_timeout` 으로 `request_in_progress` 409). `in_progress` 는 후속 비동기 명령용으로 남겨 둔 값 |
 | `response_status`, `response_body` | 재생용 원 응답(작은 jsonb) |
 | `created_at` | 24시간 후 삭제 |
 
@@ -148,23 +164,24 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `seq` | bigint 단조 증가(전역) |
 | `aggregate_type`, `aggregate_id` | 대상 |
 | `type`, `payload` | 이벤트 종류, jsonb(스키마 정본은 `packages/protocol`) |
-| `trace_id`, `owner_key` | 흐름 추적, 상세 열람 권한 |
+| `trace_id`, `owner_key` | 흐름 추적, 상세 열람 권한(`owner_key` = 행위자 키 `session:<id>` / `user:<id>`) |
 | `status` | `new` / `processing` / `published` / `dead` |
-| `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at` | 선점·재시도(§2-1) |
+| `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at` | 선점·재시도(§2-1). `next_attempt_at` 기본값 `now()`(생성 즉시 선점 가능) |
 | `last_error` | 길이 제한 |
 | `created_at`, `published_at` | |
 
-**순서 보장**: 디스패처는 **동시에 하나만 활성**(어드바이저리 락). `seq` 순서로 전달하면 대상별 순서가 지켜진다.
+**순서 보장**: 디스패처는 **동시에 하나만 활성**(어드바이저리 락). `seq` 순서로 전달하면 대상별 순서가 지켜진다. 같은 집합체의 이벤트는 쓰는 쪽이 **집합체 행 잠금을 잡은 뒤** append 하므로 `seq` 순서 = 커밋 순서다(예: 반응 명령이 대상 `entry` 행에 `FOR NO KEY UPDATE`). `seq` 는 구멍이 있을 수 있는 비교용 값이다.
 
 **`trace_step`** — 흐름 단계 기록(**추가 전용**, 시각화 입력)
 
 | 컬럼 | 설명 |
 |---|---|
-| `trace_id` | uuid |
+| `id` | bigint identity PK. 같은 `at` 안의 단계 순서를 안정화하고 gateway 의 증분 읽기 커서로 쓴다 |
+| `trace_id` | uuid (`(trace_id, id)` 인덱스) |
 | `step` | `written` / `outboxed` / `dispatched` / `received` / `processed` / `retried` / `failed` / `dead` |
 | `at` | timestamptz |
 | `detail` | 짧은 jsonb. **글 본문을 넣지 않는다** |
-| `owner_key` | 상세를 볼 수 있는 행위자 |
+| `owner_key` | 상세를 볼 수 있는 행위자 = 내부 행위자 키 그대로(`session:<id>` / `user:<id>`, 05) |
 
 ### 4-4. `realtime` (쓰기)
 **`inbox_message`** — 소비자 `realtime-broadcaster` (§4-5 공통 형태). 이 모듈은 쓰기 모델이 inbox 뿐이다.
@@ -177,9 +194,10 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `message_id` | uuid. outbox 이벤트 id. **PK (`consumer`, `message_id`)** |
 | `source`, `type` | 발신 모듈/외부, 종류 |
 | `seq` | 발신 쪽 순번(읽기 모델 순서 검사) |
+| `aggregate_id` | uuid. 집합체별 선두 규칙(재시도 중인 앞 이벤트가 같은 집합체의 뒤 이벤트를 막음)에 쓰며 `(consumer, aggregate_id, seq)` 부분 인덱스(`status IN ('received','processing')`)를 둔다 |
 | `payload` | jsonb |
 | `status` | `received` / `processing` / `processed` / `dead` |
-| `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at` | 선점·재시도(§2-1) |
+| `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at` | 선점·재시도(§2-1). `next_attempt_at` 기본값 `now()` |
 | `last_error` | |
 | `received_at`, `processed_at` | |
 
@@ -187,7 +205,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 
 ## 5. M1 읽기 모델 (프로젝션)
 
-읽기 모델은 **조회에 맞춘 모양**이고 이벤트로만 갱신된다. 행마다 `last_seq` 를 가져 **더 오래된 이벤트는 무시**한다(재전달·역전 안전).
+읽기 모델은 **조회에 맞춘 모양**이고 이벤트로만 갱신된다(예외 §1). 행마다 **순번 컬럼**을 가져 **더 오래된 이벤트는 무시**한다(재전달·역전 안전). `entry_view` 처럼 필드마다 다른 이벤트가 갱신하는 행은 **필드 묶음별 순번**을 둔다 — 단일 `last_seq` 면 병렬 워커에서 `hidden`(seq 11)이 먼저 반영될 때 `edited`(seq 10)가 영영 버려진다.
 
 ### 5-1. `guestbook_read`
 **`entry_view`** — 목록 조회용 글 + 반응 집계
@@ -195,12 +213,19 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | 컬럼 | 설명 |
 |---|---|
 | `entry_id` | uuid PK |
-| `display_name`, `body` | 표시용 |
-| `status` | `visible` / `hidden` |
-| `author_user_id` | uuid, NULL 가능. `isMine`·`canEdit` 계산용, **응답에 노출하지 않음** |
+| `display_name`, `body` | 표시용 (`deleted` 행은 본문을 비움) |
+| `status` | `visible` / `hidden` / `deleted` (목록은 `visible` 만) |
+| `version` | int. 명령 쪽 `entry.version` 의 반영값(03 의 `version`) |
+| `author_kind` | `anonymous` / `user` |
+| `author_actor_key` | text, NULL 가능. 행위자 키(`session:<id>` / `user:<id>`). `isMine`(익명 포함)·`canEdit` 계산용, **응답에 노출하지 않음**. 세션 정리가 익명 행을 NULL 로 만든다(§9) |
 | `reactions` | jsonb. 이모지별 개수 (예: `{"👍": 3}`) |
 | `created_at`, `updated_at` | |
-| `last_seq` | 반영한 마지막 이벤트 순번 |
+| `content_seq` | `entry.posted`·`entry.edited` 반영 순번(본문·이름·`version`) |
+| `status_seq` | `entry.hidden`·`unhidden`·`deleted` 반영 순번(`status`) |
+| `reaction_seq` | jsonb. **이모지별** 마지막 `reaction.changed` 순번 (예: `{"👍": 41}`) |
+| `last_seq` | 진단용(위 셋의 최댓값) |
+
+각 이벤트는 자기 순번 컬럼만 비교한다(`WHERE content_seq < $seq` 등). 상세는 [F12](../design/features/12-guestbook-read.md).
 
 이전 설계의 `reaction_summary` 는 `entry_view.reactions` 로 흡수했다. 목록은 JOIN 없이 한 테이블에서 읽는다.
 
@@ -210,17 +235,30 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 |---|---|
 | `report_id` PK, `entry_id` | |
 | `entry_excerpt` | 본문 앞부분(길이 제한) |
-| `reason`, `status`, `created_at` | |
+| `reason_code`, `status`, `created_at` | `note` 는 두지 않는다(이벤트에 없음). 관리자는 필요 시 쓰기 모델 조회 |
 | `last_seq` | |
 
 **`my_reaction`** — 행위자별 눌림 표시(`myReactions`)
 
 | 컬럼 | 설명 |
 |---|---|
-| `entry_id`, `actor_key`, `emoji` | PK. `reaction.changed`(행위자는 봉투 `ownerKey`)로 갱신 |
-| `last_seq` | 반영한 마지막 이벤트 순번 |
+| `entry_id`, `actor_key`, `emoji` | PK. `reaction.changed`(행위자는 봉투 `ownerKey` = 행위자 키)로 갱신 |
+| `present` | boolean. 눌림 여부. **삭제하지 않고 묘비로 남긴다** — 늦게 온 `added` 가 먼저 반영된 `removed` 를 되돌리지 못하게 |
+| `last_seq` | 반영한 마지막 이벤트 순번 (`last_seq < $seq` 일 때만 갱신) |
 
-세션 삭제 시 `actor_key` 의 `session:` 값은 정리 작업이 삭제한다(§9).
+세션 삭제 시 `actor_key` 의 `session:` 값은 정리 작업이 **이벤트 없이 직접 삭제**한다(§9 예외).
+
+**`projection_state`** — 프로젝션 상태(재구성 조정, ADR-023 §6, GB-26)
+
+| 컬럼 | 설명 |
+|---|---|
+| `name` | PK. 프로젝션 이름(예: `entry_view`) |
+| `status` | `live` / `rebuilding` / `catching_up` / `swapping` |
+| `fence_seq` | 재구성 기준 순번(이후 이벤트를 따라잡음) |
+| `snapshot_loaded` | boolean. 스냅샷 적재 전/후 이중 적용 판단 |
+| `updated_at` | |
+
+**`entry_view_next`** — 재구성 중에만 존재하는 임시 그림자 테이블. `entry_view` 와 같은 모양이며 교체 후 보관 시간(제안 1시간)을 두고 삭제한다.
 
 ### 5-2. `events_read`
 **`flow_counter`** — 전체 방문자 익명 요약(FR-041). `trace_step` 을 **주기 집계**해서 채운다(이벤트 구동이 아닌 **배치 프로젝션**).
@@ -242,8 +280,16 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `channel` | `public` 등 |
 | `seq` | 채널별 단조 증가 순번 |
 | `type`, `payload` | 클라이언트에 보낸 변경과 같은 내용 |
+| `event_id` | uuid. 원 이벤트 id, **유일**(재전달 시 같은 이벤트가 두 행이 되지 않게) |
 | `created_at` | |
-| 키 | PK (`channel`, `seq`) |
+| 키 | PK (`channel`, `seq`), UNIQUE (`event_id`) |
+
+**`channel_seq`** — 채널별 순번 카운터(채널당 1행, 마이그레이션이 `public` 삽입)
+
+| 컬럼 | 설명 |
+|---|---|
+| `channel` | PK |
+| `last_seq` | bigint. `UPDATE … SET last_seq = last_seq + 1 … RETURNING` 으로 부여 — 행 잠금이 커밋까지 유지돼 seq 순서 = 커밋 순서, 롤백하면 함께 원복돼 구멍이 없다 |
 
 재접속한 클라이언트가 마지막 수신 `seq` 를 보내면 그 이후를 돌려준다. 이력이 오래돼 없으면 **전체 스냅샷**(`entry_view` 에서 만든다). 보관은 짧게(값은 측정 후).
 
@@ -257,6 +303,10 @@ erDiagram
     ENTRY ||--o{ REACTION : "반응 정본"
     ENTRY ||--o{ REPORT : "신고"
     ENTRY ||--o{ MODERATION_ACTION : "조치 이력"
+    WRITE_LOCK {
+        smallint id
+        boolean locked
+    }
 ```
 
 쓰기 모델 → 읽기 모델의 흐름은 관계가 아니라 **이벤트**다:
@@ -279,6 +329,7 @@ flowchart LR
 | `events.outbox_event.aggregate_id` | 각 모듈의 행 | 명령 usecase(같은 트랜잭션에서 기록) |
 | `<m>.inbox_message.message_id` | `events.outbox_event.id` | 전달 계층이 같은 id 로 전달 |
 | `guestbook_read.*.entry_id` | `guestbook.entry.id` | 프로젝터. 재구성으로 복구 가능 |
+| `guestbook_read.entry_view.author_actor_key`, `my_reaction.actor_key` | `identity.session.id` / `user_account.id` (`session:` / `user:` 접두) | 프로젝터. 세션 삭제 시 정리 작업이 NULL/삭제 |
 
 ## 8. 인덱스 (질의에서 출발)
 
@@ -291,6 +342,9 @@ flowchart LR
 | 디스패처가 읽을 이벤트 | `events.outbox_event (seq) WHERE status = 'new'` 부분 인덱스(`next_attempt_at` 조건 포함 여부는 구현 시) |
 | 임대 만료 회수 | `outbox_event (lease_until) WHERE status = 'processing'`, `inbox_message` 도 동일 |
 | inbox 처리 대상 | `inbox_message (next_attempt_at) WHERE status = 'received'` |
+| 집합체별 선두 규칙 | `inbox_message (consumer, aggregate_id, seq) WHERE status IN ('received','processing')`, `outbox_event (aggregate_id, seq)` |
+| 흐름 상세·증분 읽기 | `trace_step (trace_id, id)`, PK `id` |
+| 재구성 상태 | `projection_state` PK `name` |
 | 정리 작업 | `outbox_event (created_at)`, `inbox_message (received_at)`, `trace_step (at)`, `flow_counter (bucket)` |
 | 재접속 복구 | `change_log` 기본키가 곧 인덱스 |
 
@@ -304,14 +358,18 @@ flowchart LR
 | `guestbook_read.*` | 정본을 따름 | 재구성 가능 |
 | `session` | 만료(7일) 후 삭제 | 정리 작업 |
 | `entry.author_session_id` | 세션 삭제 시 NULL | 같은 작업이 익명화 |
+| `entry_view.author_actor_key` (`session:`) | 세션 삭제 시 NULL | **읽기 모델 직접 쓰기 예외 ①** — 이벤트 없이 정리 작업이 `AnonymizeSessionData` 로 쓴다(재구성해도 `entry.author_session_id` 가 NULL 이라 같은 결과) |
+| `entry` (`deleted`) | 보관(묘비). 물리 삭제 기준은 EV-10 에서 정함 | 미결 |
 | `reaction.actor_key` (`session:`) | 세션 삭제 시 행마다 무작위 값으로 교체 | 집계는 유지, 행위자 식별은 불가 |
 | `outbox_event`(`published`), `inbox_message`(`processed`), `trace_step`, `flow_counter` | 7일 | 정리 작업 |
 | `request_key` | 24시간 | 정리 작업 |
-| `my_reaction` (`session:` 행위자) | 세션 삭제 시 함께 | 정리 작업 |
+| `my_reaction` (`session:` 행위자) | 세션 삭제 시 함께 | **읽기 모델 직접 쓰기 예외 ①** — 정리 작업이 이벤트 없이 삭제 |
 | `outbox_event`·`inbox_message` (`dead`) | 30일, 테이블당 1만 건 상한 | ADR-023 |
 | `realtime_read.change_log` | 1시간 또는 채널당 1만 행 중 먼저 닿는 쪽 | 정리 작업(ADR-023) |
 
 정리 작업은 **한 번에 큰 삭제를 하지 않는다**(배치 크기 제한).
+
+**읽기 모델·쓰기 모델 경계의 예외(모두 명시)**: ① 위 익명화 두 건(`entry_view.author_actor_key`, `my_reaction`)은 이벤트 없이 직접 쓴다 ② 재구성 잡은 `entry_view_next` 를 채우고 교체한다 ③ `LoadEntryForConflict`(409 응답용)는 쓰기 스키마 `guestbook.entry` 를 읽는다. 그 외 모든 읽기 모델 갱신은 inbox 경유 이벤트다.
 
 ## 10. 일관성 점검
 
@@ -320,6 +378,7 @@ flowchart LR
 | 읽기 모델 ↔ 정본 | `entry_view.reactions` 를 `reaction` 개수와 대조 | `projection_drift` |
 | 반영 지연 | 가장 오래된 미처리 inbox 의 나이 | `projection_lag_seconds`, `inbox_oldest_age_seconds` |
 | 고착 항목 | 오래된 `processing` | `oldest_processing_age_seconds` |
+| 재구성 고착 | `projection_state.status != live` 가 오래 지속 | `projection_rebuild_age_seconds` |
 | 재구성 가능성 | 읽기 모델을 비우고 다시 채워 원래와 비교(시험) | — |
 
 ## 11. 후속 Phase 윤곽 (확정 아님)
@@ -340,4 +399,6 @@ ADR-023 이 규칙과 초기값을 정했다. 남은 것은 측정 후 조정뿐
 | 항목 | 결정 시점 |
 |---|---|
 | 임대 길이·백오프·배치 크기 조정 | 처리 시간 측정 후 |
-| 스키마 반영: `available_at`(재시도 시각), `projection_state`(재구성 상태), 글·이름 `CHECK` 길이 | 마이그레이션 작성 시 |
+| 재시도 시각은 `next_attempt_at` 으로 확정(`available_at` 는 쓰지 않는다) | — |
+| `deleted` 행·`resolved` 신고 물리 삭제 기준, `entry_view_next` 보관 시간(제안 1시간) | EV-10 / 재구성 구현 시 |
+| `write_lock` 변경 이력 테이블 필요 여부(현재는 감사 로그) | 운영 중 |

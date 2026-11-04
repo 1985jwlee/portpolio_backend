@@ -10,32 +10,33 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `id` | uuid v7 | 이벤트 식별자 = inbox `message_id` (중복 제거 키) |
-| `seq` | int64 | outbox 전역 단조 증가. 읽기 모델 `last_seq` 비교 기준 |
+| `seq` | int64 | outbox 전역 단조 증가. 읽기 모델의 필드별 순번(`content_seq`·`status_seq`·`reaction_seq`, report 는 `last_seq`) 비교 기준 |
 | `type` | string | `<aggregate>.<verb-past>` (아래 §2) |
 | `schemaVersion` | int | 페이로드 스키마 버전, 1부터 |
 | `occurredAt` | ISO 8601 UTC | 도메인에서 사건이 일어난 시각 |
 | `aggregate` | `{ type, id, version }` | 대상 집합체와 그 시점 `version` |
 | `traceId` | uuid | 흐름 추적 단위. `trace_step` 과 공유 |
-| `ownerKey` | string \| null | 상세 열람 권한(비공개 채널용). **공개 채널로 나가는 변환에서 제거** |
+| `ownerKey` | string \| null | 이벤트를 일으킨 **행위자의 내부 키** — `session:<sessionId>` \| `user:<userId>`(= `ActorContext.actorKey`). 비공개 흐름 열람 권한과 프로젝터의 `actor_key`·`author_actor_key` 로 쓴다. **공개 채널로 나가는 변환에서 항상 제거** |
 | `payload` | object | 종류별 본문 (§2) |
 
 - 봉투에 **IP·토큰·원본 쿠키 값이 들어가지 않는다.**
-- `ownerKey` 는 `anon:<세션해시>` 또는 `user:<userId>` 형태이며 **공개 변환에서 항상 삭제**된다(AC-009).
+- `ownerKey` 는 **내부 행위자 키와 같은 값**(`session:<id>` / `user:<id>`)이다. 별도 해시·변환 계층을 두지 않는다(형식이 둘이면 매핑 계층이 필요해진다). 이 값은 서버 내부(DB·워커·gateway 내부)에서만 돌고 **공개 변환에서 항상 삭제**된다(AC-009). 세션 ID 는 DB 의 uuid 이지 쿠키 토큰이 아니다.
 
 ## 2. 이벤트 종류 (M1)
 
 | `type` | 발행 모듈 | 발행 시점(같은 트랜잭션) | `payload` (v1) |
 |---|---|---|---|
 | `entry.posted` | guestbook | `PostEntry` | `entryId`, `displayName`, `body`, `authorKind`(`anonymous`\|`user`), `authorUserId`(user 일 때만, **공개 변환에서 제거**), `createdAt` |
-| `entry.edited` | guestbook | `EditEntry` | `entryId`, `body`, `updatedAt` |
+| `entry.edited` | guestbook | `EditEntry` | `entryId`, **`body`(전체)**, `updatedAt` |
 | `entry.deleted` | guestbook | `DeleteEntry` | `entryId` |
 | `entry.hidden` | guestbook | `HideEntry` | `entryId`, `actionId` |
-| `entry.unhidden` | guestbook | `HideEntry`(해제) | `entryId`, `actionId` |
+| `entry.unhidden` | guestbook | `HideEntry`(해제) | `entryId`, `actionId` — **공개 변환에서 `entry.restored`(04)가 된다** |
 | `reaction.changed` | guestbook | `AddReaction`/`RemoveReaction` | `entryId`, `emoji`, `op`(`added`\|`removed`), **`count`**(변경 후 이 이모지의 총개수) |
-| `report.filed` | guestbook | `ReportEntry` | `reportId`, `entryId`, `reasonCode`, `excerpt`(앞 80자) |
+| `report.filed` | guestbook | `ReportEntry` | `reportId`, `entryId`, `reasonCode`, `excerpt`(앞 80자, **관리자 큐 전용**) — 신고자 `note` 는 싣지 않는다(`guestbook.report.note` 에만 둔다) |
 | `report.resolved` | guestbook | `ResolveReport` | `reportId`, `resolution`(`dismissed`\|`entry_hidden`) |
 
 - **`reaction.changed` 는 증감이 아니라 변경 후 총개수(`count`)를 싣는다.** 프로젝터가 `reactions[emoji] = count` 로 **덮어쓰므로** 재전달·순서 역전에서도 결과가 같다(`last_seq` 검사와 함께).
+- `entry.posted` 의 `authorUserId` 는 이벤트에 남기되(소비자가 필요), 읽기 모델은 `author_actor_key`(`ownerKey` 와 같은 값)로 저장한다. 공개 변환에서는 둘 다 제거된다.
 - `entry.posted` 의 `displayName` 은 발행 시점의 값이다. 이후 이름이 바뀌어도 과거 이벤트는 바꾸지 않는다.
 - 사이트 공통 이벤트(`entry.*`, `reaction.*`)만 **공개 채널 변환 대상**이다. `report.*` 는 관리자 큐 전용이며 어떤 공개 채널로도 나가지 않는다.
 
@@ -165,7 +166,7 @@ classDiagram
     MessageRunner ..> InboxStore
 ```
 
-`ProjectorBase.isStale` 가 `last_seq` 비교를 한 곳에서 한다(모든 프로젝터 공통).
+`ProjectorBase.isStale` 가 필드별 순번 비교를 한 곳에서 한다(모든 프로젝터 공통).
 
 ## 4. 시퀀스 — 발행에서 소비까지
 
@@ -184,7 +185,7 @@ sequenceDiagram
     D->>O: published (claim_token 일치 조건)
     R->>X: 선점 received→processing
     R->>H: apply(tx, envelope)
-    H->>V: last_seq 검사 후 갱신
+    H->>V: 순번 검사 후 갱신
     R->>X: processed (같은 tx, claim_token 일치)
 ```
 
@@ -253,5 +254,5 @@ registry.register('entry.posted', 1, EntryPostedV1);
 
 | 항목 | 결정 시점 |
 |---|---|
-| `entry.edited` 가 본문 전체를 싣는지 변경분만 싣는지 | 구현 시(전체 권장: 프로젝터 단순) |
+| (확정) `entry.edited` 는 본문 **전체**를 싣는다 | — |
 | 익명→로그인 전환 시 귀속 이벤트 | ADR-008 미결과 함께 |

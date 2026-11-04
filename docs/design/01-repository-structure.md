@@ -355,6 +355,7 @@ flowchart TD
 | `SESSION_TTL_DAYS` | int | `7` | 아니오 | 아니오 | ADR-008 |
 | `GITHUB_CLIENT_ID` | string | — | **예** | 아니오 | |
 | `GITHUB_CLIENT_SECRET` | string | — | **예** | **예** | |
+| `OAUTH_STATE_SECRET` | string(32바이트 이상) | — | **예** | **예** | OAuth 임시 쿠키(`state`·PKCE verifier) 서명 키 ([06](06-auth.md) §3, ID-05). 회전 시 진행 중 로그인만 무효 |
 | `GITHUB_REDIRECT_URI` | URL | `PUBLIC_ORIGIN` + `/api/auth/github/callback` | 아니오 | 아니오 | |
 | `ADMIN_GITHUB_IDS` | 숫자 ID 쉼표 목록 | — | **예** | 아니오 | 로그인 이름이 아니라 **숫자 ID** (이름은 바뀔 수 있다) |
 | `RATE_LIMIT_POST_PER_MIN` · `RATE_LIMIT_REACT_PER_MIN` · `RATE_LIMIT_REPORT_PER_MIN` | int | 미정 | 아니오 | 아니오 | 가정 A-011: 구현 시 정한다 |

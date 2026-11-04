@@ -11,16 +11,20 @@
 
 ## 설계 상세
 
-### 지표(제안 이름과 목적)
+### 지표 이름 규약과 핵심 지표
+- **모든 지표는 `pf_` 접두**를 쓴다(예: `pf_http_requests_total`). 전체 카탈로그(이름·종류·레이블 허용목록·발생 위치·알람 후보)의 정본은 [design/features/17](../design/features/17-ops-observability.md) 이다. 이 표는 핵심만 둔다.
+
 | 지표 | 종류 | 용도 |
 |---|---|---|
-| `http_requests_total` | 카운터 | 경로·메서드·상태별 요청 수 |
-| `http_request_duration_seconds` | 히스토그램 | p95 판정(NFR 300ms) |
-| `outbox_pending` | 게이지 | 적체(전달 지연의 선행 지표) |
-| `outbox_dead_total` | 카운터 | dead-letter 발생 |
-| `event_process_duration_seconds` | 히스토그램 | 작성→소비까지 시간 |
-| `ws_connections` | 게이지 | 접속자 수 |
-| `ws_reconnects_total` | 카운터 | 재접속 빈도 |
+| `pf_http_requests_total` | 카운터 | 경로(`route` 템플릿)·메서드·상태 분류별 요청 수 |
+| `pf_http_request_duration_seconds` | 히스토그램 | p95 판정(NFR 300ms) |
+| `pf_outbox_depth{status}` | 게이지 | 적체(전달 지연의 선행 지표) |
+| `pf_outbox_dead_total` · `pf_inbox_dead_total` | 카운터 | dead-letter 발생 |
+| `pf_event_process_duration_seconds` | 히스토그램 | 소비 처리 시간 |
+| `pf_event_end_to_end_seconds` | 히스토그램 | 작성→소비 완료까지 시간 |
+| `pf_ws_connections{channel}` | 게이지 | 접속자 수(public/private) |
+| `pf_ws_resume_total{mode}` | 카운터 | 재접속·재개 빈도(replay/snapshot) |
+| `pf_ws_queue_overflow_total` | 카운터 | 느린 소비자 종료(4408) |
 
 ### 레이블 규칙
 **세션 식별자·사용자 식별자·글 내용을 레이블로 쓰지 않는다.** 카디널리티 폭증과 개인정보 노출을 막는다(ADR-008).
