@@ -224,10 +224,11 @@ sequenceDiagram
 | `GITHUB_CLIENT_SECRET` | 연 1회 또는 노출 의심 시 | GitHub 에서 새 secret 생성 → `secrets/` 교체 → api 재기동 → 구 secret 폐기 | 즉시 폐기·교체. 기존 세션은 영향 없음(세션은 우리 것) |
 | DB 비밀번호(역할별: §5.1) | 연 1회 | 역할마다 새 비밀번호 설정 → 해당 `secrets/database_url_<api\|worker\|gateway\|migrator\|backup>` 교체 → 그 서비스 재기동 | 즉시 교체(유출된 역할만) |
 | Tailscale 노드 인증(계정·인증 키를 쓴다면 키) | 노출 시 | 관리 콘솔에서 노드 제거·키 폐기 후 재등록 (구체 절차는 구현 시 확인, 13 §6.8) | 즉시 |
-| `FIELD_KEYS` (필드 암호화 키링, api·worker) | 연 1회 또는 노출 시 | 새 키 추가 → `active` 변경 → `worker rotate-field-keys` 로 재암호화 → 잔여 0 확인 후 옛 키 제거. **키링 백업은 백업 개인키와 별도로 보관**(분실 시 `note` 복구 불가, ADR-026) |
+| `FIELD_KEYS` (필드 암호화 키링, api·worker) | 연 1회 또는 노출 시 | 새 키 추가 → `active` 변경 → `worker rotate-field-keys` 로 재암호화 → 잔여 0 확인 후 옛 키 제거. **키링 백업은 백업 개인키와 별도로 보관**(분실 시 `note` 복구 불가, ADR-026) | 즉시 새 키로 교체·재암호화, 옛 키 폐기 |
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, api 필수) | 연 1회 또는 노출 시 | 새 값 생성 → `secrets/oauth_state_secret` 교체(저장 위치는 [02](02-dev-environment.md) §5) → api 재기동. 진행 중인 로그인 시도(10분 쿠키)만 실패한다 | 즉시 교체 |
 | `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 노출 시 | Discord 에서 웹훅 **삭제 후 재생성** → `secrets/discord_webhook` 교체 → grafana 재기동. URL 자체가 자격이라 `SecretString`·로그 마스킹(`https://discord.com/api/webhooks/…` 패턴 → `[redacted]`) 대상 | 즉시(웹훅 삭제) |
 | Grafana 관리자 비밀번호 | 연 1회 | 환경 파일 교체 후 재기동 | 즉시 |
+| `REQUEST_HASH_KEYS` (`request_key.request_hash` HMAC 키링, api) | 연 1회 또는 노출 시 | 새 `kid` 추가 → 현재+직전 2개 유효 → 직전 키는 보관 24시간 + 여유 1시간 뒤 폐기(행은 24시간 휘발이라 재암호화 불필요). **DB·백업·덤프에 두지 않는다**(secret 저장소 `secrets/request_hash_keys`) | 즉시 새 `kid` 로 교체, 구 키 폐기(진행 중 멱등 재생만 영향) |
 | 백업 암호화 키 | 키 분실·노출 시만 | 새 키로 이후 백업 암호화. 기존 덤프는 구 키가 있어야 복호화되므로 **구 키를 보관** | 새 키 발급, 외부 보관분 재암호화 |
 | 세션 토큰 | 7일 만료(자동) | 만료·로그아웃 시 서버에서 폐기(ADR-008) | 사용자 단위 전체 폐기 가능: `worker admin revoke-sessions --all|--user|--session` ([13](13-incident-response.md) §5) |
 | 관리자 GitHub 계정 | — (계정 보안 2FA 유지) | `ADMIN_GITHUB_IDS` 로 권한을 설정값으로만 부여(DB 플래그 없음) | 허용목록에서 제거 후 재배포 + 세션 폐기 + GitHub 비밀번호·2FA·OAuth 앱·PAT 점검 ([13](13-incident-response.md) §6.9) |
@@ -325,7 +326,7 @@ sequenceDiagram
 | 앱 `RateLimitGuard` | 행위자 키(세션/사용자) | 계정(세션)당 도배, 반응 연타, 신고 남용, 관리자 계정 탈취 시 폭주 | 해당 없음 |
 | WS | 연결·메시지 | 메시지 폭주(`4429`), 탭 폭증(`4409`), 전체 상한 | 해당 없음 |
 
-- 세션이 새로 발급되는 경로(`/api/me`)는 **세션 키로 막을 수 없어** 주소 기준 nginx 제한이 유일한 방어다. 세션을 계속 새로 받아 세션 제한을 우회하려는 시도도 같은 주소 제한에 걸린다.
+- 세션이 새로 발급되는 경로(`/api/me`)는 **세션 키로 막을 수 없어** 주소 기준 nginx 제한이 유일한 방어다. **IP 를 못 얻는 동안에는 이 방어가 전역 한도로 퇴화하므로 익명 세션 발급 자체에 전역 토큰버킷 + 상한 근접 시 PoW 챌린지를 걸고**(F17 §9.2, ADR-003), 상거래·채팅 쓰기의 제한은 세션이 아니라 계정(github_id) 기준으로 건다. 익명 관전자는 공유 참가자 번호로 집계하고 WS 연결 상한은 역할별로 나눠 플레이어 슬롯을 예약한다(F14). 세션을 계속 새로 받아 세션 제한을 우회하려는 시도도 같은 주소 제한에 걸린다.
 - 주소를 모르는 상태(Funnel 에서 실제 IP 미확인 G14 ④, 또는 정규화 실패)에서는 nginx 제한이 모든 요청을 한 주소(Funnel 의 로컬 연결)로 묶어 **사실상 전역 한도**가 된다 → 정규화 검증(G7 ②)과 G14 ④ 가 선행 조건이다. **그 경우 `/api/me` 의 세션 발급 남용 방어가 약해지는 것이 위험이며**, 세션/계정 기준 제한을 우선하고 신규 세션 발급에 전역 토큰 버킷을 둔다. 주소 확보 시/미확보 시 nginx 설정은 둘 다 설계했다(F17 §9.2: 미확보 시 주소별 `limit_conn` 제거·전역 상한·WS 제한은 gateway 세션 기준·정적 자원 `limit_req` 제외, 제안·미검증).
 - **Funnel 에는 Cloudflare 의 기본 DDoS 방어가 없고** 대역폭 한도가 비공개이며 베타다. 한도 초과·정책 변경은 위험으로 수용하고 G14 ③ 에서 체감을 측정한다(ADR-003).
 - 제한 초과는 `pf_rate_limit_decisions_total{app,rule,decision}` 로 관측하고(레이블에 주소·세션 금지), 급증 시 쓰기 잠금 스위치(ADR-028 사다리 1단계)를 쓴다.

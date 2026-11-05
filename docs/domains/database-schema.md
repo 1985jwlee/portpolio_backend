@@ -148,7 +148,7 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | 컬럼 | 설명 |
 |---|---|
 | `actor_key`, `key` | PK. 행위자와 클라이언트 `Idempotency-Key` |
-| `request_hash` | 요청 본문 해시(같은 키·다른 요청 감지) |
+| `request_hash` | 요청 지문의 **HMAC-SHA256**(같은 키·다른 요청 감지). 형식 `<kid>:<hex>` — 키 없는 SHA-256 은 저엔트로피 본문(마스킹 원문·짧은 상담 문장)을 덤프에서 사전 대입으로 역산할 수 있어 쓰지 않는다. 서버 비밀 키는 DB·백업·덤프에 없다(secret 저장소). 키 회전: 현재+직전 2개 유효, 직전 키는 보관 24시간 + 여유 1시간 뒤 폐기, 비교는 행의 `kid` 키로 재계산. 암호화 방(CS)은 본문 대신 `roomId·clientMsgId·길이` 만 지문에 넣는다(design/phases/04 §4.1) |
 | `status` | `in_progress` / `done`. **영속되는 값은 `done` 뿐이다** — 선점·기록은 명령과 같은 트랜잭션이라 `in_progress` 행은 커밋 시점에 존재하지 않는다(동시 요청은 행 잠금 대기/`lock_timeout` 으로 `request_in_progress` 409). `in_progress` 는 후속 비동기 명령용으로 남겨 둔 값 |
 | `response_status`, `response_body` | 재생용 원 응답(작은 jsonb) |
 | `created_at` | 24시간 후 삭제 |
@@ -441,7 +441,7 @@ flowchart LR
 | `session.created_at`, `last_seen_at`, `expires_at` | SYS | |
 | `request_key.actor_key` | PSD | 24시간 후 삭제 |
 | `request_key.key`, `status`, `response_status`, `created_at` | SYS | |
-| `request_key.request_hash` | **HSH** | 요청 본문 해시 |
+| `request_key.request_hash` | **HSH** | 비밀 키 HMAC-SHA256(`kid:hex`). **키 없는 해시는 HSH 가 아니다**(저엔트로피 입력은 역산된다). 백업·덤프 대상에서 `request_key` 전체 제외(요청: design/features/17) |
 | `request_key.response_body` | PSD | 재생용 원 응답(`me` 등), 24시간 후 삭제 |
 
 ### guestbook (쓰기)
@@ -532,7 +532,7 @@ flowchart LR
 | 1 | `game` / `game_read`, (`chat` / `chat_read` 는 6a 에서 먼저 도입, 대국 채팅 룸 종류 추가) | `game_event` 대국별 `seq` 추가 전용, `UNIQUE (game_id, move_id)`, `chat.room.last_seq` 조건부 UPDATE 로 방별 순번, `UNIQUE (room, sender, client_msg_id)` | [P1](../design/phases/01-baduk.md) §11, [P4](../design/phases/04-chat.md) §11 |
 | 2 | `analysis` (`ledger` 는 Phase 3 에서 이미 도입; 여기서는 `reward` 추가) | `analysis_job` `UNIQUE (game_id)` + 선점/임대, `reward` `UNIQUE (game_id, user_id)` | [P1](../design/phases/01-baduk.md) §10~11, ADR-037·040 |
 | 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC), 같은 Phase 에 `ledger`(원장 `journal`/`posting` 추가 전용·자산별 차변=대변 지연 제약 트리거, `ledger.grant` `UNIQUE (github_id, kind)`, `ledger.supply_cap`)·`payment`(`payment_leg` `UNIQUE (payment_id, asset)`)·최소 `pricefeed` 스냅샷·최소 `escrow`(`escrow_leg`; hold / release / refund) 도입(ADR-040·048) | [P2](../design/phases/02-commerce.md) §10 |
-| 5 | `pricefeed`(실제 소스), `payment`(카드·환불 확장), `escrow`(분쟁·동결·자동 확정 확장), `settlement`(`funded_*`, `point_redemption_micro`) (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded/frozen` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
+| 5 | `pricefeed`(실제 소스), `payment`(카드·환불 확장), `escrow`(분쟁·동결·자동 확정 확장), `settlement`(`funded_*`, `point_redemption_micro`) (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded/frozen` CAS + `escrow.pending_refund_krw`(환불 진행 표식 — 0 일 때만 자동 해제·수령 확인·분쟁 판정·`frozen→held`, P0 R11) + 행 잠금 순서 `payment → escrow → ledger 계정(id 순) → order_exchange → order`(P0 R9), `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
 | 6 (6a `support`·`chat`, 6c `inventory`·`fulfillment`) | `inventory`, `fulfillment`, `support` (+`_read`) | `sku_position` CHECK `allocated + earmarked ≤ available`, 물리 재고 이동 원장 추가 전용, `recipient_enc`·CS `body_enc`(ENC) | [P3](../design/phases/03-fulfillment.md) §10, [P4](../design/phases/04-chat.md) §11 |
 | 6d | `identity.wallet_link`(공개키 `UNIQUE`), `identity.wallet_challenge`(1회용) | 서명 챌린지 소진 조건부 UPDATE, 공개키는 PSD | [P0](../design/phases/00-platform-evolution.md) §7.3 |
 | 공통 | `security.data_key`(Phase 5 KEK/DEK 상향), `realtime_read.room_log`·`room_seq`(**예약 — 현재 미사용**, 쓸 경우 허용 쌍 추가와 함께) | 봉투 `v2.<dekId>.…` | [P0](../design/phases/00-platform-evolution.md) §9.3·§6 |

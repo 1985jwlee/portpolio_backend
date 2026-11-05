@@ -78,7 +78,7 @@
 | `flow.summary` | public | `{ window: '5m', buckets: FlowBucket[] }` | **익명 요약**. 개수만. **순번 없음(휘발성)**. 푸시는 `window` 고정(5분), 1시간 등은 REST(`GET /api/flow/summary`) |
 | `presence` | public | `{ count }` | 접속자 수(근사). **순번 없음(휘발성)** |
 | `flow.step` | private | `{ traceId, step, at, detail? }` | **내 흐름 상세**(단계 값은 05 §2.2) |
-| `hb` | sys | public: `{ head: seq }` / private: `{}` | 하트비트 + (public 만) 채널 머리 번호(누락 감지) |
+| `hb` | sys | public: `{ head: seq }` / private: `{}` / room: `{ heads: { <room>: head } }` | 하트비트 + (public) 채널 머리 번호 / (room, `/ws/room`) 구독 중인 방별 머리 번호(누락 감지). 룸 연결 상세는 phases/00 §6 |
 | `pong` | sys | `{ n }` | `ping` 응답 |
 | `bye` | sys | `{ reason, reconnectAfterMs }` | **우아한 종료 예고**(배포·재시작). 이후 `1001` |
 | `error` | sys | `{ code, message, fatal }` | 오류. `fatal` 이면 서버가 곧 종료 |

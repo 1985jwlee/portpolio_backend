@@ -228,6 +228,7 @@ classDiagram
 | 대국 종료 후 | 읽기 전용 | 읽기 전용 + 플레이어에게 공개 | `resolved` 까지 쓰기, `closed` 에서 읽기 전용 |
 
 - **D5(치팅 방지)**: 관전자가 플레이어에게 수를 알려 주는 것을 막으려고 `game_spectators` 방은 대국 중 플레이어의 구독을 거절한다. 대국이 끝나면 P1 의 `game.finished` 이벤트로 `revealed = true` 가 되어 플레이어도 읽는다.
+  - **이 규칙은 부정 방지 수단이 아니다(검토 반영)**: 관전자는 대국 밖 채널(메신저·음성)로 수를 알려 줄 수 있어 방 비공개로는 막을 수 없다. 비레이팅 대국에서는 **UX 배려(대국 중 상대 방의 잡담이 보이지 않게)** 로 격하하고, **레이팅 대국의 우회 억제는 관전 화면 N수 지연(phases/01 소관, 제안값은 그쪽에서 정한다)** 이 맡는다. 레이팅 대국의 관전 채팅은 종료 시 공개(위)를 유지하고, 관전 지연이 없는 동안은 레이팅 대국 관전 채팅 자체를 읽기 전용 알림으로 두자는 안을 phases/01 에 요청한다
 - 쓰기 권한은 **쓰기 모델**(`chat.participant`, `chat.room`)로 판정한다. 구독 권한과 REST 조회·읽음·신고의 인가는 모두 `RoomAccessPolicy.decide(actor, room)`(쓰기 모델 기준: 대국 참가 상태, 티켓의 `customer_user_id`/`agent_user_id`)로 하며 **`participant` 행의 유무에 의존하지 않는다**. 관전자는 **첫 메시지·읽음·신고 때** 참가자 행이 지연 생성된다(§12.2). CS 방은 배정이 풀린 직후 읽기 모델 지연에 기대지 않도록 `CsRoomPolicy` 가 `ticket.agent_user_id` 를 쓰기 모델에서 확인한다.
 - 참가자 `ref` 는 **방 범위 불투명 번호**다. 클라이언트에는 행위자 키(`session:`/`user:`)를 노출하지 않는다(PSD 보호, 서버 직렬화 1회 재사용 규칙을 깨지 않으려는 이유도 같다).
 
@@ -248,13 +249,13 @@ stateDiagram-v2
     assigned --> in_progress : 상담원 첫 응답
     in_progress --> in_progress : 메시지·하트비트 (임대 연장, 총 상한 2시간)
     in_progress --> open : ReleaseTicket · 임대 만료(무응답) 회수
-    in_progress --> resolved : ResolveTicket
-    resolved --> in_progress : ReopenTicket (7일 이내)
+    in_progress --> resolved : ResolveTicket (같은 tx 로 상담원 참가자 제거 · claim_token 교체)
+    resolved --> open : ReopenTicket (7일 이내 · 새 claim_token · 새 배정 시각)
     resolved --> closed : 7일 경과 · 고객 종료
     open --> closed : 고객 취소
     closed --> [*]
 ```
-전이 규칙·임대·펜싱은 [ADR-046](../../adr/ADR-046-cs-ticket-and-agent-assignment.md). 티켓의 `order_id` 는 고객 소유 검증 후 연결한다. **회수(reaper)와 `ReleaseTicket` 은 `assigned`·`in_progress` 모두에서** 일어나고 `claim_token` 을 교체한다. 같은 상담원의 즉시 재선점은 별도 조항 없이 `open` 으로 돌아온 티켓을 다시 `ClaimTicket` 하는 일반 경로뿐이다.
+전이 규칙·임대·펜싱은 [ADR-046](../../adr/ADR-046-cs-ticket-and-agent-assignment.md). 티켓의 `order_id` 는 고객 소유 검증 후 연결한다. **회수(reaper)와 `ReleaseTicket` 은 `assigned`·`in_progress` 모두에서** 일어나고 `claim_token` 을 교체한다. **해결(`resolved`)·종료(`closed`) 전이는 같은 트랜잭션에서 담당 상담원을 참가자에서 제거(`RemoveParticipantInTx`)하고 `claim_token` 을 교체**한다 — 해결 뒤에도 열람 권한이 남거나 재오픈이 임대 총 상한(`claimed_at + 2시간`)과 충돌하는 것을 막는다. **재오픈은 `open` 대기열로 돌아가** 일반 `ClaimTicket` 으로 새 토큰·새 `claimed_at`·새 임대를 받는다(이전 상담원 우선 배정은 없다). 같은 상담원의 즉시 재선점은 별도 조항 없이 `open` 으로 돌아온 티켓을 다시 `ClaimTicket` 하는 일반 경로뿐이다.
 
 ### 3.5 서비스·정책 클래스
 
@@ -331,13 +332,15 @@ flowchart TD
     K -- "신규" --> C{"ContentPolicy (잠금 전)<br/>길이 · 링크 · 중복 → 거절 / 금칙어 → 마스킹"}
     C -- "길이·링크·중복 위반 → 거절" --> E3["400 validation_failed (사유 코드)"]
     C -- "금칙어 포함 → 마스킹" --> M["본문의 금칙어를 * 로 치환 (원문 폐기, masked=true)"]
-    M --> L
-    C -- "통과" --> L["tx: chat.room 조건부 UPDATE<br/>last_seq+1 WHERE status='open' RETURNING"]
+    M --> P0
+    C -- "통과" --> P0{"RoomAccessPolicy.decide (잠금 전, 커넥션 반납 뒤)<br/>권한 · canPost"}
+    P0 -- "불가" --> E2["403 forbidden (잠금 전 거절)"]
+    P0 -- "가능" --> L["tx: chat.room 조건부 UPDATE<br/>last_seq+1 WHERE status='open' RETURNING"]
     L --> S{"방이 열려 있는가"}
     S -- "아니오 (read_only/closed)" --> E1["409 room_closed (롤백)"]
-    S -- "예" --> P{"RoomAccessPolicy.decide · 뮤트 · canPost<br/>(관전자는 참가자 행 지연 생성)"}
-    P -- "불가" --> E2["403 forbidden / 403 muted (롤백)"]
-    P -- "가능" --> I["message INSERT<br/>UNIQUE(room, sender, client_msg_id)"]
+    S -- "예" --> P{"채팅 자체 조건 재검사 (같은 tx · 같은 커넥션)<br/>뮤트 · 참가자 행 (관전자는 지연 생성)"}
+    P -- "뮤트" --> E4["403 muted (롤백)"]
+    P -- "통과" --> I["message INSERT<br/>UNIQUE(room, sender, client_msg_id)"]
     I --> D{"유일 키 충돌?"}
     D -- "예 (request_key 만료 뒤 재시도)" --> RB["트랜잭션 롤백 → 카운터 원복<br/>기존 메시지 조회"]
     RB --> RE["200 {기존 message, seq} + Idempotency-Replayed"]
@@ -345,6 +348,7 @@ flowchart TD
     O --> R["request_key 응답 기록<br/>(encrypted 방은 messageId·seq 만) → 커밋"]
     R --> OK["201 {message, seq, masked}"]
 ```
+- **방 행 잠금 중에는 다른 커넥션을 쓰지 않는다(검토 반영, P0 R7)**: 방 행을 잠근 채 `RoomAccessPolicy`(P1 대국 참가 상태 등 타 모듈 조회가 풀에서 별도 커넥션을 잡는다)를 부르면 풀이 작을 때 잠금 보유 요청들이 서로 커넥션을 기다리며 풀 교착이 생길 수 있다. 그래서 **정책 판정은 잠금 전**(ContentPolicy 와 같은 단계)에 하고, 잠금 안에서는 **채팅 자체 조건만 같은 tx 로 재검사**한다 — 방 열림(UPDATE 조건)·뮤트·참가자 행. 정책 판정과 잠금 사이에 권한이 바뀌는 틈은 `game.finished` 등 상태 이벤트가 방을 닫는 쪽(조건부 UPDATE)이 최종 심판이라 허용한다. 시험 CH-AC16: 풀 크기 2에서 동시 전송 3건이 교착 없이 모두 완료되거나 거절된다.
 - 방 행 잠금(`UPDATE … WHERE status='open' RETURNING last_seq`)은 **조건부 UPDATE** 이므로 "닫힌 방에 쓰지 않는다"는 검사와 순번 부여를 한 문장으로 한다(ADR-021 1번).
 - **정책 판정(`ContentPolicy`)은 방 잠금 이전**에 한다(불필요한 순번 소모·잠금 보유를 막는다). 길이·링크·중복은 거절이고 **금칙어(U17)는 거절하지 않고 마스킹**한다 — 서버가 금칙어를 `*` 로 치환한 본문으로 계속 진행하며, 이후 모든 경로(저장·outbox·push·재생·읽기 모델·`request_key` 응답)에는 치환된 본문만 흐른다(§6.2). 중복 판정 `DuplicateGuard` 는 "10초 안 같은 본문" 휴리스틱일 뿐이고, **정확한 심판은 유일 키**다.
 - **seq 구멍 방지(검토 반영)**: 방 카운터를 올린 *뒤* 유일 키 충돌이 나면 카운터만 오른 채 커밋될 수 있다. 그래서 충돌을 감지하면 **트랜잭션을 롤백(카운터 원복)하고 기존 메시지를 별도로 조회해 응답**한다. 이 경로는 `request_key` 가 24시간 뒤 만료된 후 같은 `client_msg_id` 가 다시 올 때 생긴다. 이렇게 하면 방 `seq` 는 어떤 경로에서도 연속이고, 클라이언트의 gap 검사(§4.6)는 구멍을 영원히 gap 으로 보는 일이 없다.
@@ -358,6 +362,7 @@ flowchart TD
 |---|---|
 | HTTP | `Idempotency-Key` + `request_key`(24시간, M1 규칙). 같은 키·같은 요청 → 같은 응답 재생 |
 | 도메인 | `client_msg_id` = `Idempotency-Key`. `UNIQUE (room_id, sender_key, client_msg_id)` 가 최종 심판. `request_key` 만료 뒤 충돌은 **롤백 후 기존 메시지 반환**(§4.1) |
+| 요청 지문 | `request_key.request_hash` 는 **서버 비밀 키 HMAC-SHA256**(`<kid>:<hex>`, 키 회전은 현재+직전 2개·직전 키는 보관 24시간+1시간 뒤 폐기, database-schema `request_key`)이다. **encrypted 방(CS)은 본문을 지문에 넣지 않고 `roomId·clientMsgId·길이` 만 쓴다**(본문 변경 감지는 `UNIQUE (room_id, sender_key, client_msg_id)` 충돌 시 기존 행의 `messageId` 반환으로 갈음). 비밀 키는 DB·백업에 없고 `request_key` 는 백업에서 제외한다(features/17 에 요청) |
 | 응답 재생 | encrypted 방(CS)의 `request_key.response_body` 는 **`{messageId, seq}` 만** 저장한다(평문 본문이 24시간 DB 에 남는 것을 막는다, database-schema §9.1). 재생 시 본문이 필요하면 클라이언트가 REST 조회로 가져온다 |
 | 전달 | outbox/inbox 의 `(consumer, message_id)` 유일 키(ADR-020) |
 | 표시 | 클라이언트는 `messageId`/`seq` 로 중복 제거(자기 전송 응답과 푸시가 겹침) |
@@ -425,7 +430,7 @@ sequenceDiagram
     alt 권한 없음
         G-->>C: room.error {room, code: forbidden}
     else 권한 있음
-        G->>G: 구독 먼저 등록 (이후 push 는 큐에 보관)
+        G->>G: 구독 먼저 등록 (이후 push 는 연결별 버퍼에 보관, seq 로 정렬)
         G->>E: head(room)
         E->>W: last_seq 읽기 (카운터만)
         W-->>E: 130
@@ -435,8 +440,10 @@ sequenceDiagram
             G-->>C: chat.message 121..130
             G-->>C: replay.end {room, count}
         else plain 방, resume 없음 또는 간격 큼
+            G->>R: message_view 최근 50건 (읽기 모델이 head 에 못 미치면 100ms 간격 재시도, 최대 2초)
             G-->>C: room.joined {room, role, head: 130, mode: snapshot}
             G-->>C: room.snapshot {room, data: 최근 50건, head: 130}
+            Note over G,C: 버퍼의 seq > 130 만 이어서 방출 (이하 중복은 버린다)
         else encrypted 방 (CS)
             G-->>C: room.joined {room, role, head: 130, mode: live}
             G-->>C: chat.notice {room, seq: 130} (resume 가 head 보다 작을 때만)
@@ -446,7 +453,8 @@ sequenceDiagram
     G-->>C: 이후 push (seq = head+1 …)
 ```
 - **구독을 먼저 등록하고 나서** `head` 를 읽는다. `head` 이하는 쓰기 모델에 이미 있으므로 읽기 모델이 따라잡는 대로 재생하고, `head` 초과는 구독 후 push 로 들어온다 → 두 구간 사이에 빠지는 메시지가 없다(검토 R3 #4).
-- **읽기 모델 지연**: `chat-broadcaster` 와 `chat-projector` 는 서로 다른 소비자라 push 가 읽기 모델 투영보다 앞설 수 있다. 재생이 `head` 에 못 미치면 gateway 가 100ms 간격으로 최대 2초 재시도하고, 그래도 모자라면 가진 만큼만 보낸 뒤 `room.joined.head` 를 그대로 알려 클라이언트가 gap 으로 감지해 `GET ?after=` 로 채운다. 클라이언트는 `GET` 이 비어 있으면(투영 지연) 짧은 백오프(250ms→1s, 최대 5회)로 재시도한다.
+- **읽기 모델 지연**: `chat-broadcaster` 와 `chat-projector` 는 서로 다른 소비자라 push 가 읽기 모델 투영보다 앞설 수 있다. 재생이 `head` 에 못 미치면 gateway 가 100ms 간격으로 최대 2초 재시도하고, 그래도 모자라면 **뒤처진 스냅샷·재생을 내보내지 않고** `room.error {room, code: unavailable, fatal: true}` + close `4500`(클라이언트 지수 백오프+지터 재접속)으로 거절한다 — `head` 를 알려 주고 가진 만큼만 보내면 클라이언트가 이미 `head` 까지 받았다고 믿어 그 사이 메시지가 영구 누락될 수 있어서다(방명록 RT-05 와 같은 방식, features/14). **replay·snapshot 두 모드가 같은 계약**이고, 대국 룸(phases/01)도 같다. 이 거절은 지표 `pf_ws_snapshot_catchup_timeout_total{kind=chat}` 로 센다. REST `GET ?after=` 의 빈 응답(투영 지연)은 클라이언트가 짧은 백오프(250ms→1s, 최대 5회)로 재시도한다.
+- **유휴 누락 감지**: 룸 연결의 25초 `hb` 에 구독 중인 plain 방의 현재 `head` 를 싣는다(`hb { heads: { <room>: head } }`, encrypted 방 포함 — 알림 전용 방은 `chat.notice` 누락 감지에 쓴다). 클라이언트는 마지막 `seq` < `head` 면 gap 으로 보고 `room.join { resume }` 을 다시 보낸다. 대국 룸의 `clock` 메시지도 같은 이름 `head` 를 싣는다(phases/01). **이미 구독 중인 방에 `room.join` 을 다시 보내면** 구독(구독자 집합)을 그대로 둔 채 `resume` 이 있으면 그 이후를 재생하고 없으면 `room.snapshot` 을 다시 보낸다(해시 불일치·순번 공백 때의 재동기화 요청 — phases/01 §5.3 과 같은 규칙)
 - **CS(encrypted) 방은 알림 전용**이다: gateway 는 본문을 읽지도 보내지도 않는다(키가 없다). 재개에서도 `room.joined{head}` 와 `chat.notice` 만 보낸다.
 - 클라이언트는 방별로 `seq` 연속성을 검사하고(건너뛰면 `room.join { resume }` 재요청) 중복 `seq` 는 무시한다(M1 `SeqTracker` 방별 확장).
 - 재생 상한은 한 번에 200건(제안). 더 놓쳤으면 스냅샷으로 대체하고 위쪽 이력은 REST `GET …?before=` 로 가져온다.
@@ -469,7 +477,7 @@ flowchart TD
 
 ### 4.8 방별 팬아웃과 백프레셔
 - gateway 는 `RoomHub`(방 id → 구독 연결 집합)을 두고 **같은 메시지를 직렬화 1회**(M1 D8)로 구독자에게 보낸다.
-- 연결별 `SendQueue`(64건/256KB, M1 규칙)가 그대로 적용되고 초과 시 `4408` 로 격리한다. 채팅 메시지는 **합치지 않는다**(덮어쓰기 의미가 없다). 반응 합치기와 달리 모든 메시지가 의미를 갖기 때문이다.
+- 연결별 `SendQueue`(64건/256KB, M1 규칙)가 그대로 적용되고 초과 시 `4408` 로 격리한다. **단 `room.join` 재생(최대 200건)은 이 큐를 거치지 않고** 드레인 기반 별도 경로(features/14 RT-06)로 보내며, 클라이언트는 지수 백오프+지터로 재접속하고 연속 `4408` 이면 `resume` 없이 스냅샷 모드로 간다(재생이 큐 상한을 넘겨 재접속 루프에 빠지는 것을 막는다). 채팅 메시지는 **합치지 않는다**(덮어쓰기 의미가 없다). 반응 합치기와 달리 모든 메시지가 의미를 갖기 때문이다.
 - 큰 방 한계(제안): P0 §6.8 의 룸별 상한(제안 200) 이내에서 대국 방 관전자 **최대 100명**, CS 방 참가자 3명 이하(고객 + 상담원 + 관리자 열람 시 일시). 한도 초과 입장은 `room.error room_full`.
 
 ---
@@ -535,7 +543,7 @@ flowchart TD
 | 비교 방식 | 비교용 정규화 사본(NFC, 대소문자 접기, 제로폭 문자 제거)에서 찾고, 일치 구간을 **원문 오프셋으로 되돌려** 치환한다. 비교용 사본은 메모리에서만 쓰고 저장하지 않는다 |
 | 원문 | **저장하지 않는다**(제안). `message.body`·읽기 모델·outbox·push·`request_key.response_body`·로그 어디에도 치환 전 본문이 없다. 남기는 것은 `message.masked`(boolean)와 지표뿐이다 |
 | 응답 | `201 {message(치환된 본문), seq, masked}` — 클라이언트는 `masked=true` 일 때 "일부 단어가 가려졌습니다"를 보여 준다. 낙관적 표시를 한 클라이언트는 응답의 본문으로 교체한다 |
-| 멱등 | `request_hash` 는 요청 본문(치환 전)으로 계산하고, 재생은 **저장된 치환 결과**를 돌려준다. 목록이 바뀌어도 이미 저장된 메시지를 **소급 치환하지 않는다** |
+| 멱등 | `request_hash` 는 요청 본문(치환 전)을 **서버 비밀 키 HMAC**(§4.3)으로 서명해 계산하고(키 없는 해시는 덤프에서 금칙어·원문이 사전 대입으로 역산된다), 재생은 **저장된 치환 결과**를 돌려준다. 목록이 바뀌어도 이미 저장된 메시지를 **소급 치환하지 않는다** |
 | 중복 판정 | `DuplicateGuard` 는 치환 후 본문으로 비교한다(원문 해시를 따로 두지 않는다). 다른 금칙어를 번갈아 보내도 같은 본문으로 보일 수 있으나 속도 제한이 보완한다 |
 | 우회 | 띄어쓰기·특수문자 삽입·자모 분리·비슷한 글자 치환은 **막지 않는다**(범위 밖). 신고(§6.3)와 관리자 숨김·뮤트로 보완한다 |
 
@@ -611,6 +619,8 @@ sequenceDiagram
 
 **삭제 경로(`DeleteMessage`, CH-23)**: 발신자 본인(또는 관리자)이 `DELETE /api/rooms/{roomId}/messages/{seq}`(CS 방은 `DELETE /api/support/tickets/{id}/messages/{seq}`)로 요청한다. 한 트랜잭션에서 `message.body`/`body_enc` 를 **NULL 로 비우고** `status=deleted`, `deleted_at` 을 기록하고 발신자 연결(`sender_key`)을 `purged:<uuid>` 로 끊으며 `chat.message_deleted` 를 발행한다. 스키마 `CHECK` 는 `status='deleted'` 일 때 본문 컬럼이 모두 NULL 인 것을 허용한다(§11.1). 투영기는 `message_view` 의 본문을 비우고 `status_seq` 를 올리며, gateway 는 `chat.deleted {room, seq}` 로 클라이언트가 묘비로 교체하게 한다. **`hold` 방(신고 보류)·법적 보존 대상은 거절**하고 사유를 기록한다(정책은 법무 검토 후, 미확인). 대국 채팅도 같은 경로로 본인 메시지를 삭제할 수 있고(PUB 이라도 개인정보가 섞였을 때), 그 메시지의 신고 스냅샷(`snapshot_enc`)에는 삭제가 소급되지 않는다(증거 보존, 처리 후 90일 뒤 삭제).
 
+**신고 전 삭제의 증거 소실 방지(검토 반영)**: 가해자가 신고 전에 삭제하면 증거가 사라진다. 그래서 `DeleteMessage` 는 같은 트랜잭션에서 plain 방 메시지의 `body`(이미 마스킹된 값)를 **기존 ENC 필드 `message.body_enc` 로 암호화해 옮기고 `quarantine_until = now() + 72시간`(제안)을 기록**한다(새 ENC 필드를 만들지 않는다 — P0 §9.5 통합표 불변. CS 방은 이미 `body_enc` 이므로 `quarantine_until` 만 기록). `status='deleted'` 묘비라도 격리 기간에는 `body_enc` 만 NOT NULL 을 허용한다. 격리본은 클라이언트·읽기 모델(`message_view` 는 비운다)·푸시·이벤트에 나가지 않고 관리자 신고 처리 화면만 열람 감사와 함께 복호화한다. 72시간 안에 신고가 접수되면(삭제된 메시지를 포함한 앞뒤 5건) 격리본을 신고 스냅샷으로 **승격**(대국 방은 `snapshot` 평문, CS 방은 `snapshot_enc`)하고 `hold` 규칙을 따르며, 신고가 없으면 정리 배치가 `quarantine_until` 이후 `body_enc` 를 NULL 로 만든다. 사용자에게는 "삭제 즉시 노출 중단, 신고 대비 72시간 보관 후 영구 삭제"를 고지한다. 보관 기간 72시간은 제안이며 법무 검토 후 확정한다
+
 ### 7.5 로그·감사
 채팅 본문·표시 이름은 로그에 남기지 않는다(`room_id`·`seq` 는 허용). CS 대화 열람은 **열람 세션당 1회** 감사 기록한다(§6.4).
 
@@ -668,7 +678,7 @@ database-schema.md 형식을 따른다. 컬럼 전수가 아니라 **핵심 테�
 | 컬럼 | 설명 | 등급 |
 |---|---|---|
 | `room_id`, `actor_key` PK | 행위자 키. 세션 만료 시 `purged:<uuid>` 로 익명화(§7.1). **관전자는 첫 메시지·읽음·신고 때 지연 생성**되므로 행이 없어도 접근은 `RoomAccessPolicy` 가 판정한다 | PSD |
-| `ref` smallint | 방 범위 번호, UNIQUE (`room_id`, `ref`) | SYS |
+| `ref` smallint | 방 범위 번호, UNIQUE (`room_id`, `ref`). **익명 관전자는 방 안의 공유 번호 풀(초기 200, 제안)에서 활성 동안만 빌려 쓰고 세션이 끊기면 반납**해 새 익명 세션 남발이 번호·행을 무한히 늘리지 못한다. 풀이 차면 새 익명 관전자는 읽기 전용이다 | SYS |
 | `role` | `player_black` 등 | SYS |
 | `display_label` | 표시 이름 스냅샷 | PII |
 | `muted_until`, `joined_at`, `left_at`, `version` | | SYS |
@@ -683,12 +693,13 @@ database-schema.md 형식을 따른다. 컬럼 전수가 아니라 **핵심 테�
 | `kind` | `text` / `system` / `notice` | SYS |
 | `body` text | plain 방의 본문(금칙어는 `*` 로 치환된 뒤 값, 원문은 저장하지 않음 — §6.2) | PUB |
 | `masked` boolean | 금칙어 치환이 있었는지(기본 false, 본문 복원 불가) | SYS |
-| `body_enc` text | encrypted 방의 AES-256-GCM 봉투 | **ENC** |
+| `body_enc` text | encrypted 방의 AES-256-GCM 봉투. 삭제된 plain 방 메시지의 **72시간 격리본**도 같은 필드에 둔다(`quarantine_until` 이전까지, §7.4) | **ENC** |
+| `quarantine_until` timestamptz | 삭제 격리 만료(NULL = 격리 없음). 인덱스 `(quarantine_until) WHERE quarantine_until IS NOT NULL` | SYS |
 | `client_msg_id` uuid | 멱등 키(시스템 메시지는 NULL) | SYS |
 | `status` | `visible` / `hidden` / `deleted`(묘비: 본문 컬럼이 모두 NULL) | SYS |
 | `created_at`, `hidden_at`, `deleted_at` | | SYS |
 - UNIQUE (`room_id`, `seq`); UNIQUE (`room_id`, `sender_key`, `client_msg_id`) WHERE `client_msg_id IS NOT NULL`.
-- CHECK: `kind <> 'text' OR status = 'deleted' OR ((body IS NULL) <> (body_enc IS NULL))` — 삭제(`status='deleted'`)된 묘비는 본문 컬럼이 **둘 다 NULL** 이어도 허용하고, 그 외 텍스트 메시지는 정확히 하나만 NOT NULL. `body` 길이 ≤ 앱 상한의 2배(ADR-023 규칙). 방 종류가 plain 이면 `body_enc` 는 NULL, encrypted 면 `body` 는 NULL 이어야 한다는 방 종류별 제약은 앱·시험으로 강제.
+- CHECK: `kind <> 'text' OR status = 'deleted' OR ((body IS NULL) <> (body_enc IS NULL))` — 삭제(`status='deleted'`)된 묘비는 본문 컬럼이 **둘 다 NULL**(또는 격리 중 `body_enc` 만 NOT NULL, `body` 는 항상 NULL)이어도 허용하고, 그 외 텍스트 메시지는 정확히 하나만 NOT NULL. `body` 길이 ≤ 앱 상한의 2배(ADR-023 규칙). 방 종류가 plain 이면 `body_enc` 는 NULL, encrypted 면 `body` 는 NULL 이어야 한다는 방 종류별 제약은 앱·시험으로 강제.
 
 **`report`**, **`moderation_action`**: M1 `guestbook` 의 동일 이름 표와 같은 모양(`reporter_key`(PSD, 세션 만료 시 익명화), `reason_code`, `status`, `resolution`, `snapshot_enc`). 신고 스냅샷은 CS 방이면 **`ENC`**(`chat.report.snapshot_enc`, 키 회전 대상), 대국 방이면 `snapshot` 평문(PUB).
 
@@ -785,7 +796,7 @@ database-schema.md 형식을 따른다. 컬럼 전수가 아니라 **핵심 테�
 ### 13.2 WebSocket `/ws/room` (P0 §6.3 형식에 맞춤 — ADR-032 확정 대기)
 - 연결: 인증 필수(`/ws/private` 과 같은 세션 쿠키 검증), `hello` 5초 규칙·`hb`·백프레셔·종료 코드는 M1 04 와 동일. **방이 필요한 화면에 들어갈 때만 연결**한다(첫 진입 연결이 아니므로 M1 소켓 수 추정에 영향이 작다).
 - 룸 키(P0 §6.3): `chat:<chatRoomId>`(대국 채팅의 플레이어 방·관전자 방은 각각 별도 uuid), `cs:<ticketId>`. 대국 자체는 `game:<gameId>`(P1 소유). 봉투에 `ch:'room'`, `rm:'<type>:<id>'`.
-- 클라이언트 → 서버(허용 목록 전부): `hello`, `room.join {room, resume?}`, `room.leave {room}`, `ping`, 휘발성 `typing {room}`. 그 밖의 인바운드는 `room.error {code: inbound_not_allowed}`(반복 시 `4400`). **`room.join` 은 연결당 초당 5회**(P0 §6.8), 초과 시 `4429`.
+- 클라이언트 → 서버(허용 목록 전부): 룸 도메인 인바운드는 **3종**(`room.join {room, resume?}`·`room.leave {room}`·휘발성 `typing {room}`)이고, 연결 공통 `hello`·`ping`(M1 04)을 더한 5개가 허용 목록의 전부다. 3종은 `/ws/room` 에서 새로 허용하는 것이다. 그 밖의 인바운드는 `room.error {code: inbound_not_allowed}`(반복 시 `4400`). **`room.join` 은 연결당 초당 5회**(P0 §6.8), 초과 시 `4429`.
 - 서버 → 클라이언트:
 
 | `t` | 본문 | 비고 |
@@ -987,12 +998,13 @@ flowchart TD
 | CH-AC9 | `request_key` 만료 뒤 같은 `clientMsgId` 재전송 → 기존 메시지 반환, `room.last_seq` 불변(seq 구멍 없음) | L3 |
 | CH-AC10 | 읽기 모델 투영을 지연시킨 채 재개·`GET ?after=` → 누락 없이 복구(대기·재시도), 구독 직전 push 유실 없음 | L3 |
 | CH-AC11 | 메시지 삭제 → 본문 NULL 묘비, 구독자 `chat.deleted`, 재생 시 묘비, `hold` 방 삭제 거절 | L3 |
+| CH-AC15 | 신고 전 삭제된 메시지를 72시간 안에 신고하면 격리본이 스냅샷으로 승격되고, 72시간 뒤에는 `body_enc` 가 NULL 로 정리되며, 격리본이 읽기 모델·push·outbox·로그에 없다(센티널) | L3 센티널 |
 | CH-AC12 | 세션 만료 후 `participant`/`sender_key`/`reporter_key` 가 `purged:` 로 바뀌고 멱등 유일 키 충돌이 없다 | L3 |
-| CH-AC13 | 금칙어가 든 전송 → `201` 이고 `masked=true`, 본문은 코드포인트 수가 같은 `*` 치환본이다. 센티널 금칙어가 DB 덤프·outbox·push·읽기 모델·`request_key` 응답·로그에 없다. 거절 지표는 늘지 않는다 | L3 센티널 |
+| CH-AC13 | 금칙어가 든 전송 → `201` 이고 `masked=true`, 본문은 코드포인트 수가 같은 `*` 치환본이다. 센티널 금칙어가 DB 덤프·outbox·push·읽기 모델·`request_key` 응답·로그에 없고, **덤프의 `request_hash` 에서 센티널의 키 없는 SHA-256 값도 발견되지 않는다**. 거절 지표는 늘지 않는다 | L3 센티널 |
 | CH-AC14 | 링크·10초 내 같은 본문은 여전히 `400 validation_failed`, CS 방은 금칙어 규칙을 적용하지 않는다, 같은 `clientMsgId` 재전송은 저장된 치환본을 돌려준다(목록 변경 후에도 동일) | L3 |
 | SP-AC1 | 두 상담원이 동시에 claim → 한 명만 성공 | L3 동시성 |
 | SP-AC2 | 임대 만료 후 이전 상담원의 resolve 거절, 티켓이 대기열 복귀 | L3 |
-| SP-AC3 | CS 본문 센티널이 DB 덤프·outbox·읽기 모델(평문)·`request_key.response_body`·로그에 없다 | L3 |
+| SP-AC3 | CS 본문 센티널이 DB 덤프·outbox·읽기 모델(평문)·`request_key.response_body`·로그에 없고, **`request_hash` 는 본문 비의존(`roomId·clientMsgId·길이`)이라 센티널 SHA-256 이 덤프에 없다** | L3 |
 | SP-AC4 | ws-gateway 설정에 키 재료(`KEK_KEYS_FILE`/DEK, 상향 전 `FIELD_KEYS`)가 없다, 푸시 메시지에 본문이 없다 | L2·L3 |
 | SP-AC5 | 상담원이 대화를 열면 감사 행이 생기고 롤백 시 사라진다 | L3 |
 | SP-AC6 | 고객이 남의 주문을 연결하면 `403 order_not_owned` | L2 |
@@ -1000,6 +1012,10 @@ flowchart TD
 | SP-AC8 | release/reaper 뒤 이전 상담원은 REST 조회가 즉시 거절되고 구독이 `room.closed` 로 해제된다(읽기 모델 지연과 무관) | L3 |
 | SP-AC9 | CS 방 재개·스냅샷 모드에서 gateway 가 `chat.notice` 외에는 아무 본문도 보내지 않는다(설정에 키 없음) | L3 |
 | SP-AC10 | `typing` 을 보내도 `lease_until` 이 늘지 않고 총 상한(2시간)을 넘는 연장이 거절된다 | L3 |
+| SP-AC11 | 해결(`resolved`) 직후 이전 상담원의 REST 열람이 `403`, 재오픈 티켓은 `open` 에서 새 `claim_token`·새 `claimed_at` 으로 재배정되고 총 상한은 새 배정 시각부터 계산된다 | L3 |
+| CH-AC16 | 풀 크기 2 에서 동시 전송 3건이 교착 없이 모두 끝난다(정책 판정은 잠금 전, 잠금 안은 채팅 자체 조건만) | L3 |
+| CH-AC17 | 읽기 모델 투영을 멈춘 채 `room.join`(replay·snapshot 모두) → 2초 뒤 `room.error unavailable` + `4500`, 스냅샷의 `head` 이하 누락이 없다. 구독 먼저 버퍼링한 push 중 `seq > head` 만 스냅샷 뒤 방출된다 | L3 카오스 |
+| CH-AC18 | 유휴 연결에서 `hb.heads` 가 마지막 `seq` 보다 크면 클라이언트가 `resume` 재요청한다. 재생 200건이 송신 큐 상한(64건)을 넘겨도 `4408` 이 나지 않고, 연속 `4408` 후 재접속은 `resume` 없이 스냅샷 모드다 | L3 |
 | 카오스 | worker 중단 중 전송 → 재개 후 이력 순서·푸시 복구, gateway 재시작 중 재접속 폭풍 | L3 |
 | 부하 | k6: 동시 방 20개 × 방당 구독 20, 초당 메시지율 계단식 → `pf_chat_fanout_seconds` p95 | L3 |
 
@@ -1040,7 +1056,7 @@ flowchart TD
 | 영역 | 계약 |
 |---|---|
 | P0 | 채널 모델(`/ws/room`, ADR-032), 서비스 경계(모놀리스 유지, ADR-030), 이벤트 전달 계층(ADR-031: 채팅 규모에선 폴링으로 충분), RBAC `agent`, 자원 예산 |
-| P1 바둑 | (조정 완료) `game.started`·`game.finished`·`game.abandoned`(P1 소비자 표에 `chat-game-sync` 추가 요청), `GameRoomPolicy` 구현(포트 소유는 `realtime`), 관전자 방 비공개 규칙, 익명 플레이어 허용(P1 §10). presence 는 `realtime` 소유(D19) |
+| P1 바둑 | (조정 완료) `game.started`·`game.finished`·`game.abandoned`(P1 소비자 표에 `chat-game-sync` 추가 요청), `GameRoomPolicy` 구현(포트 소유는 `realtime`), 관전자 방 비공개 규칙(UX 배려 — 부정 억제는 관전 지연), 플레이어 로그인 필수(U21, 익명은 관전자만). presence 는 `realtime` 소유(D19) |
 | P2 상거래 | `OrderContextReader` 읽기 포트(요약·**소유자 검증 인자** 요청 C9), 환불·분쟁은 채팅이 아니라 commerce 관리 도구로(채팅이 주문 상태를 바꾸지 않는다) |
 | P3 풀필먼트 | 배송 추적 요약을 `OrderContextReader` 에 포함 요청(읽기 전용), 반품 접수를 티켓에서 시작하는 연동은 후속 |
 
@@ -1079,7 +1095,7 @@ flowchart TD
 |---|---|
 | ~~금칙어 정책(마스킹 vs 거절)~~ | **닫힘(2026-11-05, U17)**: 마스킹(`*` 치환 후 전송), 원문 저장 안 함(제안) |
 | **[사용자 제공]** 금칙어 초기 목록 | P1 구현 시 |
-| ~~관전자 익명 허용, 플레이어 로그인 필수 여부~~ | **닫힘(2026-11-04)**: P1 §5 — 익명 세션도 비레이팅 대국·관전 가능(뮤트 우회는 알려진 위험, §22) |
+| ~~관전자 익명 허용, 플레이어 로그인 필수 여부~~ | **닫힘(U21, 2026-11-05)**: 플레이어(레이팅·비레이팅 불문)는 로그인 필수, 익명은 **관전자만**(뮤트 우회는 관전자에 한한 알려진 위험, §22). 2026-11-04 의 '익명 비레이팅 대국 허용'은 폐기 |
 | ~~`*InTx` 공개 usecase 규칙(C3)~~ | **닫힘(2026-11-04)**: P0 §2.4 B12 정본 |
 | **[사용자 판단]** Web Push 채택 여부와 구독 토큰 등급 | Phase 6 후반 |
 | **[사용자 판단·법무 검토 필요·미확인]** CS 보관 기간(1년 제안)과 삭제 요청 처리 정책(법적 보존 충돌 시) | 법무 검토 |

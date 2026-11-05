@@ -9,8 +9,8 @@
 
 ## 결정
 0. **도입 시점(구현 순서 D24)**: `/ws/room` 의 **첫 사용처는 6a(CS 채팅)** 이고 대국 룸(`game:*`)은 Phase 1(바둑, 구현 순서 마지막)에서 같은 연결에 추가된다. Phase 3~5 는 `/ws/public`·`/ws/private` 만 쓴다.
-1. **세 번째 연결 `/ws/room`** 을 추가한다. 세션 필수(익명 포함), 한 연결에 여러 룸을 `room.join` 으로 구독한다(연결당 최대 8, 제안). 룸 키는 `<type>:<uuid>`(`game:`·`chat:`·`cs:`), 구독 속도는 초당 5회(초과 시 `4429`, 정본 값).
-2. **WebSocket 은 push 전용을 유지한다.** 쓰기(착수·채팅·신고)는 멱등 키가 있는 REST 이고 결과가 룸 채널로 push 된다(ADR-018). 인바운드 허용은 `hello`·`room.join`·`room.leave`·`ping`·휘발성 `typing` 뿐이다.
+1. **세 번째 연결 `/ws/room`** 을 추가한다. 세션 필수(익명은 **관전자만**, U21 — 대국 플레이어는 로그인 필수; 익명 연결은 역할별 슬롯 상한으로 로그인 연결과 분리, features/14 RT-15), 한 연결에 여러 룸을 `room.join` 으로 구독한다(연결당 최대 8, 제안). 룸 키는 `<type>:<uuid>`(`game:`·`chat:`·`cs:`), 구독 속도는 초당 5회(초과 시 `4429`, 정본 값).
+2. **WebSocket 은 push 전용을 유지한다.** 쓰기(착수·채팅·신고)는 멱등 키가 있는 REST 이고 결과가 룸 채널로 push 된다(ADR-018). 인바운드 허용은 룸 도메인 **3종**(`room.join`·`room.leave`·휘발성 `typing`)과 연결 공통 `hello`·`ping`(합 5개)뿐이다.
 3. 룸 순번·재개: **도메인이 자체 순번 로그를 가진 룸**은 그 순번이 방 순번이다 — (a) 대국은 `game_event`(push 는 fast lane `room_changed`), (b) 채팅은 `chat` 메시지 표(명령 쪽 방 카운터, ADR-045; push 는 표준 경로 outbox → chat-broadcaster → NOTIFY). 둘 다 재생은 `RoomEventSource` 이고 `room_log` 에는 쓰지 않는다. **`room_log (room_key, seq)` + `room_seq`**(M1 `change_log` 의 일반화)는 **자체 로그가 없는 룸 종류용 예약**(현재 해당 없음)이다. 이력이 없으면 **도메인이 만든 스냅샷**으로 복구한다(정본은 도메인 표).
 4. **`realtime` 모듈이 포트를 소유**한다: `RoomAccessPolicy`, `RoomSnapshotProvider`, `RoomMessageMapper`, `RoomEventSource`(도메인이 자체 순번 로그를 가진 룸의 재생·원천). 도메인 모듈이 `GameRoomPolicy`(game)·`ChatRoomPolicy`(chat)·`CsRoomPolicy`(support) 구현을 `apps/ws-gateway/compose` 에서 등록한다(포트를 도메인이 정의하거나 game 이 chat 을 임포트하는 구성은 쓰지 않는다) → `realtime` 은 도메인에 의존하지 않는다.
 5. 룸 이벤트 지연 예산은 **p95 ≤ 250ms(제안, 미측정)**. 자체 순번 로그가 있는 룸(대국)은 **명령 tx 의 `NOTIFY room_changed` + `RoomEventSource`** 를 기본 fast lane 으로 쓴다(경계 규칙 예외 없음). 로그 없는 룸이 예산을 넘길 때의 2차 대응 `realtime.AppendRoomLogInTx` 는 **미사용 예약**이다 — 쓰려면 ADR-030 개정으로 허용 쌍 #11 을 먼저 추가해야 한다(경계 규칙 R4).

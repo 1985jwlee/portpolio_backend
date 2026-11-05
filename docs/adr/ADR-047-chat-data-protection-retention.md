@@ -17,7 +17,7 @@ M1 의 필드 암호화는 `report.note` 하나였고, 이유는 "저장하는 �
 4. **outbox/inbox 페이로드에도, `request_key.response_body` 에도 CS 본문을 싣지 않는다**(7일/24시간 보관·PUB 가정, ADR-026 §9.1). CS 이벤트는 메타데이터만, CS 전송의 멱등 재생 응답은 `{messageId, seq}` 만 가진다.
 5. **보관**: 대국 채팅은 대국 종료 후 **30일**(확정, U7), CS 채팅은 해결·종료 후 **1년**(확정, U7, 법적 보관 의무는 **법무 검토 필요·미확인**). 보관 기간이 지나면 삭제한다(익명화가 아니라 행 삭제 + 이벤트 없는 읽기 모델 정리 — database-schema §9 예외 목록에 추가 필요).
 6. **열람 감사**: 상담원·관리자가 CS 대화를 열면 감사 로그(`admin.support_conversation_opened`, category `admin`, `actor_role=agent|admin`)를 **대화 열람 세션당 1회**(같은 `(actor, room)` 의 첫 복호화 조회, 이후 30분 윈도우 제안) 같은 트랜잭션에 남긴다. 조회마다 쓰면 알림마다 `audit_log` 가 쏠린다. M1 `report_note_read` 와 같은 "조회도 짧은 쓰기 tx" 패턴이다(ADR-027 확장; `actor_role` 열거에 `agent`/`operator` 추가가 필요).
-7. **삭제 요청(`DeleteMessage`)**: 발신자 본인(또는 관리자)이 삭제를 요청하면 한 트랜잭션에서 본문 컬럼을 NULL 로 비우고 묘비(`status=deleted`, `deleted_at`)로 두며 발신자 연결을 `purged:<uuid>` 로 끊고 `chat.message_deleted` 를 발행한다(읽기 모델도 비운다). `hold`(신고 보류) 방·법적 보존 대상이면 거절하고 사유를 기록한다(정책은 법무 검토 후, 미확인). 신고 스냅샷(`snapshot_enc`)에는 삭제가 소급되지 않는다(증거 보존, 처리 후 90일 뒤 삭제).
+7. **삭제 요청(`DeleteMessage`)**: 발신자 본인(또는 관리자)이 삭제를 요청하면 한 트랜잭션에서 본문 컬럼을 NULL 로 비우고 묘비(`status=deleted`, `deleted_at`)로 두며 발신자 연결을 `purged:<uuid>` 로 끊고 `chat.message_deleted` 를 발행한다(읽기 모델도 비운다). `hold`(신고 보류) 방·법적 보존 대상이면 거절하고 사유를 기록한다(정책은 법무 검토 후, 미확인). **신고 전 삭제의 증거 소실을 막기 위해 삭제 본문은 기존 ENC 필드 `message.body_enc` 에 72시간(제안, `quarantine_until`) 암호화 격리한다** — 클라이언트·읽기 모델·push·이벤트에는 나가지 않고, 그 안에 신고가 접수되면 신고 스냅샷으로 승격하며 아니면 NULL 로 정리한다(새 ENC 필드 없음, 법무 검토 후 기간 확정). 신고 스냅샷(`snapshot_enc`)에는 삭제가 소급되지 않는다(증거 보존, 처리 후 90일 뒤 삭제).
 8. **로그**: 채팅 본문, 방 id 와 발신자의 결합은 어떤 로그에도 남기지 않는다(`room_id` 는 허용, 본문·표시 이름 금지). `Redactor` 거부 목록에 `body`·`note` 는 이미 있다.
 9. **세션 행위자 키 익명화**: 세션은 7일이면 삭제되는데 채팅 보관은 30일~1년이므로, `chat` 이 `AnonymizeSessionData` 를 등록해 `participant.actor_key`·`message.sender_key`·`report.reporter_key` 의 `session:` 값을 `purged:<uuid>` 로 교체하고 `chat_read.participant_view` 를 정리한다(읽기 모델 직접 쓰기 예외, database-schema §9).
 
@@ -27,7 +27,7 @@ M1 의 필드 암호화는 `report.note` 하나였고, 이유는 "저장하는 �
 | 테이블.컬럼 | 등급 | 비고 |
 |---|---|---|
 | `chat.message.body` | PUB | 대국 채팅 방만, CS 방에서는 NULL |
-| `chat.message.body_enc` | **ENC** | CS 방만, 평문 컬럼과 상호 배타 |
+| `chat.message.body_enc` | **ENC** | CS 방, 그리고 삭제된 plain 방 메시지의 72시간 격리본(`quarantine_until`). 평문 컬럼과 상호 배타 |
 | `chat.message.sender_key` | PSD | 행위자 키. 클라이언트에는 방 범위 `sender_ref` 만 노출. 세션 만료 시 익명화 |
 | `chat.participant.actor_key` | PSD | 세션 만료 시 익명화 |
 | `chat.report.reporter_key` | PSD | 세션 만료 시 익명화 |

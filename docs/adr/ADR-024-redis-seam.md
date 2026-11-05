@@ -24,13 +24,14 @@ M1 은 Redis 를 쓰지 않는다(ADR-022). 그런데 그 자리를 무엇이 �
 | `EventTransport` | outbox 이벤트를 구독 모듈로 전달 | Postgres 폴링 + `NOTIFY` | Redis Streams(소비자 그룹) — ADR-006 |
 | `StockReservation` (Phase 3) | 재고 원자 선점 — 연산 `reserve`·`release`·`confirm`·`restock`·`peek`(phases/00 §5.4, 영역 문서에서 `StockStore` 라 부르던 것과 같은 포트) | — | Lua 스크립트(ADR-010), 단일 Redis 인스턴스(P0 D6) |
 
+- **`StockReservation` 의 두 정리 경로는 순서가 정해져 있다**: ① 만료 스윕은 Postgres 예약 행 CAS(`active→expired`)가 성공한 **뒤에만** `release.lua` 를 호출한다(Redis 먼저 되돌리면 확정 중인 예약 수량이 이중 복원된다). ② Redis 수량을 PG 정본과 맞추는 교정은 `rebuilding` 상태로 새 `reserve` 를 막은 동안에만 쓴다(교정 중 동시 `reserve` 카오스 시험 대상).
 - `EventTransport` 는 **ADR-006 의 전달 인터페이스와 같은 것**이다. 구독 쪽은 항상 `ReceiveMessage` → inbox 저장이라 전달 계층이 바뀌어도 소비자는 안 바뀐다(ADR-020).
 - 포트는 `kernel` 에, 구현은 `packages/infra/{memory,postgres,redis}` 에 둔다. 의존 규칙: **`domain`/`service`/`usecase` 는 구현 패키지를 임포트할 수 없다**(경계 규칙에 추가, design/01).
 
 ### M1 기능별 처리 (Redis 없이)
 | 기능 | M1 처리 | 알려진 한계 | Redis 가 해소하는 것 |
 |---|---|---|---|
-| 세션 속도 제한 | 메모리 버킷(api 프로세스). IP 기준은 nginx `limit_req` | api 를 여러 개 띄우면 한도가 인스턴스별 | 인스턴스 간 공유 한도 |
+| 세션 속도 제한 | 메모리 버킷(api 프로세스). IP 기준은 nginx `limit_req`. **익명 세션 발급 자체에 전역 토큰버킷**(ADR-003: IP 미확인 시 세션 기준 제한의 우회 방어) | api 를 여러 개 띄우면 한도가 인스턴스별(전역 버킷도 인스턴스별 → 레플리카 ≥2 부터 Redis 공유 필수) | 인스턴스 간 공유 한도 |
 | 접속자 수 | gateway 메모리 합 | gateway 인스턴스 합산 불가 | 합산 |
 | 세션 검증 캐시 | gateway 메모리 30초 | 인스턴스 간 무효화 불가(최대 30초 지연, design/06) | 즉시 무효화 |
 | 멱등 키 | Postgres `request_key`(트랜잭션 안) | 쓰기에 DB 왕복 추가 | (옮기지 않는다 — 정합성상 DB 가 낫다) |

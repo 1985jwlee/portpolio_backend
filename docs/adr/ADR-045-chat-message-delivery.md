@@ -13,9 +13,9 @@ M1 의 WebSocket 은 **읽기 전용 푸시 채널**이고 쓰기는 REST 이다
 2. **방별 순번은 명령 쪽에서 부여한다.** 같은 트랜잭션에서 `chat.room.last_seq` 를 `UPDATE … SET last_seq = last_seq + 1 … RETURNING` 으로 올려 메시지 `seq` 로 쓴다(방 행 잠금으로 방 안 쓰기 직렬화, seq 순서 = 커밋 순서, 롤백하면 구멍 없음). **정책 검사(`ContentPolicy`)는 잠금 이전**에 한다.
 3. **중복 전송은 클라이언트 메시지 id 로 막는다.** 헤더 `Idempotency-Key` 를 `client_msg_id` 로 삼고 `UNIQUE (room_id, sender_key, client_msg_id)` 를 **최종 심판**으로 둔다(ADR-021 6번). 같은 id 의 재전송은 **기존 메시지(같은 seq)를 돌려준다**. `request_key`(24시간)가 남아 있으면 저장된 응답을 재생하고, **만료된 뒤 유일 키 충돌**이 나면 카운터가 이미 올랐을 수 있으므로 **트랜잭션을 롤백(카운터 원복)하고 기존 메시지를 조회해 응답**한다 — 어떤 경로에서도 방 seq 는 연속이다. (검토 반영: 롤백 없이 기존 행을 반환하면 카운터만 오른 채 커밋되어 영구 gap 이 생긴다.)
 4. **전파는 M1 파이프라인을 따른다**: 메시지 저장 + outbox(`chat.message_posted`)가 한 트랜잭션 → 디스패처 → 소비자 둘(`chat-projector` 가 `chat_read.message_view` 갱신, `chat-broadcaster` 가 `/ws/room` 구독자에게 푸시). 푸시 메시지는 **방 순번 `seq` 를 그대로 싣는다**(소비자가 새로 부여하지 않는다).
-5. **재개는 읽기 모델로**: 클라이언트가 방별 마지막 `seq` 를 `room.join { room, resume }` 에 보내면 gateway 가 `RoomEventSource`(chat 구현)로 `chat_read.message_view` 에서 `seq > resume` 를 재생하고, 이력이 없거나 너무 크면 최근 N건 스냅샷으로 대체한다. **구독을 먼저 등록한 뒤** `head` 를 쓰기 모델 `room.last_seq` 에서 읽고, 읽기 모델이 `head` 에 못 미치면 gateway 가 대기·재시도(100ms 간격 최대 2초)하며, 그래도 모자라면 클라이언트가 gap 으로 감지해 REST `GET ?after=` 로 채운다(소비자 둘의 처리 지연 차이로 push 가 투영보다 앞설 수 있기 때문, 검토 반영).
+5. **재개는 읽기 모델로**: 클라이언트가 방별 마지막 `seq` 를 `room.join { room, resume }` 에 보내면 gateway 가 `RoomEventSource`(chat 구현)로 `chat_read.message_view` 에서 `seq > resume` 를 재생하고, 이력이 없거나 너무 크면 최근 N건 스냅샷으로 대체한다. **구독을 먼저 등록한 뒤** `head` 를 쓰기 모델 `room.last_seq` 에서 읽고, 읽기 모델이 `head` 에 못 미치면 gateway 가 대기·재시도(100ms 간격 최대 2초)하며, 그래도 모자라면 **뒤처진 재생·스냅샷을 내보내지 않고 `room.error{unavailable, fatal}` + `4500` 으로 거절**한다(3차 검토 반영 — gap 으로 맡기면 `head` 를 믿은 클라이언트가 그 사이를 영구 누락한다. 방명록 RT-05 와 같은 방식, replay·snapshot·대국 룸 모두 같은 계약). 스냅샷 뒤에는 구독 버퍼에서 `seq > head` 만 방출하고, 룸 `hb`(와 대국 `clock`)가 현재 `head` 를 실어 유휴 시 누락을 감지한다. 재생은 송신 큐를 거치지 않고 드레인 기반으로 보내며(큐 상한 `4408` 재접속 루프 방지), 클라이언트는 지수 백오프+지터, 연속 `4408` 이면 스냅샷 모드로 간다(소비자 둘의 처리 지연 차이로 push 가 투영보다 앞설 수 있기 때문, 검토 반영).
 6. **암호화 방(CS)은 응답 재생·재개에서도 본문을 내보내지 않는다**: `request_key.response_body` 는 `{messageId, seq}` 만 저장하고, 재개·스냅샷 모드는 `room.joined{head}` + `chat.notice {room, seq}` 만 보낸다. 본문은 REST 조회(api 가 복호화, ADR-047). 지원 방 전송은 `/support/tickets/{id}/messages` 만이며 `POST /rooms/{id}/messages` 는 `support_ticket` 방을 `409 room_kind_mismatch` 로 거절한다.
-7. **WS 인바운드는 `room.join`·`room.leave`·`typing` 3종**(P0 §6.3 허용 목록)뿐이고 `room.join` 은 연결당 초당 5회(P0 §6.8, 초과 시 `4429`)다. 어느 인바운드도 DB 쓰기·임대 연장을 하지 않는다.
+7. **WS 룸 인바운드는 `room.join`·`room.leave`·`typing` 3종**(P0 §6.3 허용 목록; 연결 공통 `hello`·`ping` 을 더하면 5개)뿐이고 `room.join` 은 연결당 초당 5회(P0 §6.8, 초과 시 `4429`)다. 어느 인바운드도 DB 쓰기·임대 연장을 하지 않는다.
 8. **금칙어는 거절하지 않고 마스킹한다**(U17, 2026-11-05): 대국 채팅의 `ContentPolicy` 는 길이·링크·중복 위반만 `400 validation_failed` 로 거절하고, 금칙어는 서버가 `*` 로 치환(코드포인트당 1개, 길이 보존)해 저장·push 한다. **치환 전 원문은 저장하지 않는다**(제안) — 저장·outbox·push·읽기 모델·`request_key` 응답 모두 치환본만 다루고, 응답은 `masked` 플래그를 싣는다. 우회(띄어쓰기·자모 분리)는 신고로 보완한다. CS 방에는 적용하지 않는다. 초기 금칙어 목록은 구현 시 사용자가 제공한다.
 
 ## 설계 상세
@@ -64,7 +64,7 @@ REST 쓰기 지연(요청→응답)이 **p95 150ms**(제안) 를 넘는 것이 �
 | 푸시가 읽기 모델 투영보다 먼저 도착해 재개가 비어 보임 | plain 방은 push 가 본문을 포함하므로 재조회가 필요 없다. 재개는 **구독 먼저 → `head`(쓰기 모델) → 읽기 모델 대기·재시도** 순서로 구독 직전 push 유실을 막고, 그래도 모자라면 클라이언트가 gap 으로 감지해 REST 로 채운다. CS 방은 알림 전용이므로 GET 이 비면 짧은 백오프 재시도 |
 | 핫 방의 방 행 경합 | 방당 쓰기율 상한(속도 제한), 관전자 쓰기 별도 등급, 대국 방은 최대 인원 제한 |
 | 전달 지연이 길어 채팅이 답답함 | 지표 `pf_chat_fanout_seconds` 로 감시, 철회 조건 충족 시 WS 전송 도입 |
-| 동일 `client_msg_id` 를 다른 본문으로 재사용 | `request_hash` 불일치 시 `422 idempotency_key_reuse`(M1 규칙) |
+| 동일 `client_msg_id` 를 다른 본문으로 재사용 | `request_hash`(서버 비밀 키 HMAC, CS 방은 `roomId·clientMsgId·길이` 만) 불일치 시 `422 idempotency_key_reuse`(M1 규칙). CS 방에서 길이까지 같은 다른 본문은 유일 키 충돌로 기존 행을 돌려준다 |
 | `request_key` 만료 뒤 재전송이 카운터만 올림 | 충돌 시 롤백 후 기존 행 반환(결정 3), 시험 CH-AC9 |
 | 원문 미보존 때문에 신고 처리자가 치환 전 내용을 볼 수 없고 오탐을 복구할 수 없음, 우회 표현은 치환되지 않음 | `masked` 플래그·마스킹 지표로 상습 추정, 신고 시 앞뒤 5건 스냅샷(치환본), 한계가 드러나면 원문 단기 ENC 보관 재검토(PUB 등급·키 회전 부담이 있어 지금은 채택 안 함) |
 

@@ -274,9 +274,9 @@ Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evol
 |---|---|---|---|
 | Phase 1 | `game` 모듈(`chat`·`/ws/room` 은 6a 에서 먼저 도입, 여기서는 대국 채팅 룸 종류 추가) | 대국 명령은 **REST**(WS 는 push 전용), `game_event` 로그 + NOTIFY fast lane, `realtime` 이 룸 포트·presence 소유 | [P1](../design/phases/01-baduk.md), [P4](../design/phases/04-chat.md), ADR-032·034·035·045 |
 | Phase 2 | `analysis`(KataGo 별도 프로세스; `ledger` 는 Phase 3 에서 이미 도입) | 분석 큐는 **Postgres inbox 선점**(Redis 없음), 보상 전이는 B12 `InTx` | [P1](../design/phases/01-baduk.md) §9~10, ADR-036·037 |
-| Phase 3 | `catalog`, `deal`, `order`, `ledger`(모의 USDC·POINT 지급·교환), 최소 `pricefeed`(고정 환율 소스), `payment`(원장 결제·혼합 결제), 최소 `escrow`(hold / release / refund)와 환불, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정은 B12 `InTx` 쌍, Streams 판정 | [P2](../design/phases/02-commerce.md), ADR-031·038·040·048 |
+| Phase 3 | `catalog`, `deal`, `order`, `ledger`(모의 USDC·POINT 지급·교환), 최소 `pricefeed`(고정 환율 소스), `payment`(원장 결제·혼합 결제), 최소 `escrow`(hold / release / refund)와 환불, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정·환불(취소 포함)·수령 확인은 B12 `InTx` 쌍(락 순서 R9, 다중 저널 일괄 잠금 R10), Streams 판정. 라이브는 POINT 단독 결제(D1) — USDC 다리·교환·혼합은 6d 입금 브리지 이후 노출 | [P2](../design/phases/02-commerce.md), ADR-031·038·040·048 |
 | Phase 4 | 워크로드 분리 — **산출물은 k3d 실측 보고서**(HPA·PDB·롤링 소켓 재접속). 라이브는 Compose 를 유지하고 레플리카는 포화가 측정으로 확인될 때만 추가 | HPA·PDB 는 k3d 에서만 검증, M1 G8 롤링 패턴. `ws-gateway` 사이트/룸 분화는 `/ws/room` 이 생기는 6a 이후 측정으로 판단(P0 D17) | [P0](../design/phases/00-platform-evolution.md) §10, ADR-033 |
-| Phase 5 | `settlement` + `payment`·`escrow`·`pricefeed` 확장(카드 결제, 분쟁·동결·자동 확정, 실제 시세) | 웹훅 inbox, 모의 결제 어댑터, KEK/DEK 상향 | [P2](../design/phases/02-commerce.md), ADR-039~041 |
+| Phase 5 | `settlement` + `payment`·`escrow`·`pricefeed` 확장(카드 결제, 분쟁·동결·자동 확정, 실제 시세) | 웹훅 inbox, 모의 결제 어댑터, KEK/DEK 상향, 환불 진행 표식(`pending_refund_krw`, R11)과 반품 요청 tx 의 `held→frozen`(쌍 #5 `FreezeInTx`) | [P2](../design/phases/02-commerce.md), ADR-039~041 |
 | Phase 6 (6a~6d) | `chat`·`support`(6a, `/ws/room` 도입), `inventory`·`fulfillment`(6c), 지갑 연결(6d) | 이중 재고 원장, 출고 사가, CS 티켓, 허용목록 역할(`agent`·`operator`) | [P3](../design/phases/03-fulfillment.md), [P4](../design/phases/04-chat.md), ADR-032·042~047 |
 | Phase 6e | 마작(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) | 마지막 구현 | [P1](../design/phases/01-baduk.md), ADR-034·035 |
 

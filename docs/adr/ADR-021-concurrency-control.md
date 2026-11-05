@@ -19,6 +19,7 @@
 7. **모든 쓰기(C·U·D)는 트랜잭션 안에서**: 한 문장짜리 쓰기도 `UnitOfWork.run` 으로 감싼다. 읽기 전용 핸들에는 쓰기 메서드가 없어 구조로 강제한다(ADR-025).
 8. **기본 격리 수준은 READ COMMITTED** 이며, 위 장치로 정합성을 얻는다. SERIALIZABLE 은 쓰지 않는다.
 9. **싱글톤 작업**(디스패처)은 어드바이저리 락 하나를 보유한 인스턴스만 수행한다.
+10. **여러 행을 잠그는 tx 는 전역 락 순서를 따른다**(P0 §2.4 R9: `reservation → deal.stock → user_purchase → payment → escrow → ledger 계정(id 오름차순) → order_exchange → order`). 한 tx 가 저널을 둘 이상 기장하면 **모든 저널의 계정을 모아 `FOR UPDATE ORDER BY id` 로 한 번에** 잠근 뒤 기장한다(`PostJournalsInTx`, R10). 교착(40P01)은 조율자가 **상한 횟수만 재시도**하고 넘으면 거절·경보하며, 역순 계정 두 tx 를 동시에 돌리는 교착 주입 시험을 둔다. 외부 호출(결제 환불)로 tx 가 둘로 갈리면 **tx1 이 같은 순서로 잠그고 `escrow.pending_refund_krw` 를 CAS 로 세워** 그 사이의 자동 해제·수령 확인·분쟁 판정을 막는다(R11).
 
 ## 설계 상세
 
@@ -74,8 +75,8 @@ sequenceDiagram
 | `events.outbox_event` | `new` → `processing` → `published` / `dead` | 단일 디스패처(어드바이저리 락), 순번 순서 |
 | `<m>.inbox_message` | `received` → `processing` → `processed` / `dead` | PK 중복 차단, 읽기 모델 순번 검사 |
 | `ledger.reward` (Phase 2) | `PENDING` → (분석 선점 `processing`) → `CONFIRMED`/`FLAGGED` | 분석은 트랜잭션 밖, 토큰 완료 |
-| `deal.reservation` (Phase 3) | `active` → `confirming` → `confirmed` / `expired` | Redis Lua 선점(ADR-010), 만료 복원도 선점 후 멱등 |
-| `payment.payment` / `escrow` (Phase 3 최소형, Phase 5 확장) | 상태 전이마다 기대 상태 조건 | PG 호출은 트랜잭션 밖, 웹훅은 inbox |
+| `deal.reservation` (Phase 3) | `active` → `confirming` → `confirmed` / `expired` | Redis Lua 선점(ADR-010), 만료 복원도 선점 후 멱등. **만료 스윕 = Postgres CAS 성공 후에만 `release.lua`**(반대 순서면 확정 중인 예약의 수량을 되돌린다); Redis↔PG 대조 교정은 `rebuilding` 차단 아래에서만 |
+| `payment.payment` / `escrow` (Phase 3 최소형, Phase 5 확장) | 상태 전이마다 기대 상태 조건 | PG 호출은 트랜잭션 밖, 웹훅은 inbox. 환불 in-flight 는 `escrow.pending_refund_krw` 표식(결정 10) |
 | `guestbook.entry` 수정·숨김 | `version` 비교 | 409 + 최신 상태 반환 |
 | `guestbook.report` 처리 | `open` → `resolved` 조건부 갱신 | 관리자 동시 처리 시 한 명만 성공 |
 

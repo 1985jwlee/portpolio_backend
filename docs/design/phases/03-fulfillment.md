@@ -291,7 +291,7 @@ ATP(sku)       = availableTotal − allocatedTotal − earmarkedTotal      (자�
 `ISSUE` 가 `allocated` 만 줄이고 `available` 은 그대로 두면 ATP 가 +1 되는 이중 계산이 되고, `PICK` 이 합계를 줄이면 전량 할당 SKU 가 CHECK 에 걸린다. 위 정의(집합 + ISSUE 동시 −)는 두 문제를 모두 없앤다.
 
 - 타임딜은 `deal` 생성 시 `earmark(sku, "deal:<id>", Q)` 를 `inventory` 에 요청해 **물리 재고를 먼저 묶는다**. 그래야 Redis 로 Q 개를 팔고도 출고 때 물리 재고가 모자라는 일이 없다.
-- 주문이 결제되면 `order.paid` 가 오고, 풀필먼트가 **약정에서 할당으로 소비**한다: `earmark −q`, `allocated +q` (`AcceptOrder` 의 같은 트랜잭션, `availableTotal` 불변). 약정의 **해제 규칙**은 §4.6.
+- 주문이 결제되면 `order.paid` 가 오고, 풀필먼트가 **약정에서 할당으로 소비**한다: `earmark −q`, `allocated +q` (`AcceptOrder` 의 같은 트랜잭션, `availableTotal` 불변). 이때 **`allocation.origin_ref`** 에 출처(`earmark:deal:<id>` 또는 `free`)를 기록한다 — 취소로 할당이 풀릴 때 어디로 돌려줄지의 근거다. 약정의 **해제 규칙**은 §4.6.
 
 ---
 
@@ -363,16 +363,21 @@ earmark 소비는 `earmarked_total = earmarked_total - :q, allocated_total = all
 
 판매 가능 총량 ≤ 약정 상한 규칙은 상거래(`deal`)가 받는다(P2). 약정의 증감은 아래 이벤트로만 일어난다.
 
-**활성화 시점 (D24)**: 약정은 6c 에서 켜진다(착수 점검: 물리 재고 시드 → 초기 약정 동기화 순). 그 전의 딜은 약정 없이 게시되었으므로, 켤 때 **진행 중 딜(open/scheduled)** 마다 `earmark(sku, "deal:<id>", 남은 판매 가능 수량)` 를 초기 동기화 잡이 만들고(재고가 모자라면 해당 딜을 `publish_rejected` 사유로 관리자 큐에 올린다), 이미 닫히거나 정산된 딜은 대상이 아니다.
+**활성화 시점 (D24)**: 약정은 6c 에서 켜진다(착수 점검: 물리 재고 시드 → 초기 약정 동기화 순). 그 전의 딜은 약정 없이 게시되었으므로, 켤 때 **진행 중 딜(open/scheduled)** 마다 `earmark(sku, "deal:<id>", 약정량)` 를 초기 동기화 잡이 만든다(재고가 모자라면 해당 딜을 `publish_rejected` 사유로 관리자 큐에 올린다). 이미 닫히거나 정산된 딜은 대상이 아니다.
+
+**전환 경합(C15).** 전환 중에도 예약·확정이 계속되므로 *남은 판매 가능 수량* 을 읽는 순간과 약정을 만드는 순간 사이에 확정이 끼면 약정이 모자라거나 남는다. 그래서 ① 딜별로 **확정 차단 상태**(P2 `deal` 의 `earmark_cutover` 플래그: 새 예약은 계속 받되 `ConfirmPurchase` 만 짧게 대기/재시도)로 만든 뒤 ② **약정량 = `totalQty − confirmed`(활성 예약 포함)** 로 약정을 만들고 ③ 그 딜의 `fulfillment_mode` 를 `physical` 로 바꾸고 차단을 푼다(딜 단위, 한 번에 하나씩). 차단 구간은 딜 하나당 한 트랜잭션 길이이고, 차단 중 도착한 확정은 대기 후 `physical` 로 확정된다. 전환 전에 `demo` 로 확정된 수량은 약정 대상이 아니다(`confirmed` 가 아니라 *앞으로 확정될 수량* 만 묶는다). 전환 시점에 이미 `demo` 로 확정된 주문은 `demo` 로 남는다(P2 §5.2.1).
 
 | 시점 | 이벤트 | 약정 변화 | 비고 |
 |---|---|---|---|
 | 딜 게시 | `deal.published {dealId, skuId, totalQty}` | `+Q` (`allocated + earmarked + Q ≤ available` 조건부 UPDATE) | 실패 시 `inventory.earmark_rejected` |
 | 결제 확정 주문 수신 | `order.paid` (`AcceptOrder`) | `−q` (+`allocated +q`) | 약정 부족(`earmark.qty < q`)이면 자유 재고로 폴백, 둘 다 없으면 `fulfillment.rejected(OUT_OF_STOCK)`(드문 경로, `pf_wms_earmark_shortfall_total`) |
 | 딜 마감 | `deal.closed` | **변화 없음** | 마감 시점에는 결제 확정됐지만 `order.paid` 가 아직 소비되지 않은 주문, 마감 후 확정되는 예약이 있을 수 있어 해제하지 않는다 |
-| 딜 정산 완료 | `deal.settled {dealId, skuId, totalQty, confirmedQty}` | **`−(totalQty − confirmedQty)` 만 해제** | `confirmedQty` 는 구매 확정 수량(소비되었거나 소비 대기 중인 약정 포함). 남는 약정 `confirmedQty − 소비분` 은 아직 올 `order.paid` 용으로 유지 |
+| 딜 정산 완료 | `deal.settled {dealId, skuId, totalQty, confirmedQty}` | **`현재 약정 − 소비 대기분` 만 해제**(아래 계산식) | `confirmedQty` 는 **`physical` 모드로 확정된 활성 수량**(활성 예약 포함, demo 확정·취소분 제외). 남는 약정 `confirmedQty − 순소비` 은 아직 올 `order.paid` 용으로 유지 |
 | 운영 조정 | `deal.stock_adjusted {delta}` | `±delta` | |
-| 출고 전 취소 | `deal.restocked {dealId, skuId, qty, reason:'cancel'}` | `+qty` (할당 해제와 쌍) | 취소로 풀린 할당이 판매 가능 재고로 돌아오는 경로. 사유가 `OUT_OF_STOCK` 거절이면 복원하지 않는다 |
+| 출고 전 취소(physical) | (이벤트 소비가 아니라 **`ReleaseAllocationInTx` 의 같은 tx**) | 할당의 `origin_ref` 가 `earmark:deal:<id>` 이고 그 약정 행이 **살아 있으면(미정산)** `earmarked +q`·`allocated −q`(P1 불변), 아니면 `allocated −q` 만(자유 재고로) | 약정 복귀를 별도 이벤트로 하면 해제와 복귀 사이에 `deal.settled` 가 끼어 약정이 영구히 새거나 이중 계상된다. 사유가 `OUT_OF_STOCK` 거절이면 할당이 없어 복원할 것이 없다 |
+| 출고 전 취소(demo) | `deal.restocked {dealId, skuId, qty, reason:'demo_cancel'}` (P2 `RestockOnCancel`, 트리거 `order.cancelled{mode=demo}`) | **변화 없음** | demo 주문은 풀필먼트가 켜지기 전 구간의 것이라 약정을 소비한 적이 없다. 이벤트는 `deal.stock`·Redis 복원 용도이고 `earmark-consumer` 는 이를 약정에 반영하지 않는다(소비해도 NOOP 으로 inbox 기록만) |
+
+**해제량 계산(`deal.settled`).** `channel_earmark` 는 현재 `qty` 와 함께 **채널별 누계 `consumed_qty`(소비) · `returned_qty`(취소 복귀)** 를 가진다. 정산 시 `pending = max(0, confirmedQty − (consumed_qty − returned_qty))`(확정됐지만 `order.paid` 가 아직 소비되지 않은 몫), **`release = qty − pending`** 을 한 조건부 UPDATE 로 해제하고 약정 행을 `released` 로 닫는다(이후 늦은 소비는 자유 재고 폴백, 취소는 자유 재고로 복귀). `totalQty − confirmedQty` 와 같은 값이 나오는 것이 정상이며(AC-WM-15), 다르면 `pf_wms_earmark_shortfall_total` 과 R4 대사 이상으로 올린다 — 운영 조정(`stock_adjusted`)·취소 복귀가 섞인 뒤에도 식이 깨지지 않게 누계로 계산하는 것이다.
 
 `deal.settled` 는 P2 상태 `settled` 전이(활성 예약 0·미결제 주문 0 조건) 시 발행한다. 마감(`closed`)과 정산(`settled`) 사이에 `order.paid` 가 늦게 소비돼도 약정이 이미 해제된 일이 없다는 것이 핵심이다.
 
@@ -437,7 +442,7 @@ stateDiagram-v2
 - **RETURNED_TO_SENDER** 는 종결이 아니라 **반품 흐름의 시작**이다: 반송 확정 시 `ReturnCase`(`origin = RTS`)가 만들어져 `RETURN_RECEIPT` → 검수 → `RESTOCK`/`DISPOSE` 로 이어진다(§5.3).
 - 상태 전이는 모두 `version` 조건부 UPDATE 이고, 전이마다 `fulfillment_order_event`(추가 전용 이력)와 outbox 이벤트가 같은 트랜잭션에 쓰인다.
 - `PACKED` 이후 취소는 상태 머신에서 허용하지 않는다(§5.4 취소 표). 대신 출고 후 반품 경로로 간다.
-- **교환 출고 게이트 (U23)**: P2 의 상품 교환 신규 주문(`order.paid` 의 `exchangeOfOrderId` 있음)은 상태 머신에 **새 상태를 만들지 않는다**. 접수·할당은 일반 주문과 같고(`ALLOCATED`/`PARTIALLY_ALLOCATED`), `fulfillment_order.release_gate_return_id` 가 채워져 있는 동안 **웨이브 후보에서 제외**될 뿐이다(§13.2). 게이트는 연결된 `return_case` 가 `return.inspected` 환불 판정(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`)이 되는 **같은 `InspectReturn` 트랜잭션에서 해제**된다(`release_gate_return_id` 를 NULL 로). `REJECTED` 면 게이트는 풀리지 않고 P2 의 `order.cancel_requested` 가 와서 일반 취소 판정표(§5.4, `ALLOCATED` → 즉시 취소)로 끝난다. 게이트 동안 할당은 유지되고, 게이트 시간의 상한은 P2 의 발송 기한 + 검수 시간이며 초과하면 P2 가 취소를 요청한다.
+- **교환 출고 게이트 (U23)**: P2 의 상품 교환 신규 주문(`order.paid` 의 `exchangeOfOrderId` 있음)은 상태 머신에 **새 상태를 만들지 않는다**. 접수·할당은 일반 주문과 같고(`ALLOCATED`/`PARTIALLY_ALLOCATED`), `fulfillment_order.release_gate_return_id` 가 채워져 있는 동안 **웨이브 후보에서 제외**될 뿐이다(§13.2). 게이트는 연결된 `return_case` 가 `return.inspected` 환불 판정(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`)이 되는 **같은 `InspectReturn` 트랜잭션에서 해제**된다(`release_gate_return_id` 를 NULL 로). `REJECTED` 면 게이트는 풀리지 않고 P2 의 `order.cancel_requested` 가 와서 일반 취소 판정표(§5.4, `ALLOCATED` → 즉시 취소)로 끝난다. **순서(C5)**: ① P2 는 교환 신규 주문의 `ConfirmPurchase` 에서 `order_exchange` 행을 잠그고 `awaiting_payment` 일 때만 확정하므로(결제 만료 스위퍼가 같은 tx 에서 신규 주문 `pending_payment→cancelled` 로 닫으면 그 뒤 `order.paid` 는 오지 않는다) 풀필먼트는 *닫힌 교환의 주문* 을 정상 경로에서는 받지 않는다. ② 그래도 `order.cancelled` 가 `order.paid` 보다 먼저 소비되는 역전에 대비해 `AcceptOrder` 는 접수 tx 의 첫 단계에서 inbox 의 같은 `orderId` 취소 기록을 확인하고 있으면 접수·할당 없이 NOOP(거절 이벤트도 내지 않는다 — 상거래가 이미 닫았다). ③ **FO 생성·할당·`release_gate_return_id` 설정은 같은 `AcceptOrder` tx** 라서 게이트 없는 교환 FO 가 웨이브 후보가 되는 구간이 없다. ④ 교환 신규 주문 줄은 `dealId` 가 있어도(원 주문과 같은 딜 줄, 판매가는 P2 가 원 줄의 결제 단가를 재사용) **약정을 소비하지 않고 자유 재고에서 할당**한다(`origin_ref=free`) — 교환은 딜 판매분이 아니라 재공급이고, 약정 소비로 하면 딜 약정이 원 판매분 몫만큼 모자라진다. 게이트 동안 할당은 유지되고, 게이트 시간의 상한은 P2 의 발송 기한 + 검수 시간이며 초과하면 P2 가 취소를 요청한다.
 
 ### 5.3 하위 상태 머신
 
@@ -524,7 +529,7 @@ stateDiagram-v2
 | PACKED | **취소 불가**(라벨 발급 후). 거절 + 출고 후 반품 안내 | 변동 없음 | `fulfillment.cancel_rejected` |
 | SHIPPED 이후 | 취소 불가 → 반품 경로 | 변동 없음 | `fulfillment.cancel_rejected` |
 
-**외부 사유 취소**: `order.cancelled`·`order.disputed`·`payment.refunded`(관리자 환불·분쟁 등으로 상거래가 먼저 주문을 닫은 경우)를 받으면 `reason = EXTERNAL` 로 위 판정표를 같은 방식으로 적용한다(PACKED 이후는 취소 불가 → 출고 후 반품/회수 안내). 응답 이벤트는 `fulfillment.cancelled`/`cancel_rejected` 이고 환불은 이미 상거래 쪽에서 진행 중이므로 중복 환불 근거로 쓰이지 않게 `reason` 으로 구분한다.
+**외부 사유 취소**: `order.cancelled`·`order.disputed`·`payment.refunded{full=true}`(관리자 환불·분쟁 등으로 상거래가 먼저 주문을 닫은 경우)를 받으면 `reason = EXTERNAL` 로 위 판정표를 같은 방식으로 적용한다. **`payment.refunded`·`payment.refund_pending` 은 `full` 플래그(P0 §8.3)가 `true`(전액 환불)일 때만 FO 전체 취소의 근거**이고, `full=false`(누적 부분 환불·반품 부분 환불)는 FO 를 건드리지 않는다 — 부분 환불이 출고를 통째로 멈추면 안 된다. `payment.refund_pending` 은 취소 근거가 아니라 무시하며(환불이 끝나야 `full` 판정이 확정), P2 `payment-fulfillment-refunder` 는 `reason=EXTERNAL` 이면 재환불하지 않으므로 이 취소는 환불을 되일으키지 않는다. 같은 주문에 `cancel_requested` 와 `payment.refunded{full}` 이 둘 다 오면 먼저 도착한 쪽이 판정표를 적용하고 나중 것은 이미 `CANCELLED` 라 NOOP 이다(PACKED 이후는 취소 불가 → 출고 후 반품/회수 안내). 응답 이벤트는 `fulfillment.cancelled`/`cancel_rejected` 이고 환불은 이미 상거래 쪽에서 진행 중이므로 중복 환불 근거로 쓰이지 않게 `reason` 으로 구분한다.
 
 경합 처리: 취소 요청과 상태 전이는 모두 `FulfillmentOrder.version` 조건부 UPDATE 이므로 한쪽만 이긴다. 진 쪽은 최신 상태를 읽고 판정표를 다시 적용한다(재시도 1회).
 
@@ -834,9 +839,9 @@ flowchart TD
 | 조율자(fulfillment, L5) | 호출(inventory, L4) | 원장 이동 | `available`/`allocated` |
 |---|---|---|---|
 | `AcceptOrder` · `BackorderRetry` | `AllocateInTx` (줄마다, `sku_id` 오름차순) | — | `allocated +`, (약정 소비 시 `earmarked −`) |
-| `CancelFulfillment`(피킹 전 취소) | `ReleaseAllocationInTx` | — | `allocated −` |
+| `CancelFulfillment`(피킹 전 취소) | `ReleaseAllocationInTx` (`origin_ref` 가 살아 있는 약정이면 **같은 tx 에서** `earmarked +` 복귀, §4.6) | — | `allocated −` (, `earmarked +`) |
 | `ConfirmPickScan` | `RecordMovementInTx(PICK)` | STORAGE·PICK_FACE→STAGING | 불변 |
-| PUTBACK 작업 스캔 | `RecordMovementInTx(PUTBACK)` + (취소 시) `ReleaseAllocationInTx` | STAGING→STORAGE·PICK_FACE | 불변 / `allocated −` |
+| PUTBACK 작업 스캔 | `RecordMovementInTx(PUTBACK)` + (취소 시) `ReleaseAllocationInTx`(약정 복귀 포함) | STAGING→STORAGE·PICK_FACE | 불변 / `allocated −`(, `earmarked +`) |
 | `HandOverShipments`(= `DispatchShipment`) | `IssueInTx` | STAGING→EXTERNAL (`ISSUE`) | `available −`, `allocated −` **동시** |
 | `ReceiveReturn` | `RecordMovementInTx(RETURN_RECEIPT)` | EXTERNAL→QUARANTINE | 불변(QUARANTINE 은 판매 대상 아님) |
 | `RestockReturn` | `RecordMovementInTx(RESTOCK)` | QUARANTINE→STORAGE | `available +` |
@@ -863,13 +868,13 @@ flowchart TD
 | `order.cancel_requested` | commerce | `orderId`, `reason` | `CancelFulfillment` (판정표 §5.4) |
 | `order.return_requested` | order | `orderId`, `returnId`, `lines`, `reason`, `resolution`(`REFUND`/`EXCHANGE`), (교환) `exchangeId`·`newOrderId` | `OpenReturn`(교환이면 `return_case` 에 신규 주문 연결) |
 | `order.address_corrected` | order | `orderId`, `shippingAddressRef` (새 rev) | `ON_HOLD` 해제 + 배송지 재스냅샷 |
-| `order.cancelled` · `order.disputed` · `payment.refunded` | order · payment | `orderId`, `reason` | 외부 사유 취소로 `CancelFulfillment`(`reason=EXTERNAL`, §5.4). 이미 출고된 주문은 반품/회수 안내 |
+| `order.cancelled` · `order.disputed` · `payment.refunded` | order · payment | `orderId`, `reason`, (`payment.refunded` 만) **`full`** | 외부 사유 취소로 `CancelFulfillment`(`reason=EXTERNAL`, §5.4). **`payment.refunded` 는 `full=true` 만 소비**, `full=false` 는 NOOP. 이미 출고된 주문은 반품/회수 안내 |
 | `deal.published` | deal | `dealId`, `skuId`, `totalQty` | `EarmarkStock` (거절 시 `inventory.earmark_rejected` 발행) |
-| `deal.settled` | deal | `dealId`, `skuId`, `totalQty`, **`confirmedQty`** | `ReleaseEarmark` — `totalQty − confirmedQty` 만 해제(§4.6). `deal.closed` 는 약정을 바꾸지 않는다 |
-| `deal.restocked` | deal | `dealId`, `skuId`, `qty`, `reason`(`cancel`) | 약정 `+qty` (할당 해제와 쌍) |
+| `deal.settled` | deal | `dealId`, `skuId`, `totalQty`, **`confirmedQty`** | `ReleaseEarmark` — 현재 약정에서 소비 대기분(`confirmedQty` − 순소비)을 뺀 만큼만 해제(§4.6 계산식). `deal.closed` 는 약정을 바꾸지 않는다 |
+| `deal.restocked` | deal | `dealId`, `skuId`, `qty`, `reason`(`cancel`·`demo_cancel`) | **약정을 바꾸지 않는다**(inbox 기록만). physical 취소의 약정 복귀는 `ReleaseAllocationInTx` 의 같은 tx(§4.6)이고 이 이벤트는 `deal.stock`·Redis 복원 신호다. 이름·필드는 P2 `RestockOnCancel` 과 같다 |
 | `deal.stock_adjusted` | commerce | `dealId`, `skuId`, `delta` | 약정 조정 |
 
-가정이 깨지면 바뀌는 곳: 이벤트 이름·필드는 `fulfillment-consumer` 의 매핑 한 곳. **주소를 참조(`shippingAddressRef`)로 받는다는 가정**과 **`deal.settled.confirmedQty` 를 P2 가 싣는다는 가정**(약정 해제량 계산)이 핵심이며, P2 가 주소를 페이로드에 직접 싣겠다면 outbox 보관(7일) 동안 평문 PII 가 DB 에 남으므로 **거절하고 참조 방식을 요구**한다.
+가정이 깨지면 바뀌는 곳: 이벤트 이름·필드는 `fulfillment-consumer` 의 매핑 한 곳. **주소를 참조(`shippingAddressRef`)로 받는다는 가정**과 **`deal.settled.confirmedQty` 를 P2 가 `physical` 확정 활성 수량으로 싣는다는 가정**(약정 해제량 계산)이 핵심이며, P2 가 주소를 페이로드에 직접 싣겠다면 outbox 보관(7일) 동안 평문 PII 가 DB 에 남으므로 **거절하고 참조 방식을 요구**한다.
 
 ### 9.2 발행
 
@@ -900,7 +905,7 @@ flowchart TD
 | 소비자 | 소유 | 구독 | 효과 |
 |---|---|---|---|
 | `fulfillment-consumer` | fulfillment | (교환 필드를 포함해) `order.paid`·`order.cancel_requested`·`order.cancelled`·`order.disputed`·`payment.refunded`·`order.return_requested`·`order.address_corrected` | 출고 흐름 시작/취소(요청·외부 사유)/반품 |
-| `earmark-consumer` | inventory | `deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked` | 약정 증감(§4.6) |
+| `earmark-consumer` | inventory | `deal.published`·`deal.settled`·`deal.stock_adjusted`(약정 증감, §4.6)·`deal.restocked`(NOOP — inbox 기록만) | 약정 증감(§4.6) |
 | `carrier-webhook-consumer` | fulfillment | 웹훅 inbox | 추적 반영 |
 | `fulfillment-projector` | fulfillment | `fulfillment.*`·`shipment.*`·`package.*`·`return.*` | `fulfillment_read` 갱신 |
 | `inventory-projector` | inventory | `inventory.*` + 원장 이벤트 | `inventory_read` 갱신 |
@@ -922,9 +927,9 @@ flowchart TD
 | `ledger_entry` | `id`, `seq` bigint, `type`, `sku_id`, `lot_id`, `from_location_id`, `to_location_id`, `qty` > 0, `reason`, `ref_type`, `ref_id`, `actor_key`, `trace_id`, `at` | **추가 전용**, `(sku_id, at)`·`(ref_type, ref_id)` 인덱스, `qty > 0` CHECK | SYS, `actor_key`=PSD |
 | `stock_balance` | PK(`sku_id`,`lot_id`,`location_id`,`status`), `on_hand` ≥ 0, `version` | CHECK `on_hand >= 0`, 부분 인덱스 `WHERE on_hand > 0` | SYS |
 | `sku_position` | `sku_id` PK, `available_total`(= Σ `on_hand`, `SELLABLE_KINDS`), `allocated_total`, `earmarked_total`, `version` | **CHECK `allocated_total + earmarked_total <= available_total`**, 각 ≥ 0. `ISSUE` 는 `available_total`·`allocated_total` 을 같은 UPDATE 에서 함께 −(§3.4 숫자 검증) | SYS |
-| `allocation` | `id`, `fo_line_id`, `sku_id`, `qty`, `status`(`ACTIVE`·`RELEASED`·`ISSUED`), `created_at` | `(sku_id,status)` 부분 인덱스 `WHERE status='ACTIVE'`, 유일(`fo_line_id`) 활성 | SYS |
+| `allocation` | `id`, `fo_line_id`, `sku_id`, `qty`, `status`(`ACTIVE`·`RELEASED`·`ISSUED`), **`origin_ref`**(`earmark:deal:<id>`·`free`), `created_at` | `(sku_id,status)` 부분 인덱스 `WHERE status='ACTIVE'`, 유일(`fo_line_id`) 활성 | SYS |
 | `location_plan` | `allocation_id`, `sku_id`, `lot_id`, `location_id`, `qty`, `status` | `(allocation_id)` | SYS |
-| `channel_earmark` | PK(`sku_id`,`channel_ref`), `qty` ≥ 0, `version` | `channel_ref` 예 `deal:<id>` | SYS |
+| `channel_earmark` | PK(`sku_id`,`channel_ref`), `qty` ≥ 0, **`consumed_qty`·`returned_qty`**(누계), **`released_at` NULL**(정산 해제 후 값), `version` | `channel_ref` 예 `deal:<id>` | SYS |
 | `asn`·`asn_line`·`inspection` | 입고 예정·검수 | `asn.code` 유일 | SYS |
 | `count_task`·`count_line`·`adjustment` | 실사·조정(승인 상태, 승인자) | `adjustment.status` 상태 CHECK | SYS, `approved_by`=PSD |
 | `discrepancy` | `kind`(R1~R6), `sku_id`, `detail` jsonb(수량만), `status` | `(status, kind)` 인덱스 | SYS |
@@ -1362,6 +1367,9 @@ M1 08 의 계층·등급 체계를 따른다. 이 영역의 AC 후보:
 | AC-WM-17 | 교환 신규 주문 할당 중에도 P1~P6 불변식이 유지되고(약정 비소비, `allocated_total` 만 증가), 게이트 취소 시 `allocated` 가 정확히 복원된다 | 속성 + L3 |
 | AC-WM-18 | 분할 배송: 배송 2건 중 1건만 `delivered` 일 때 `allDelivered=false`, 마지막 완료 시에만 true 이며 `tracking_view` 가 배송 N건과 `pendingLines` 를 낸다 | L3 |
 | AC-WM-15 | 딜 `closed` 와 `settled` 사이에 `order.paid` 가 늦게 소비돼도 약정이 이미 해제된 일이 없고 `settled` 에서 `totalQty − confirmedQty` 만 해제 | 이벤트 순서 주입 L3 |
+| AC-WM-19 | physical 취소의 약정 복귀는 `ReleaseAllocationInTx` 와 같은 tx 다 — 취소 직후 `deal.settled` 가 끼어도 약정이 새거나 이중 계상되지 않고(미정산이면 `earmarked +q`, 정산 후면 자유 재고로), 해제량이 누계(`consumed−returned`)로 계산된 값과 `totalQty − confirmedQty` 가 일치하며 P1 이 유지된다 | 이벤트 순서 주입 + 속성 L3 |
+| AC-WM-20 | `payment.refunded{full=false}` 는 FO 를 취소하지 않고 `full=true` 만 `reason=EXTERNAL` 로 취소하며(재환불 없음), demo 취소(`deal.restocked{reason:'demo_cancel'}`)는 약정을 바꾸지 않는다 | L3 |
+| AC-WM-21 | 6c 전환: 딜별 확정 차단 상태에서 약정량 = `total − confirmed`(활성 예약 포함)로 만들고, 전환 중 동시 확정 100건에도 약정 부족·과다가 없으며 전환 전 `demo` 확정분은 약정 대상이 아니다. 교환 신규 주문은 약정을 소비하지 않고 자유 재고로 할당되며 `order.cancelled` 가 `order.paid` 보다 먼저 소비돼도 접수되지 않는다 | 동시성 L3 |
 
 시험 기법:
 - **속성 기반**(L2): 임의의 이동 시퀀스(`fast-check` 류, 도구 미확인)에서 원장 합 = 잔고, 보존 법칙이 유지됨.
@@ -1378,7 +1386,7 @@ M1 08 의 계층·등급 체계를 따른다. 이 영역의 AC 후보:
 | `OrderGenerator` | 설정한 분포(SKU 가중치, 줄 수, 취소 확률, 주소 오류 확률, 반품 확률)로 P2 의 `order.paid` 와 같은 모양의 이벤트를 발행. 개발·데모용 | 관리자 토글, 초당 상한, 시드 고정(재현) |
 | `SimulatedCarrier` | `CarrierGateway` 구현. 운송장 발급, 상태 진행(수거→이동→배달 시도→완료/실패)을 **설정된 지연**으로 진행. 웹훅/폴링 둘 다 제공 | 지연 분포, 실패율, 중복·역순 주입 |
 | `WorkerBot` | 열린 작업을 자동으로 선점·스캔·완료(사람 없이 파이프라인 구동) | 봇 수, 오류율(오스캔·쇼트) |
-| `SimClock` | `Clock` 포트의 가속 구현(배송 며칠을 분 단위로) | 가속 배율, **시험·데모에서만** |
+| `DemoClock` | **플랫폼 단일 `DemoClock` 포트**(P0·P2 정본)의 풀필먼트 측 소비자. 별도 가속 시계(`SimClock`)를 두지 않는다 — 시계가 둘이면 배송 기한·반품 기한·에스크로 해제 기한의 압축 배율이 어긋난다. 배송 며칠을 분 단위로 만드는 것은 이 포트의 배율 하나이고, `SimulatedCarrier` 의 상태 진행 지연도 같은 시계를 읽는다 | 배율은 `DemoClock` 설정 한 곳, **시험·데모에서만**. 압축 후 실효 기한과 소비자 지연(p99) 여유의 검증은 P2(에스크로 기한·`ESCROW_TIME_SCALE` 절)가 소유하고 풀필먼트는 `shipment.delivered`·`return.*` 발행 지연 p99 를 지표로 제공한다 |
 | `FaultInjector` | M1 testkit 확장: 택배 웹훅 지연·유실, DB 지연, 잡 중단 | 시험 코드, 관리자 카오스 API |
 
 규칙: 시뮬레이터는 **기본 꺼짐**이고 켠 사실은 감사(`simulator_toggled`)에 남는다. 시뮬레이터가 만든 주문은 `is_simulated=true` 표식으로 구분하고 M1 공개 지표에 섞이지 않게 레이블을 분리한다(레이블 값은 고정 열거).

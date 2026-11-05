@@ -5,7 +5,7 @@
 - 전제: M1 의 기반 규약을 그대로 따른다 — 모듈러 모놀리스(ADR-001), CQRS 논리 분리와 `usecase → service → domain`(ADR-018·019), outbox/inbox(ADR-005·020), 선점·임대·낙관적 버전(ADR-021), **모든 쓰기는 트랜잭션**과 Drizzle 빌더 기본(ADR-025), 데이터 보호 등급(ADR-026), 감사 로그(ADR-027), 사고 대응(ADR-028), Redis 이음새(ADR-024).
 - 근거 문서: ADR-010(재고), ADR-011(정산 통화), ADR-015(모의 면책), ADR-016(결제·확장), [database-schema.md §11](../../domains/database-schema.md), [architecture.md §12](../../domains/architecture.md), [design/00](../00-system-overview.md), [F13](../features/13-events-pipeline.md).
 
-> **구현 순서 (P0 D24).** 이 문서의 **Phase 3 은 구현 순서 2번째**(M1 다음, 바둑보다 먼저)이고 Phase 5 는 4번째다. 그 결과 **Phase 3 은 바둑 보상 없이 단독으로 닫혀야** 한다. 선행 공백과 해법은 P0 §1.4 에 있고 이 문서에 반영한 것은 다음과 같다 — ① 포인트 출처는 **첫 로그인 지급(POINT 100,000, `ClaimWelcomeGrant`; USDC 는 환경별 공급 — P0 U24)·관리자 지급·USDC→POINT 단방향 교환**이고 바둑 보상은 Phase 2 에서 붙는 마지막 출처(ADR-048) ② Phase 3 의 `payment` 는 **원장 결제 어댑터(포인트 우선 + USDC 혼합)와 그 환불(원장 역분개)까지의 최소형**, 카드·웹훅·PG 환불은 Phase 5 ③ Phase 3 에도 **최소 `pricefeed`(고정 환율 소스 `FixedRateSource`)** 가 있어 모든 결제가 스냅샷을 갖는다(P0 G3 개정; `legacy_demo`·`LegacyDemoOrderClosure` 는 **완전 폐기**) ④ Phase 3 에도 **최소 `escrow`**(`hold`/`release`/`refund` 만)가 있어 `ConfirmPurchase` 가 `escrow` 행을 만들고(`HoldInTx`, 쌍 #5) 환불(쌍 #7)도 Phase 3 부터 활성이다 — 분쟁(`disputed`)·반품 동결(`frozen`)·자동 확정 타이머·정산(`settlement`)은 Phase 5 가 같은 테이블 위에 확장한다(소급 이관 절차 없음, §7.0) ⑤ `inventory` 약정은 6c 까지 꺼져 있다(`INVENTORY_EARMARK=off`, 딜 게시는 `publishing` 을 즉시 통과) ⑥ `/ws/room` 이 없어도 구매 결과·재고 카운트는 `/ws/private`·`/ws/public` 으로 충분하다. 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
+> **구현 순서 (P0 D24).** 이 문서의 **Phase 3 은 구현 순서 2번째**(M1 다음, 바둑보다 먼저)이고 Phase 5 는 4번째다. 그 결과 **Phase 3 은 바둑 보상 없이 단독으로 닫혀야** 한다. 선행 공백과 해법은 P0 §1.4 에 있고 이 문서에 반영한 것은 다음과 같다 — ① 포인트 출처는 **첫 로그인 지급(POINT 100,000, `ClaimWelcomeGrant`; USDC 는 환경별 공급 — P0 U24)·관리자 지급·USDC→POINT 단방향 교환**이고 바둑 보상은 Phase 2 에서 붙는 마지막 출처(ADR-048) ② Phase 3 의 `payment` 는 **원장 결제 어댑터(포인트 우선 + USDC 혼합)와 그 환불(원장 역분개)까지의 최소형**, 카드·웹훅·PG 환불은 Phase 5 ③ Phase 3 에도 **최소 `pricefeed`(고정 환율 소스 `FixedRateSource`)** 가 있어 모든 결제가 스냅샷을 갖는다(P0 G3 개정; `legacy_demo`·`LegacyDemoOrderClosure` 는 **완전 폐기**) ④ Phase 3 에도 **최소 `escrow`**(`hold`/`release`/`refund` 만)가 있어 `ConfirmPurchase` 가 `escrow` 행을 만들고(`HoldInTx`, 쌍 #5) 환불(쌍 #7)도 Phase 3 부터 활성이다 — 분쟁(`disputed`)·반품 동결(`frozen`)·자동 확정 타이머·정산(`settlement`)은 Phase 5 가 같은 테이블 위에 확장한다(소급 이관 절차 없음, §7.0) ⑤ `inventory` 약정은 6c 까지 꺼져 있다(`INVENTORY_EARMARK=off`, 딜 게시는 `publishing` 을 즉시 통과) ⑥ `/ws/room` 이 없어도 구매 결과·재고 카운트는 `/ws/private`·`/ws/public` 으로 충분하다 ⑦ **Phase 3 은 POINT 단독 결제로 닫는다**(2026-11-05 사용자 결정 D1): USDC 다리·USDC→POINT 교환·혼합 결제 코드는 Phase 3 에 만들고 로컬·시험 환경에서 시연하지만, **라이브 노출은 6d 의 devnet 입금→원장 반영 브리지(`UsdcDepositBridge`)가 생긴 뒤**다(설정 `USDC_LEG_ENABLED`, 라이브 기본 off). 라이브에서 100,000원을 넘는 상품은 숨기거나 'USDC 입금 후 구매 가능'으로 표기한다(U24·U26 은 그대로). 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
 
 > **면책 (ADR-015).** 이 문서의 모든 결제·정산·포인트·에스크로는 **모의(시뮬레이션) 또는 테스트넷**이다. 실제 금전이 오가지 않는다. 결제 관련 화면과 README 상단에 이를 표기하고, 카드번호·계좌번호는 어디에도 저장하지 않는다.
 
@@ -23,7 +23,7 @@
 | 이벤트 전달 | Postgres outbox 가 정본. Redis Streams 는 **Phase 3 부하 시험 후 소비자 단위로 판정**(P0 D4·ADR-031). 소비자 코드·inbox 는 불변 |
 | Redis | **Phase 3 의 재고 선점부터 필수.** Phase 3 은 **Redis 인스턴스 1개**(P0 D6·ADR-033)이고 용도는 **키 접두사로 논리 분리**한다 — 재고 영역(`pf:stock:`, 이 문서의 `redis-stock`)과 전달 영역(`pf:evt:`, Streams 를 채택할 때의 `redis-stream`). `noeviction`, 비스트림 키는 전부 TTL 또는 재구성 가능. 문서 안의 `redis-stock`/`redis-stream` 은 **논리 영역 이름**이다. 인스턴스 물리 분리는 Phase 4 재평가(S4) |
 | 실시간 | 개인 알림은 M1 의 `/ws/private`, 공개 딜 재고 표시는 `/ws/public` 의 순번 없는 휘발성 메시지. 방 단위 구독(`/ws/room`)은 필요할 때만 |
-| 원장 | `ledger` 모듈은 **하나**다(P0 D20): 스키마 정본은 이 문서 §9 / [ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md), 바둑 보상의 POINT 규칙·`reward` 상태 머신은 [phases/01 §10](01-baduk.md) / ADR-037. 상거래는 `PostJournalInTx` 등 공개 `InTx` 만 쓴다 |
+| 원장 | `ledger` 모듈은 **하나**다(P0 D20): 스키마 정본은 이 문서 §9 / [ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md), 바둑 보상의 POINT 규칙·`reward` 상태 머신은 [phases/01 §10](01-baduk.md) / ADR-037. 상거래는 `PostJournalsInTx`(다중 저널 일괄 잠금, P0 R10) 등 공개 `InTx` 만 쓴다 |
 
 ---
 
@@ -31,7 +31,7 @@
 
 | 단계 | 내용 | DoD(로드맵) | 이 문서의 구체화 |
 |---|---|---|---|
-| **Phase 3** | 타임딜: Redis Lua 재고 선점 → outbox → 멱등 소비 → Postgres, k6 부하 시험 | **초과 판매 0건 + 부하 결과표**(ADR-010·013) | 원장 결제(포인트 우선 + USDC 혼합)로 구매 완료까지의 수직 조각 — **최소 `escrow`(hold/release/refund)와 원장 환불 포함**. 선점·확정·만료·재구성·대조·부하 시험 |
+| **Phase 3** | 타임딜: Redis Lua 재고 선점 → outbox → 멱등 소비 → Postgres, k6 부하 시험 | **초과 판매 0건 + 부하 결과표**(ADR-010·013) | 원장 결제로 구매 완료까지의 수직 조각 — **DoD 는 POINT 단독 결제로 닫는다**(D1; 포인트 우선 + USDC 혼합·교환은 로컬·시험 환경 시연, 라이브는 6d 브리지 이후). **최소 `escrow`(hold/release/refund)와 원장 환불 포함**. 선점·확정·만료·재구성·대조·부하 시험 |
 | **Phase 5** | 결제·정산(모의): PG 테스트 모드, 에스크로 흐름, 시세 피드 | 결제 → 에스크로 → 정산 **재현**, **환율 고정 시점 기록**(ADR-011·016) | 카드 테스트 결제 어댑터, 웹훅 inbox, 에스크로 확장(분쟁·`frozen`·자동 확정 타이머)·정산 상태 머신, 시세 견적·실시세 수집 |
 | **Phase 6-4** | Solana(Anchor) USDC 에스크로(devnet) | devnet 에서 결제 → 보류 → 확정/환불 | **경계만 설계**: `EscrowChainPort`, 오프체인 상태와의 동기화 계약(§8.7) |
 
@@ -164,7 +164,7 @@ stateDiagram-v2
 ```
 
 - `publishing` 은 **약정 승인을 기다리는 중간 상태**다. 게시 요청 트랜잭션이 `draft→publishing` 으로 바꾸고 `deal.published`(= 약정 요청, P3 가 소비)를 발행한다. 풀필먼트의 `inventory.earmark_changed` 를 받으면 `scheduled`, `inventory.earmark_rejected` 면 `draft` 로 **되돌린다**(`deal.publish_rejected` 발행, 관리자에게 사유 표시). `scheduled` 는 약정이 승인된 뒤에만 도달하므로 **약정 없는 딜이 열리지 않는다**.
-- **약정 꺼짐 모드 (구현 순서 D24)**: `inventory`(6c)가 생기기 전까지는 `INVENTORY_EARMARK=off` 이고, 이때 `PublishDeal` 은 약정 요청 없이 `draft→publishing→scheduled` 를 **같은 트랜잭션에서 통과**한다(`deal.scheduled` 즉시 발행). 6c 에서 `on` 으로 바꾸면 위 약정 승인 흐름이 활성화되고, **진행 중(open/scheduled) 딜은 초기 약정 동기화 잡**으로 맞춘다(닫힘·정산 딜 제외, P0 §1.4 G5). **6c 착수 점검에는 '물리 재고 시드(딜 SKU 의 `inventory` 포지션)와 초기 약정 동기화'를 포함**한다 — 6c 이전에 확정된 주문은 `fulfillment_mode=demo` 로 남고 소급해 `physical` 로 바뀌지 않는다(§5.2.1).
+- **약정 꺼짐 모드 (구현 순서 D24)**: `inventory`(6c)가 생기기 전까지는 `INVENTORY_EARMARK=off` 이고, 이때 `PublishDeal` 은 약정 요청 없이 `draft→publishing→scheduled` 를 **같은 트랜잭션에서 통과**한다(`deal.scheduled` 즉시 발행). 6c 에서 `on` 으로 바꾸면 위 약정 승인 흐름이 활성화되고, **진행 중(open/scheduled) 딜은 초기 약정 동기화 잡**으로 맞춘다(닫힘·정산 딜 제외, P0 §1.4 G5). **6c 착수 점검에는 '물리 재고 시드(딜 SKU 의 `inventory` 포지션)와 초기 약정 동기화'를 포함**한다 — 6c 이전에 확정된 주문은 `fulfillment_mode=demo` 로 남고 소급해 `physical` 로 바뀌지 않는다(§5.2.1). 진행 중 딜의 전환은 **딜별로 확정을 잠시 차단한 상태**(`rebuilding` 과 같은 구매 차단)에서 하고, 초기 약정량은 `total − confirmed`(활성 예약분 포함 — 아직 확정될 수 있으므로 약정에 넣는다)다. 전환 절차의 정본은 P3(inventory 쪽)다.
 - `rebuilding` 은 §4.5 의 Redis 재구성 동안만 거치는 상태이며 구매는 `UNAVAILABLE` 로 차단된다(재구성 전 상태 `open`/`sold_out` 으로 복귀).
 - `closed → settled` 에서 **약정 잔여분을 해제**한다(§12.1): 해제량 = `total − confirmed`(= 판매되지 않은 수량만). 판매된 수량의 약정은 `order.paid` 소비(AcceptOrder)가 이미 또는 곧 소비한다.
 - `sold_out` 은 **파생 표시 상태**에 가깝다. 예약이 만료되면 수량이 돌아와 다시 `open` 이 된다(마지막 1개를 두고 결제를 놓친 사람 때문에 영구 품절로 보이면 안 된다).
@@ -214,7 +214,7 @@ ADR-010 의 결정(정본 = Postgres)을 유지하고, 역할을 **두 개의 �
 | `{deal:<id>}:user` | hash | `userKey → 보유 수량(활성 + 확정)` — 개인 한도 |
 | `{deal:<id>}:idem:<key>` | string | `resId` (PX = 예약 TTL × 4) — 같은 요청 재생 |
 
-**스크립트 4종** (`reserve`, `confirm`, `release`, `restock`). 동작 요약은 아래이고, 실제 Redis 로 돌려 본 결과는 §4.6 시험표에 있다(재현 스크립트는 별도 보관하지 않고 결과만 기록한다. 구현 시 §4.6 의 항목을 시험 코드로 다시 쓴다).
+**스크립트 4종** (`reserve`, `confirm`, `release`, `restock`). 동작 요약은 아래이고, 실제 Redis 로 돌려 본 결과는 §4.6 시험표에 있다(사전 시험 스크립트는 저장소에 두지 않았다. **결과 수치만으로는 재현 근거가 되지 않으므로** 구현 단계(3-B)에서 §4.6 의 항목을 시험 코드로 다시 써서 커밋한다).
 
 ```lua
 -- reserve  KEYS: meta, avail, res, exp, user, idem   ARGV: resId, userKey, qty, ttlMs
@@ -310,7 +310,13 @@ sequenceDiagram
 | Redis 재시작/유실 | `UNAVAILABLE`(키 없음) 급증, `pf_redis_stock_missing_total` | 구매 **자동 차단(fail-closed)** → 재구성 잡이 PG 로 키 재생성 → 차단 해제 |
 | Redis 에만 있는 예약(고아) | 대조 잡: Redis `res` 중 PG 에 없는 것 중 생성 후 grace(제안 10초) 초과 | `release` 로 회수 |
 | PG 에 `active` 인데 Redis 에 없음 | 대조 잡 | Redis 재생성(재구성에 포함) 또는 PG 쪽 `expired` 처리 |
-| `avail` 수치 불일치 | 대조 잡: `total - confirmed - Σactive` vs `avail` | **PG 기준으로 교정**, 지표 `pf_redis_stock_drift`, 경보 |
+| `avail` 수치 불일치 | 대조 잡: `total - confirmed - Σactive` vs `avail` | **PG 기준으로 교정하되 제자리 수정(`SET avail`)은 하지 않는다** — 교정은 아래 재구성 절차(`rebuilding` 으로 구매 차단 → 재계산 → 재작성)로만 한다. 차단 없이 고치면 계산과 쓰기 사이에 들어온 `reserve`·`release` 가 덮여 (I2) 가 다시 깨진다. 지표 `pf_redis_stock_drift`, 경보 |
+
+**만료 스윕과 교정의 순서 (C7)**
+
+- **만료 스윕(`ExpireReservationsJob`)은 PG 먼저**: `active` 이면서 `expires_at <= now` 인 예약을 `SKIP LOCKED` 로 선점해 `active→expired` CAS 를 커밋한 **뒤에만** `release.lua` 를 부른다. 순서를 뒤집어 Redis 를 먼저 복원하면, 그 사이 같은 예약의 확정 tx 가 PG 에서 성공해 확정 수량과 복원 수량이 겹친다(빠른 게이트 과대 허용 — 하드 게이트가 초과 판매는 막지만 (I2) 위반). `release.lua` 가 실패하면 `reservation.expired` 를 받은 `deal-redis-sync` 가 멱등으로 재시도한다.
+- **고아 회수**: 대조 잡이 Redis 에만 있는 예약을 grace(10초) 후 `release` 하므로, 예약 영속 tx(§4.4)는 `statement_timeout` 을 grace 보다 짧게(제안 5초) 둔다 — 회수 뒤에 늦게 커밋되는 PG 예약이 생기지 않게 한다.
+- **교정(대조 → 재구성)은 `rebuilding` 차단 아래에서만** 쓴다. 교정 중 들어온 `reserve` 는 `UNAVAILABLE`(503)이고, 만료 스윕은 PG CAS 만 진행하며 `release.lua` 는 차단 해제 후 재구성 결과에 이미 반영돼 `NOOP`/`ABSENT` 가 된다. 카오스 시험 AC-C47.
 
 **재구성 절차 (`worker deal:rebuild-stock <dealId>`, 멱등)**
 
@@ -362,10 +368,12 @@ flowchart TD
 | 조율자 | `order` 모듈의 `ConfirmPurchase` usecase 가 트랜잭션 경계 |
 | 참여 방식 | 층 규칙상 `order`(L4)는 `deal`(L3)·`ledger`(L4)를 **직접** 호출하고, 상위 층인 `payment`·`escrow`(L5)는 `order/port` 의 `PaymentRecordPort`·`EscrowHoldPort` 를 **소비자 쪽에서 정의**해 두고 구현은 각 모듈이 노출한 **`…InTx(tx, input)` 공개 함수**를 조립부(`apps/api/compose`)가 연결한다 |
 | 중첩 금지 유지 | 참여 함수는 트랜잭션을 열지 않고 받은 `TxContext` 를 쓴다(`uow.run` 중첩이 아님) |
-| 경계 규칙 | **B12 정본은 [P0 §2.4](00-platform-evolution.md)** — 이 경로는 허용 쌍 #2(order→deal 직접), #3(order→ledger 직접), #4(order→payment, **order 소유 `PaymentRecordPort` 로 의존 역전**), #5(order→escrow, `EscrowHoldPort`)에 해당한다. 함수 이름은 `…InTx`(`ConfirmStockInTx`·`PostJournalInTx`·`RecordPaymentInTx`·`HoldInTx`), 첫 인자 `TxContext`, 새 트랜잭션을 열지 않는다. 목록 밖 호출은 CI 가 막는다 |
+| 경계 규칙 | **B12 정본은 [P0 §2.4](00-platform-evolution.md)** — 이 경로는 허용 쌍 #2(order→deal 직접), #3(order→ledger 직접), #4(order→payment, **order 소유 `PaymentRecordPort` 로 의존 역전**), #5(order→escrow, `EscrowHoldPort`)에 해당한다. 함수 이름은 `…InTx`(`ConfirmStockInTx`·`PostJournalsInTx`·`RecordPaymentInTx`·`HoldInTx`), 첫 인자 `TxContext`, 새 트랜잭션을 열지 않는다. 목록 밖 호출은 CI 가 막는다 |
 | 결과 열거 | `ConfirmStockInTx` 는 `Confirmed` / `AlreadyConfirmed(sameOrder)` / `Exhausted` 셋 중 하나를 돌려준다. **`AlreadyConfirmed`**: 같은 예약이 이미 `confirmed` 이고 그 예약의 주문이 `paid` 이상(= 다른 경로가 먼저 정상 확정) → **NOOP**(롤백 없이 기존 결과를 돌려줌, 결제 취소 금지). **`Exhausted`**: 예약은 아직 확정되지 않았는데 `confirmed + q <= total` 조건이 0행(= 재고 소진) → 롤백하고 `rejected_stock`. 판별은 같은 tx 에서 예약 상태(`SELECT … FOR UPDATE` 후 `status`)를 먼저 읽어 `confirmed` 면 `AlreadyConfirmed` 로 분기한다 |
 | 경로별 완료 | API 승인 경로는 payment `claim_token`(임대)으로, **웹훅·대사 경로는 inbox 메시지의 `claim_token` + payment 행 `version` CAS** 로 직렬화한다(별도 예약 `claim_token` 불필요). 세 경로가 동시에 같은 결제에 도착해도 예약 CAS 가 한 번만 성공시키고 나머지는 `AlreadyConfirmed` 로 NOOP |
-| 락 순서 (전역 규약) | 행 잠금은 모든 tx 에서 **`reservation` → `deal.stock` → `user_purchase` → `payment` → `escrow` → `ledger` 계정(`account_balance`, id 오름차순) → `order`** 한 순서다. 확정 tx·환불 tx(§6.6: `payment` → `escrow` → 계정)·정산 tx(§8.5: 자기 `settlement` 행 → 계정, `escrow` 는 종결 상태라 잠그지 않는다)·지급/교환 tx(`grant`/`exchange_quote` → `supply_cap` → 계정)가 모두 이 순서의 부분 수열이다. 순서가 다른 경로를 만들면 교착한다(ADR-021, ADR-038, ADR-040, P0 §2.4) |
+| 교환 신규 주문 (C5) | 예약이 없는 주문(`reservation_id` NULL, §5.5)은 `ConfirmStockInTx` 를 부르지 않는다. 대신 같은 tx 에서 **`order_exchange` 행을 `FOR UPDATE` 로 잠그고 `status = 'awaiting_payment'` 를 확인**한 뒤 `awaiting_payment→awaiting_return` 으로 전이한다(0행·다른 상태면 `ExchangeClosed` → 롤백; 카드는 `refund_pending`(reason=`exchange_expired`)). **`AlreadyConfirmed` 판별은 payment 행 CAS** 다 — `approving→approved`(또는 원장 결제의 `awaiting_approval→approved`) 조건부 UPDATE 가 0행이고 그 결제가 이미 `approved` 면 NOOP. 만료 스위퍼(OD-16)는 같은 `order_exchange` 행을 잠그고 같은 tx 에서 신규 주문 `pending_payment→cancelled` 와 교환 `awaiting_payment→cancelled(PAYMENT_EXPIRED)` 를 함께 전이하므로 확정과 만료가 둘 다 성공할 수 없다 |
+| 락 순서 (전역 규약, P0 R9) | 행 잠금은 모든 tx 에서 **`reservation` → `deal.stock` → `user_purchase` → `payment` → `escrow` → `ledger` 계정(`account_balance`, id 오름차순) → `order_exchange` → `order`** 한 순서다(`order_exchange` 는 order 모듈 안에서 `order` 직전). 확정 tx·환불 tx(§6.6: `payment` → `escrow` → 계정 → `order`)·**취소 tx**(`RefundPayment(reason=cancel)`: `payment` → `escrow` → 계정 → `order`)·**수령 확인/자동 해제 tx**(`ReleaseEscrow`: `escrow` → 계정 → `order`)·**반품 요청 tx**(`RequestReturn`: `escrow`(`FreezeInTx`) → `order`)·교환 확정·만료 tx(`… → order_exchange → order`)·정산 tx(§8.5: 자기 `settlement` 행 → 계정, `escrow` 는 종결 상태라 잠그지 않는다)·지급/교환 tx(`grant`/`exchange_quote` → `supply_cap` → 계정)가 모두 이 순서의 부분 수열이다. **order 쓰기는 언제나 마지막 참여 함수**다(`MarkCancelledInTx`·`MarkRefundedInTx`·`MarkCompletedInTx`). 순서가 다른 경로를 만들면 교착한다(ADR-021, ADR-038, ADR-040, P0 §2.4) |
+| 다중 저널 락 (P0 R10) | 한 tx 가 저널을 둘 이상 기장하면(혼합 결제 확정·다리별 환불·교환·해제) **저널 단위로 잠그지 않는다** — `ledger.PostJournalsInTx(tx, journals[])` 가 모든 저널의 계정을 모아 `SELECT … FROM ledger.account_balance WHERE account_id = ANY($ids) ORDER BY account_id FOR UPDATE` 로 **한 번에** 잠근 뒤 기장한다(`PostJournalInTx` 는 길이 1 특수형). 한 tx 안에서 `PostJournalsInTx` 는 **한 번만** 부른다(두 번 부르면 두 번째 묶음의 작은 id 가 첫 묶음 뒤에 잠겨 순서가 깨진다). 교착(SQLSTATE `40P01`)·직렬화 실패(`40001`)는 조율자가 tx 전체를 **최대 3회**(제안, 지터 백오프 50~200ms) 재시도하고 초과하면 `503 unavailable`(+`Retry-After`, 경보) + 지표 `pf_tx_deadlock_retry_total{usecase,result}` 로 거절한다. 교착 주입 시험 AC-C46 |
 | 대안(사가) | 단계별 tx + 보상. 정합성은 약하고 보상 경로가 늘어 기각(ADR-038) |
 
 ```mermaid
@@ -386,17 +394,18 @@ sequenceDiagram
     else Exhausted (재고 소진)
         S-->>A: Rejected → 롤백 (포인트 차감 없음, 카드는 refund_pending)
     else 성공
-        Note over U: 락 순서: reservation → stock → user_purchase → payment → escrow → ledger 계정 → order
-        U->>P: RecordPaymentInTx(tx, payment APPROVED 또는 원장 결제)
+        Note over U: 락 순서(R9): reservation → stock → user_purchase → payment → escrow → ledger 계정 → order_exchange → order
+        U->>P: RecordPaymentInTx(tx, payment APPROVED 또는 원장 결제 — payment 행 CAS)
         U->>E: HoldInTx(tx, order, legs[], quote 고정)
-        U->>L: PostJournalInTx(tx, 자산별 분개: 구매자 → 에스크로 보류, 계정 id 오름차순)
+        U->>L: PostJournalsInTx(tx, 자산별 분개[]: 구매자 → 에스크로 보류, 모든 계정을 한 번에 id 오름차순 잠금)
+        Note over U,A: 교환 신규 주문이면 S 단계 대신 여기서 order_exchange FOR UPDATE (awaiting_payment 확인 → awaiting_return)
         U->>A: order 상태 pending_payment → paid (CAS)
         U->>O: append(order.paid, reservation.confirmed, payment.approved, escrow.held)
         U-->>A: 커밋
     end
 ```
 
-- Phase 3(원장 결제)은 `payment.RecordPaymentInTx` 가 다리별 원장 차감을 포함하므로 **외부 호출이 없어 한 트랜잭션으로 끝난다.** 최소 `escrow`(`HoldInTx`)도 Phase 3 부터 같은 tx 에 참여한다.
+- Phase 3(원장 결제)은 `payment.RecordPaymentInTx` 가 다리별 원장 차감을 포함하므로 **외부 호출이 없어 한 트랜잭션으로 끝난다.** 최소 `escrow`(`HoldInTx`)도 Phase 3 부터 같은 tx 에 참여한다. 다리별 차감 분개는 위 `PostJournalsInTx` **한 번의 호출**에 함께 담는다(R10).
 - Phase 5(카드)는 PG 승인 호출이 **트랜잭션 밖**(§6.3)이고, 승인 성공 뒤 이 확정 tx 로 들어온다.
 
 ### 4.8 타임딜 오픈 순간의 폭주 처리
@@ -494,10 +503,11 @@ stateDiagram-v2
 | 이력 | `order.order_status_history` 추가 전용(누가·언제·무엇이·원인 이벤트) |
 | 외부 주도 전이 | `fulfilling`/`shipped`/`delivered`/`return_requested` 의 후속은 풀필먼트 이벤트의 inbox 소비로만 일어난다(주문이 풀필먼트를 직접 호출하지 않는다) |
 | `fulfilling → cancelled` | `fulfillment.accepted` 는 AcceptOrder 단일 tx 가 접수(+할당 시도)를 끝낸 뒤 발행되고 페이로드에 `allocation(FULL\|PARTIAL\|PENDING)`·`lines[{lineId, qtyAllocated}]` 를 싣는다(P3 판본이 정본, `PENDING` 은 접수 후 할당 대기). 주문이 `fulfilling` 이 된 뒤에도 PICKING 중 취소 등으로 `fulfillment.cancelled`·`rejected` 가 올 수 있다. 이 전이를 허용 표에 둔다(없으면 상태 머신이 막힌다). 출고(PACKED 이후)는 취소가 아니라 반품 경로 |
-| 반품 | `delivered` 후 **반품 가능 기한 5일**(`RETURN_WINDOW_DAYS`, 제안) 안에서만 `order.return_requested`; **5일을 넘긴 요청은 `409 return_window_closed` 로 거절**한다. 기한은 에스크로 자동 해제(7일)보다 **짧게** 두어 반품 요청이 해제 전에 도달하도록 한다(§7.2). 요청 시 에스크로 해제를 동결(`held→frozen`)한다(§7.1). 검수 결과 `return.inspected{disposition ∈ RESTOCK\|DISPOSE\|REFUND_ONLY\|REJECTED}` 중 `REJECTED` 는 환불 없이 `return_requested → delivered` 로 되돌리고 에스크로를 `frozen→held` 로 재개하며, 같은 주문의 **반품 재요청은 막는다**. `demo` 주문(§5.2.1)에는 반품 경로가 없다 |
+| 반품 | `delivered` 후 **반품 가능 기한 5일**(`RETURN_WINDOW_DAYS`, 제안) 안에서만 `order.return_requested`; **5일을 넘긴 요청은 `409 return_window_closed` 로 거절**한다. 기한은 에스크로 자동 해제(7일)보다 **짧게** 두어 반품 요청이 해제 전에 도달하도록 한다(§7.2). 요청 tx(`RequestReturn`·`RequestExchange`)가 **같은 tx 에서** `escrow.FreezeInTx`(B12 쌍 #5, `EscrowHoldPort` 역전)로 `held→frozen` 을 하고 그 뒤 주문 `delivered→return_requested` 를 쓴다(락 순서 escrow → order). 비동기 소비자(`escrow-order-reactor`)에 동결을 맡기면 소비 지연 동안 자동 해제가 먼저 실행될 수 있다(C8). 또한 해제 tx 의 `order.MarkCompletedInTx` 는 주문이 `delivered`(demo 는 `paid`/`delivered`)일 때만 성공하므로 반품이 먼저 커밋되면 해제가 롤백된다 — 두 겹의 동기 방어다(§7.3). 검수 결과 `return.inspected{disposition ∈ RESTOCK\|DISPOSE\|REFUND_ONLY\|REJECTED}` 중 `REJECTED` 는 환불 없이 `return_requested → delivered` 로 되돌리고 에스크로를 `frozen→held` 로 재개하며, 같은 주문의 **반품 재요청은 막는다**. `demo` 주문(§5.2.1)에는 반품 경로가 없다 |
 | 교환 | 반품 기한(5일) 안에서 반품 요청에 **교환 의사**를 실을 수 있다(U23). 교환은 새 주문 상태가 아니라 **반품 케이스 + `exchange_of_order_id` 로 연결된 신규 주문**이며, 원 주문은 반품과 같은 `return_requested` 경로를 탄다. 흐름·가격차·순서는 §5.5. `demo` 주문에는 교환 경로가 없다 |
-| 환불 후속 | `cancelled`·`return_requested`(`REJECTED` 가 아닌 환불 판정)의 환불은 `payment-fulfillment-refunder`(§6.6)가 근거 이벤트를 소비해 수행한다. 주문 상태는 `payment.refunded` 소비로 `refunded` 가 된다 |
-| 이벤트 역전 | 늦게 온 이벤트가 이미 지나간 상태로 되돌리지 못한다. 상태 순위(rank)가 낮아지는 전이는 `NOOP` 으로 흡수한다 |
+| 환불 후속 | `cancelled`·`return_requested`(`REJECTED` 가 아닌 환불 판정)·`disputed`(구매자 승)의 환불은 `RefundPayment`(§6.6)가 수행한다(풀필먼트 기원은 `payment-fulfillment-refunder` 가 근거 이벤트를 소비해 호출). **주문 전이는 이벤트 소비가 아니라 환불 tx 안의 `order.MarkRefundedInTx`(B12 쌍 #7, 마지막 참여 함수)** 다 — `full=true` 면 `→refunded`(허용 출발: `paid`·`fulfilling`·`cancelled`·`return_requested`·`disputed`), 부분 환불이고 주문이 `return_requested` 면 `→delivered`(잔여 줄, §5.5). order 는 `payment.refunded` 로 상태를 바꾸지 않는다 |
+| 조율자 (C3) | 주문을 바꾸는 여러 모듈 tx 는 조율자가 정해져 있다: **취소** = payment 조율 `RefundPayment(reason=cancel)`(payment → escrow `held→refunded` CAS → ledger 역분개 → `order.MarkCancelledInTx`; 원장 결제는 한 tx 에서 `paid→cancelled→refunded` 까지, 카드는 tx1 에서 `MarkCancelledInTx`, tx2 에서 `MarkRefundedInTx`), **수령 확인·자동 해제** = escrow 조율 `ReleaseEscrow`(escrow → ledger → `order.MarkCompletedInTx`), **반품 요청** = order 조율 `RequestReturn`(`escrow.FreezeInTx` → order). 두 경로가 같은 주문에 동시에 와도 escrow 행 CAS 가 먼저 하나만 통과시키고 나머지는 `409 escrow_state_conflict` 다. `pending_payment` 주문의 취소(결제 없음)는 order 단독 tx 다 |
+| 이벤트 역전 (C14) | 상태 순위(rank)로 판정하지 않는다 — 순위 NOOP 은 정당한 역방향 전이(`return_requested→delivered`, 에스크로 `frozen→held`, 딜 `sold_out→open`, 예약 `confirming→active`)를 삼킨다. 대신 **원천 집합체 단위 순번**으로 판정한다: 소비자는 원천 집합체별 마지막 적용 버전(봉투 `aggregate.version`, F13 선두 규칙으로 같은 집합체는 순서대로 온다)을 `consumer_cursor(consumer, aggregate_id, last_version)` 에 두고 **`aggregate.version ≤ last_version` 이면 NOOP**(재전달·역전), 그 밖에는 `OrderTransitionTable` 의 허용 전이만 적용한다. 역방향 전이는 허용 표의 **명시적 엣지**이고, 표에 없는 전이(예: 종결 `refunded` 이후 도착한 `fulfillment.cancelled`)는 `NOOP` + 지표 `pf_transition_rejected_total{aggregate,from,to}` 다 |
 
 #### 5.2.1 `fulfillment_mode` — 풀필먼트가 없는 구간의 주문 (demo / physical)
 
@@ -509,6 +519,7 @@ stateDiagram-v2
 | 종결 경로 | 관리자 `MarkDelivered`(`paid→delivered`, `delivered_at` 기록, `order.demo_delivered` 발행) 또는 구매자 `confirm-receipt`(`paid` 에서 허용, `paid→completed`, 에스크로 `held→released`) | 풀필먼트 이벤트(`shipment.delivered` …) |
 | 에스크로 자동 해제 | Phase 3 은 수동만. **Phase 5 부터** `MarkDelivered` 후 `ESCROW_AUTO_RELEASE_DAYS_AFTER_DELIVERY` 를 **`ESCROW_TIME_SCALE` 로 압축**해 재현(Phase 5 DoD 의 재현 경로, 며칠을 기다리지 않는다) | `shipment.delivered` 후 7일(압축 가능) |
 | 반품·배송 실패 | 없음 | §5.2 |
+| 출고 전 취소·재고 복원 | 구매자 `POST /api/orders/{id}/cancel` → `RefundPayment(reason=cancel)` 단일 tx(§5.2 조율자), 같은 tx 에서 `order.cancelled{fulfillmentMode:'demo'}` 발행 → `deal-restock-reactor` 가 **이 이벤트 하나로** 복원(`RestockOnCancel`, Phase 3) | `order.cancel_requested` → 풀필먼트 → **`fulfillment.cancelled` 하나로** 복원(6c) |
 | 배송지 익명화 기준 | 종결(수령 확인/`MarkDelivered`) 후 30일 | 배송 완료 + 반품 기한 5일 + 30일(§5.4) |
 
 - **`legacy_demo` 와 `LegacyDemoOrderClosure` 는 완전히 폐기**한다. Phase 3 에도 스냅샷·에스크로가 있으므로 Phase 5 착수 시 정리할 별도 주문 유형이 없다. 풀필먼트 쪽의 `legacy_demo` 소비자 필터도 필요 없다(P0 G6).
@@ -521,7 +532,7 @@ stateDiagram-v2
 | 주문 번호 | `ORD-YYMMDD-XXXXXXXX` — 날짜 + Crockford base32 8자(uuid v7 의 난수부 파생, 5비트×8 = 40비트). **순차 번호를 쓰지 않는다**(주문량 추정 방지). 유일 제약 위반 시 재생성(최대 3회) |
 | 주문 생성 멱등 | `order.reservation_id` **유일**(예약 한 건당 주문 한 건) + `Idempotency-Key`(`request_key`). 같은 요청 재전송은 같은 주문을 돌려준다 |
 | 금액 | KRW 정수(원). `total_krw = Σ(unit_price × qty)`, 생성 시 `order_line` 에 이름·단가 **스냅샷**(딜 가격이 나중에 바뀌어도 불변) |
-| 만료 | 미결제 주문은 예약 만료와 함께 `expired`. 별도 타이머가 아니라 `reservation.expired` 이벤트로 전이 |
+| 만료 | 미결제 주문은 예약 만료와 함께 `expired`. 별도 타이머가 아니라 `reservation.expired` 이벤트로 전이. **예약이 없는 교환 신규 주문**은 `ExchangeDeadlineSweeper`(OD-16)가 `order_exchange` 를 잠근 같은 tx 에서 `pending_payment→cancelled` 로 바꾼다(§4.7 교환 신규 주문 행) |
 
 ### 5.4 배송지 (개인정보)
 
@@ -542,18 +553,18 @@ stateDiagram-v2
 |---|---|
 | 연결 | 신규 주문 `order.exchange_of_order_id`(NULL 이면 일반 주문) = 원 주문. 교환 한 건은 `order_exchange` 행(§10.3)이 원 주문·신규 주문·`returnId` 를 묶는다 |
 | 대상 | 원 주문의 **줄·수량 단위**(부분 교환 가능). 같은 줄에 대한 반품·교환 총량은 `order_line.qty_returned + 요청 ≤ qty` 조건부 UPDATE 로 막는다(동시 이중 요청 방지) |
-| 신규 주문 줄 | 카탈로그 정가의 일반 SKU 만. **타임딜 줄은 허용하지 않는다**(딜 재고 `confirmed`·개인 한도(I1)를 다시 거치는 경로를 만들지 않으려는 범위 한정, 제안) → `409 exchange_not_allowed`. 신규 주문은 `deal_id` 와 `reservation_id` 가 NULL 이다(`UNIQUE(reservation_id)` 는 NULL 을 허용) |
+| 신규 주문 줄·판매가 (D2, 2026-11-05 사용자 결정) | 가격은 상품이 아니라 딜이 가지므로(§3.1) "카탈로그 정가"는 없다. **같은 상품(같은 딜의 같은 SKU·옵션) 교환이면 원 주문 줄의 결제 단가(`order_line.unit_price_krw`)를 재사용**하고, **다른 상품 교환일 때만 그 상품의 현재 딜가**(요청 시점에 `open` 인 딜의 `price_krw`)를 쓴다. 가격 근거가 없으면(다른 상품인데 열린 딜이 없음) `409 exchange_not_allowed`. 어느 쪽이든 **딜 재고(`confirmed`·Redis 게이트)·개인 한도는 다시 거치지 않는다**(가격만 딜에서 가져오고 재고 확보는 풀필먼트 할당, 아래 '재고'). 쓴 가격의 근거는 `order_line.price_source`(`ORIGINAL_LINE`/`CURRENT_DEAL:<dealId>`)로 남긴다. 신규 주문은 `deal_id` 와 `reservation_id` 가 NULL 이다(`UNIQUE(reservation_id)` 는 NULL 을 허용) |
 | 재고 | 상거래의 Redis 게이트를 거치지 않는다. 요청 시 P3 의 읽기 usecase `CheckExchangeAvailability`(ATP 조회, 확약 아님)로 사전 확인하고, 실제 확보는 신규 주문의 `order.paid` 를 받은 풀필먼트의 `AcceptOrder` 할당이 한다(§5.5.5). 사전 확인에서 부족하면 `409 exchange_stock_unavailable` |
 | 가격차 | `price_diff_krw = 신규 주문 총액 − 반품 줄 환불 대상 금액`(양수 = 구매자 추가 부담, 음수 = 구매자 환급). **표시·영수증용 값**이고 별도 정산 분개를 만들지 않는다(§5.5.3) |
-| 기한 | 요청은 반품 기한(`RETURN_WINDOW_DAYS`=5일) 안, 구매자의 반품 발송은 요청 후 `EXCHANGE_RETURN_SHIP_DAYS`(7일, 제안) 안, 신규 주문 결제는 일반 결제 TTL(§6.7) 안 |
+| 기한 | 요청은 반품 기한(`RETURN_WINDOW_DAYS`=5일) 안, 구매자의 반품 발송은 요청 후 `EXCHANGE_RETURN_SHIP_DAYS`(7일, 제안) 안, 신규 주문 결제는 일반 결제 TTL(§6.7) 안. 신규 주문에는 예약이 없으므로 **결제 기한은 `order_exchange.payment_due_at` 이 정본**이고 만료는 `ExchangeDeadlineSweeper` 가 같은 tx 에서 교환·신규 주문을 함께 닫는다(§4.7). 모든 기한은 `DemoClock` 포트로 계산한다(§7.2) |
 
 #### 5.5.2 교환 상태 (`order_exchange.status`)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> awaiting_payment: RequestExchange (원 주문 return_requested + 에스크로 frozen + 신규 주문 pending_payment)
-    awaiting_payment --> awaiting_return: 신규 주문 paid (신규 에스크로 held)
-    awaiting_payment --> cancelled: 결제 만료·구매자 취소
+    [*] --> awaiting_payment: RequestExchange (같은 tx - 원 에스크로 FreezeInTx, 원 주문 return_requested, 신규 주문 pending_payment)
+    awaiting_payment --> awaiting_return: 신규 주문 ConfirmPurchase 같은 tx (order_exchange 잠금, 신규 에스크로 held)
+    awaiting_payment --> cancelled: 결제 만료(스위퍼, 신규 주문 cancelled 같은 tx)·구매자 취소
     awaiting_return --> inspecting: return.received
     awaiting_return --> cancelled: 발송 기한 초과·구매자 취소·fulfillment.rejected(신규 주문)
     inspecting --> completed: return.inspected 환불 판정 (RESTOCK·DISPOSE·REFUND_ONLY) 환불 완료
@@ -579,30 +590,31 @@ sequenceDiagram
     participant F as fulfillment
     participant RF as payment-fulfillment-refunder
     B->>O: POST /api/orders/{id}/exchanges (Idempotency-Key, 반품 줄, 신규 줄)
-    O->>O: tx1: 반품 줄 qty_returned 가산 + order_exchange(awaiting_payment) + 신규 주문 pending_payment + outbox order.return_requested{resolution:EXCHANGE}
-    O-->>E1: escrow-order-reactor: held→frozen (해제 타이머 정지)
+    O->>E1: tx1: FreezeInTx held→frozen (쌍 #5, 같은 tx, 해제 타이머 정지)
+    O->>O: tx1(계속): 반품 줄 qty_returned 가산 + order_exchange(awaiting_payment, payment_due_at) + 신규 주문 pending_payment(D2 가격) + outbox order.return_requested{resolution:EXCHANGE}
     O-->>F: OpenReturn (교환 연결)
     B->>N: 신규 주문 결제 (ConfirmPurchase, 전액)
-    N->>N: tx2: payment → escrow(신규 held) → ledger 계정 (§4.7 락 순서)
+    N->>N: tx2: payment → escrow(신규 held) → ledger 계정 → order_exchange(awaiting_payment 확인 → awaiting_return) → 신규 order paid (R9)
     N-->>F: order.paid{exchangeOfOrderId, releaseGate:RETURN_INSPECTED} → AcceptOrder (할당만, 출고 대기)
     B->>F: 반품 발송 → 작업자 ReceiveReturn · InspectReturn
     F-->>RF: return.inspected{disposition, lines}
     alt 환불 판정 (RESTOCK · DISPOSE · REFUND_ONLY)
-        RF->>RF: tx3: 원 payment 환불 F (다리별 §6.6.1) → 원 escrow 감액 → 원장 역분개 (payment → escrow → ledger 계정)
+        RF->>RF: tx3a: 원 payment 환불 선점 + 원 escrow pending_refund_krw = F (payment → escrow, R11)
+        RF->>RF: tx3b: 다리별 환불 F (§6.6.1) → 원 escrow 감액·pending 해제(부분이면 frozen→held) → 원장 역분개 → order.MarkRefundedInTx (원장 결제는 3a·3b 가 한 tx)
         F->>F: 신규 FO 출고 게이트 해제 → 웨이브 대상
         O->>O: order_exchange completed, order.exchange_completed
     else REJECTED
         F-->>O: return.inspected REJECTED
         O->>O: order_exchange cancelled(INSPECTION_REJECTED) → 신규 주문 취소·환불 (tx4, 출고 전)
-        O-->>E1: frozen→held (해제 재개)
+        O-->>E1: escrow-order-reactor: frozen→held (pending_refund_krw = 0 일 때만, 해제 재개)
     end
 ```
 
 | 단계 | 원 주문 에스크로 | 신규 주문 | 락·트랜잭션 |
 |---|---|---|---|
-| 요청 | `held→frozen`(`frozen_reason='return'`, 기존 반품 동결 그대로) | `pending_payment` 생성 | tx1 은 `order`·`order_exchange` 만, 에스크로 변경은 inbox 소비자(별 tx) |
-| 신규 결제 | 변화 없음 | 결제 승인과 같은 tx 에서 `held` 생성(§4.7) | 신규 결제의 전역 락 순서 `reservation`(없음) → `payment` → `escrow` → 계정 id 오름차순. **원 에스크로를 잡지 않는다** |
-| 검수 환불 | 환불 대상 줄 금액 F 만큼 다리별 감액. 전량이면 `frozen→refunded`, **부분이면 `escrow_leg.refunded_amount` 증가 후 `frozen→held`**(잔여 다리로 해제 재개) | 출고 게이트 해제 | 환불 tx3: `payment → escrow → ledger 계정`(§6.6). 신규 주문 행을 건드리지 않는다 |
+| 요청 | `held→frozen`(`frozen_reason='return'`, 기존 반품 동결 그대로) — **요청 tx 안의 `FreezeInTx`** | `pending_payment` 생성 | tx1: 원 `escrow`(`FreezeInTx`) → `order_exchange`(신규 행) → `order`(원 주문 `qty_returned`, 신규 주문 INSERT). R9 의 부분 수열 |
+| 신규 결제 | 변화 없음 | 결제 승인과 같은 tx 에서 `held` 생성(§4.7), 같은 tx 에서 `order_exchange` `awaiting_payment→awaiting_return` | 신규 결제의 락 순서 `reservation`(없음) → `payment` → `escrow` → 계정 id 오름차순 → `order_exchange` → `order`. **원 에스크로를 잡지 않는다** |
+| 검수 환불 | 환불 대상 줄 금액 F 만큼 다리별 감액. 전량이면 `frozen→refunded`, **부분이면 `escrow_leg.refunded_amount` 증가 후 `frozen→held`**(잔여 다리로 해제 재개 — **이 재개는 환불 완료 tx 만 한다**, R11) | 출고 게이트 해제 | 환불 tx3a(선점: `payment → escrow`, `pending_refund_krw` 설정)·tx3b(완료: `payment → escrow → ledger 계정 → order`, §6.6). 신규 주문 행을 건드리지 않는다 |
 | 정산 | 잔여 다리 `amount − refunded_amount` 로 §8.5.1 그대로(교환이 새 정산 규칙을 만들지 않는다) | 독립 에스크로·독립 정산 | 서로 다른 `escrow_id` 의 `settlement` |
 
 - **가격차 의미.** 신규 > 원(`price_diff_krw > 0`): 구매자는 신규 전액을 먼저 내고 원 환불액 F 를 나중에 돌려받아 **순 차액을 부담**한다. 신규 < 원(`< 0`): 같은 방식으로 **순 차액이 환불**된다. 환불은 원 결제의 자산·다리로 돌아가고(§6.6.1) 신규 결제는 구매자가 새로 고른 수단을 쓰므로 두 흐름의 자산이 다를 수 있다 — 그래서 합산 분개를 만들지 않고 각자 자기 분개를 가진다.
@@ -610,6 +622,7 @@ sequenceDiagram
 - **위험 1 — 자금 일시 이중 점유.** 신규 결제가 환불보다 먼저이므로 구매자는 일시적으로 N + (원 대금)을 묶어 둔다. 잔액이 모자라면 포인트·USDC 부족으로 신규 결제가 실패한다(`awaiting_payment` 에서 `PAYMENT_EXPIRED`). 화면은 "필요 금액 = 신규 총액(환불은 검수 후)"을 명시한다. 원 에스크로 잔여분을 신규 에스크로로 직접 이월하는 방식은 서로 다른 `escrow_leg` 자산 구성·락 순서(두 에스크로 동시 잠금)를 요구해 **채택하지 않았다**(미결, §20.4).
 - **위험 2 — 출고 게이트의 지연.** 신규 상품은 `return.inspected` 환불 판정 뒤에야 출고된다(반품이 불량·미도착이면 신규 출고 후 회수가 불가능하므로 보수적으로 둔다). 대신 교환 소요 시간이 길어진다. 입고(`return.received`) 시점 출고로 줄이는 안은 `REJECTED` 시 회수 불가 손실을 감수해야 해서 보류(미결).
 - **멱등.** 요청은 `Idempotency-Key` 필수. 환불 키는 기존 규칙 `refund:<paymentId>:<eventId>:<asset>`, 교환 완료·취소 전이는 `return.inspected` 의 inbox 중복 제거와 `order_exchange.version` CAS 로 한 번만 일어난다.
+- **확정과 만료의 경합(C5).** 신규 주문에는 예약이 없어 예약 CAS 가 확정을 직렬화하지 못한다. 그래서 `ConfirmPurchase` 와 `ExchangeDeadlineSweeper` 가 **같은 `order_exchange` 행**을 잠그고 `awaiting_payment` 조건으로 전이하며, 경로 간 중복 확정(API 승인·웹훅·대사)은 payment 행 CAS 로 `AlreadyConfirmed` 를 판별한다. 스위퍼가 먼저 이기면 확정 tx 는 롤백되고 카드 결제는 `refund_pending(reason=exchange_expired)` 로 자동 환불된다(에스크로가 없으므로 §6.6 의 '에스크로 없는 환불' 분기). 시험 AC-C53.
 
 #### 5.5.4 이벤트 (이름과 필드 — P0 §8.3 반영 요청 대상)
 
@@ -617,10 +630,10 @@ sequenceDiagram
 |---|---|---|
 | `order.return_requested` | 필드 추가: `resolution ∈ {REFUND, EXCHANGE}`, `exchangeId`, `newOrderId`(교환일 때) | 풀필먼트(`OpenReturn` 에 교환 연결), `escrow-order-reactor`(기존 동결 그대로) |
 | `order.paid` | 필드 추가: `exchangeOfOrderId`(NULL 허용), `releaseGate`(`{type:'RETURN_INSPECTED', returnId}`, 교환 신규 주문만) | 풀필먼트(할당 후 출고 게이트 설정) |
-| `return.inspected` | 필드 추가: `lines[{lineId, qty}]`(환불 대상 줄·수량, 부분 환불 금액 계산), `exchangeId`(NULL 허용) | `payment-fulfillment-refunder`(줄 단위 금액 F), `escrow-order-reactor`(부분이면 `frozen→held`), order |
+| `return.inspected` | 필드 추가: `lines[{lineId, qty}]`(환불 대상 줄·수량, 부분 환불 금액 계산), `exchangeId`(NULL 허용) | `payment-fulfillment-refunder`(줄 단위 금액 F — 부분이면 환불 완료 tx 가 `frozen→held` 재개), `escrow-order-reactor`(**`REJECTED` 만** `frozen→held`, `pending_refund_krw = 0` 조건), order |
 | `shipment.delivered` · `shipment.dispatched` | 필드 추가: `shipmentSeq`, `allDelivered`(분할 배송에서 마지막 배송 완료일 때만 true) — §5.5.6 | order(주문 `delivered` 전이·에스크로 기한은 `allDelivered=true` 에서만) |
 | **신규 `order.exchange_completed`** | 교환 완료(환불 + 게이트 해제 후) | 알림·프로젝터 |
-| **신규 `order.exchange_cancelled`** | `reason`(위 `cancel_reason`) | `escrow-order-reactor`(원 에스크로 `frozen→held` 재개), 풀필먼트(`order.cancel_requested` 가 별도로 신규 주문 취소를 이끎), 알림 |
+| **신규 `order.exchange_cancelled`** | `reason`(위 `cancel_reason`) | `escrow-order-reactor`(원 에스크로 `frozen→held` 재개, `pending_refund_krw = 0` 조건), 풀필먼트(`order.cancel_requested` 가 별도로 신규 주문 취소를 이끎), 알림 |
 
 `return.exchange_requested` 는 두지 않는다 — 요청은 `order.return_requested` 의 `resolution` 필드로 충분하고 이벤트를 늘리면 풀필먼트·에스크로 소비자가 둘로 갈린다.
 
@@ -691,7 +704,7 @@ classDiagram
 
 | 구현 | 단계 | 비고 |
 |---|---|---|
-| `LedgerGateway` | Phase 3 | 외부 호출 없음. `prepare` 가 다리 계획을, `approve` 가 **다리별** 원장 차감(`ledger.PostJournalInTx` — POINT 다리 + USDC 다리, §6.1.1)을 동기 완료. `cancel` 은 원장 역분개 |
+| `LedgerGateway` | Phase 3 | 외부 호출 없음. `prepare` 가 다리 계획을, `approve` 가 **다리별** 원장 차감(`ledger.PostJournalsInTx` — POINT 다리 + USDC 다리를 한 번에, §6.1.1)을 동기 완료. `cancel` 은 원장 역분개 |
 | `FakeGateway` | Phase 3~5 시험 | 결정적 성공/실패/지연/중복 웹훅을 주입하는 **시험용 PG**. 계약 시험의 기준 구현 |
 | `TossTestGateway` / `PortOneTestGateway` | Phase 5 | PG 선정은 착수 시 확정(§6.2). 둘은 `CardTestGateway` 공통 흐름(위젯 → 승인 → 웹훅)을 공유 |
 | `UsdcEscrowGateway` | Phase 6-4 | 온체인 에스크로 경계(§8.7) |
@@ -706,7 +719,8 @@ classDiagram
 | USDC | USDC(micro) | `R = T − P`, `u = floor(R × 10¹⁴ / rate_e8)` (결제 시작 시 고정한 스냅샷, §8.2.1) | `liab:user_usdc:{u}` → `liab:escrow:USDC` |
 
 - **포인트 우선 차감**: UI 토글 `usePoints`(기본 켜짐)로 끌 수 있다. `P = 0` 이면 USDC 단일 다리, `R = 0` 이면 POINT 단일 다리다.
-- **원자성**: `ConfirmPurchase` 의 한 트랜잭션이 두 분개를 함께 기장한다. 어느 쪽 `account_balance` 조건부 갱신이 `min_balance` 에서 거절되면 **전체 롤백**(`insufficient_funds`, 예약은 유지되어 TTL 안에 다시 시도할 수 있다).
+- **라이브 노출 (D1)**: USDC 다리는 설정 `USDC_LEG_ENABLED`(로컬·시험 on, 라이브 기본 off)로 연다. 라이브에서는 6d 의 devnet 입금→원장 반영 브리지가 생기기 전까지 `liab:user_usdc` 에 들어올 출처가 없으므로(U24: 원장 USDC 고정 지급 없음) `R > 0` 인 계획(= 포인트 잔액 < 주문 합계)은 `409 usdc_unavailable`(화면: 'USDC 입금 후 구매 가능')로 막고, 100,000원을 넘는 시드 상품은 목록에서 숨기거나 같은 표기로 둔다. 코드 경로·시험은 Phase 3 에 그대로 있다.
+- **원자성**: `ConfirmPurchase` 의 한 트랜잭션이 두 분개를 `PostJournalsInTx` 한 번으로 함께 기장한다(계정 일괄 잠금, R10). 어느 쪽 `account_balance` 조건부 갱신이 `min_balance` 에서 거절되면 **전체 롤백**(`insufficient_funds`, 예약은 유지되어 TTL 안에 다시 시도할 수 있다).
 - **계획 고정과 확인 단계**: `InitiatePayment` 가 `payment_leg` 계획 행(자산, 수량, KRW 가치)을 만들고 **응답으로 `{paymentId, P, u, rate, snapshotId, planExpiresAt}` 를 돌려준다.** 구매자가 이 금액(포인트 P · USDC u · 적용 환율)을 화면에서 확인한 뒤 `POST /api/payments/{id}/approve`(`LedgerGateway.approve`)를 보내야 `ConfirmPurchase` 가 실행된다 — 확인 없이 한 번에 차감되지 않는다. 승인 시점의 잔액 변동으로 계획이 바뀌지 않으며, 잔액이 모자라면 실패하고 사용자가 다시 시작한다.
 - **저널은 자산별 1건이고 멱등 키에 `:{asset}` 접미를 붙인다**(지급·결제 확정·환불 공통, §9.1): 확정은 `payment:{paymentId}:confirm:POINT` / `…:USDC`, 환불은 `refund:{paymentId}:{eventId}:{asset}` 다. 포인트 단독(`R=0`)이면 USDC 분개를, USDC 단독(`P=0`)이면 POINT 분개를 만들지 않는다.
 
@@ -736,10 +750,10 @@ stateDiagram-v2
     approving --> unknown: 승인 호출 타임아웃·응답 불명
     unknown --> approved: 대사로 승인 확인
     unknown --> failed: 대사로 미승인 확인
-    refund_pending --> refunding: PG 취소 호출 선점 (payment_refund 행 보유)
-    approved --> refunding: 환불 선점 (환불 행 + 멱등 키)
-    refunding --> refunded: 전액 취소 성공
-    refunding --> partially_refunded: 부분 취소 성공
+    refund_pending --> refunding: 진행 중 환불 행 재시도 선점 (새 환불 아님)
+    approved --> refunding: 환불 선점 (환불 행 + 멱등 키 + escrow pending_refund_krw)
+    refunding --> refunded: 취소 성공 후 누적 환불액 = 결제액 (full)
+    refunding --> partially_refunded: 취소 성공 후 잔액 남음
     refunding --> refund_pending: 취소 실패(일시) → 재시도 대기 (횟수 상한)
     refunding --> refund_failed: 취소 실패(영구 또는 재시도 상한 소진) → 수동 처리 큐·경보
     refund_failed --> refunding: 관리자 수동 재시도
@@ -756,6 +770,8 @@ stateDiagram-v2
 | 한 주문 한 활성 결제 | `payment` 에 **부분 유일 인덱스** `UNIQUE (order_id) WHERE status IN ('initiated','awaiting_approval','approving','approved','unknown','refund_pending','refunding','refund_failed','partially_refunded')` — 이중 결제 시도를 DB 가 막는다. 환불이 끝나(`refunded`)야 같은 주문에 새 결제를 시작할 수 있다 |
 | 환불 상태 | `refunding→approved` 전이는 **없다**(되돌아가면 돈이 잡힌 채 정상 결제로 보인다). 일시 실패는 `refund_pending` 으로 돌아가 같은 멱등 키로 재시도하고(상한 5회·백오프, 제안), 영구 실패·상한 소진은 `refund_failed`(수동 처리 큐·경보, 활성 결제 유일 인덱스에 남아 새 결제를 막는다). `method=ledger` 의 환불은 외부 호출이 없어 한 tx 안에서 `refunding→refunded` 를 거친다 |
 | `refund_pending` | PG 는 승인됐지만 재고 확정이 거절된 상태(또는 환불 재시도 대기). **돈이 잡혀 있는 상태**이므로 종결이 아니다. 같은 tx 에서 `payment_refund`(reason=`rejected_stock`, 멱등 키 `refund:<paymentId>:rejected_stock`) 행을 만들고 취소 호출 대상으로 남긴다. 취소가 실패해도 이 행과 대사(§6.8)가 추적한다 |
+| 환불 in-flight 1건 (C1) | 한 결제에 진행 중인 환불은 **최대 1건**이다. 새 환불의 선점은 `approved`·`partially_refunded` 에서만(`refund_pending→refunding` 은 이미 있는 `pending` 환불 행의 재시도 전용), 진행 중이면 사용자·관리자 요청은 `409 refund_in_progress`, 이벤트 기원 환불은 inbox 재시도(백오프)로 기다린다. 선점 tx 는 같은 tx 에서 `escrow.pending_refund_krw`·`pending_refund_id` 를 CAS 로 설정한다(§6.6, P0 R11) |
+| 잔여 0 (C12) | 누적 환불액(`refunded_total`)이 `amount_krw` 에 닿은 환불은 부분 환불 단계를 거쳤어도 **`refunded`** 로 끝나고(`partially_refunded` 에 남지 않는다), 같은 tx 에서 에스크로의 모든 다리 잔여가 0 이 되므로 에스크로도 `refunded` 다. 이벤트 `payment.refunded` 의 `full` 은 이 판정 그대로다 |
 | 선점 | `awaiting_approval → approving` 은 조건부 UPDATE + `claim_token` + 임대(`lease_until`). 승인 응답이 늦게 와도 토큰이 맞아야 완료 갱신 가능(ADR-021) |
 | 상태 순위 | `unknown` 은 순위 중간. 대사 결과로만 `approved`/`failed` 로 간다 |
 | 금액 | 승인 요청 금액은 **서버가 주문에서 읽은 값**이다. 클라이언트가 보낸 금액을 쓰지 않는다 |
@@ -848,27 +864,33 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["환불 요청: 구매자(출고 전) 또는 관리자 또는 시스템(재고 소진·금액 불일치)"] --> B{"에스크로 상태"}
+    A["환불 요청: 구매자(출고 전) 또는 관리자 또는 시스템(재고 소진·금액 불일치)"] --> Z{"에스크로가 있는가"}
+    Z -- "없음 (rejected_stock · late_sold_out · exchange_expired)" --> NE["에스크로 없는 환불 분기: refund_pending 의 환불 행으로 PG 취소 → 완료 tx 는 payment 만 (escrow·ledger 참여 없음, 주문은 expired 등 그대로)"]
+    Z -- "있음" --> B{"에스크로 상태"}
     B -- "해제 전 (held·frozen·disputed)" --> C{"요청 금액 <= 잔여 환불 가능액?"}
     B -- "released/settled" --> X["거절: 정산 후 환수는 M1 범위 밖. 단 반품 요청·배송 실패가 있으면 해제 자체가 동결(frozen)되므로(§7.1) 이 분기에 도달하지 않는다"]
     C -- "아니오" --> X2["409 refund_exceeds_paid"]
-    C -- "예" --> D["tx1: payment 환불 선점 (approved|refund_pending|partially_refunded→refunding 조건부) + 환불 행(멱등 키)"]
-    D --> E["PG 취소 API (부분이면 금액 지정, 멱등 키)"]
+    C -- "예" --> D["tx1 (payment → escrow, R11): payment 환불 선점 (approved|partially_refunded→refunding 조건부) + 환불 행(멱등 키) + escrow pending_refund_krw = F CAS (held·frozen·disputed 이고 pending = 0 일 때만) + cancel 이면 order.MarkCancelledInTx"]
+    D -- "escrow CAS 0행" --> X3["롤백: 409 refund_in_progress 또는 escrow_state_conflict (이미 해제·환불 중)"]
+    D --> E["PG 취소 API (부분이면 금액 지정, 멱등 키) — 원장 결제는 외부 호출 없이 tx1 과 tx2 를 한 tx 로"]
     E --> F{"결과"}
-    F -- "성공" --> G["tx2 (락 순서 payment → escrow → ledger 계정): 환불 행 completed + 에스크로 환불/감액 + 원장 역분개 + outbox (주문 상태는 payment.refunded 소비로 별도 전이)"]
-    F -- "실패(일시)" --> H0["refund_pending 으로 복귀, 같은 멱등 키로 재시도"]
-    F -- "실패(영구·상한 소진)" --> H["환불 행 failed + 결제 refund_failed + 감사 + 알림 (수동 개입)"]
-    F -- "불명" --> I["환불 행 unknown → 대사"]
+    F -- "성공" --> G["tx2 (payment → escrow → ledger 계정 → order): 환불 행 completed + escrow_leg 감액 + pending 해제 + (전량이면 →refunded, 부분이고 frozen 이면 →held 재개) + 원장 역분개(PostJournalsInTx) + order.MarkRefundedInTx + outbox payment.refunded{full}"]
+    F -- "실패(일시)" --> H0["refund_pending 으로 복귀(pending_refund 유지), 같은 멱등 키로 재시도"]
+    F -- "실패(영구·상한 소진)" --> H["환불 행 failed + 결제 refund_failed + 감사 + 알림 (수동 개입, pending_refund 유지 = 해제 차단 계속)"]
+    F -- "불명" --> I["환불 행 unknown → 대사 (pending_refund 유지)"]
 ```
 
 | 규칙 | 내용 |
 |---|---|
 | 누적 한도 | `payment_refund` 합계 ≤ 승인 금액 `CHECK` 대신 **조건부 UPDATE** `refunded_total + $r <= amount` (집계 컬럼을 payment 에 둔다) |
 | 멱등 | 환불 요청마다 `refund_idempotency_key` 유일. 같은 키 재요청은 같은 결과. **이벤트에서 시작하는 환불의 키는 근거 이벤트 id 에서 파생**한다: `refund:<paymentId>:<eventId>` (같은 `fulfillment.rejected` 가 재전달돼도 환불 1건) |
-| 환불 트리거 소비자 | **`payment-fulfillment-refunder`**(payment 모듈 소비자, 신규): `fulfillment.rejected`·`fulfillment.cancelled`·`return.inspected`(`disposition ∈ RESTOCK\|DISPOSE\|REFUND_ONLY` 인 환불 판정; `REJECTED` 는 환불하지 않는다)를 구독해 `RefundPayment` 를 호출한다. 순서: 이벤트 수신(inbox) → 주문의 활성 결제 조회 → 환불 선점 tx → PG 취소(tx 밖) → 완료 tx(원장 역분개 + 에스크로 환불 + `payment.refunded`). 주문 쪽 `order.cancelled` 전이는 별도로 `order-fulfillment-reactor` 가 같은 이벤트로 수행하고, 두 소비자는 서로를 기다리지 않는다(독립·멱등). B12 쌍 #7 의 조율자는 `RefundPayment`(payment) |
+| 환불 트리거 소비자 | **`payment-fulfillment-refunder`**(payment 모듈 소비자, 신규): `fulfillment.rejected`·`fulfillment.cancelled`·`return.inspected`(`disposition ∈ RESTOCK\|DISPOSE\|REFUND_ONLY` 인 환불 판정; `REJECTED` 는 환불하지 않는다)를 구독해 `RefundPayment` 를 호출한다. 순서: 이벤트 수신(inbox) → 주문의 활성 결제 조회 → 환불 선점 tx(payment → escrow `pending_refund_krw`) → PG 취소(tx 밖) → 완료 tx(에스크로 감액·재개 + 원장 역분개 + `order.MarkRefundedInTx` + `payment.refunded{full}`). **`fulfillment.cancelled{reason:'EXTERNAL'}`(우리 `payment.refunded{full:true}` 를 받은 풀필먼트가 FO 를 취소한 결과)는 재환불하지 않는다**(이미 환불된 건의 메아리). 출고 전 취소에서 주문의 `fulfilling→cancelled` 전이는 `order-fulfillment-reactor` 가 같은 이벤트로 수행하고, 환불 완료 tx 의 `MarkRefundedInTx` 는 출발 상태가 `paid`·`fulfilling`·`cancelled` 중 무엇이든 `refunded` 로 닫는다(늦게 온 reactor 전이는 허용 표 밖이라 NOOP, §5.2). B12 쌍 #7 의 조율자는 `RefundPayment`(payment) |
 | 원장 | 환불은 원래 분개의 **역분개(reversal)** 새 행. 원 분개를 고치지 않는다(§9). **부분 환불의 역분개 합은 원 분개를 넘지 못한다**(같은 `reversal_of_id` 를 가진 분개들의 라인별 금액 합 ≤ 원 분개 라인 금액, §9.1) |
 | 원장 결제(Phase 3 환불) | `method=ledger` 의 환불은 다리별 원장 역분개만(외부 호출 없음). **Phase 3 의 환불 트리거는 구매자 취소·관리자 환불·시스템(재고 소진)** 이고, `fulfillment.*`·`return.inspected` 소비(`payment-fulfillment-refunder`)는 풀필먼트(6c) 이후 활성이다 |
-| 재고 복원 | **출고 전 취소**(`fulfillment.cancelled`, 구매자 취소 사유)이고 딜이 `open`/`sold_out`(종료 전)일 때만, **deal 의 소비자 `deal-restock-reactor` 가 환불과 독립적으로**(환불 성공 여부와 무관) `deal.restocked {dealId, qty, reason:'cancel'}` 를 발행하고 Redis `restock.lua`(avail +q, 개인 보유 −q, 멱등 키 `restock:<orderId>`)와 PG(`stock.confirmed −q`, `user_purchase.qty −q`)를 갱신한다. **`fulfillment.rejected(OUT_OF_STOCK)` 는 복원하지 않는다**(물리 재고가 없는데 판매 가능 수량을 늘리면 안 됨). 약정은 복원 시 `+q` 로 짝지어 돌려준다(`deal.restocked` 를 inventory 가 소비, P3). 반품·분쟁 환불은 재고를 복원하지 않는다(물리 입고는 풀필먼트 `return.received` 가 관리) |
+| 재고 복원 | **출고 전 취소**이고 딜이 `open`/`sold_out`(종료 전)일 때만, **deal 의 소비자 `deal-restock-reactor` 가 환불과 독립적으로**(환불 성공 여부와 무관) 복원한다. **트리거는 모드별로 하나**다(C6): `physical` 은 `fulfillment.cancelled`(FO 취소 확정 = 물리 재고가 출고되지 않음, 사유 무관 — `EXTERNAL` 포함), `demo`(Phase 3)는 취소 tx 가 발행한 `order.cancelled{fulfillmentMode:'demo'}`. 같은 주문에 두 트리거가 오지 않으며 멱등 키 `restock:<orderId>` 가 재전달을 흡수한다. 복원 tx 는 `deal.restocked {dealId, skuId, orderId, qty, reason:'cancel'}` 를 발행하고 Redis `restock.lua`(avail +q, 개인 보유 −q, 멱등 키 `restock:<orderId>`)와 PG(`stock.confirmed −q`, `user_purchase.qty −q`)를 갱신한다. **`fulfillment.rejected(OUT_OF_STOCK)` 는 복원하지 않는다**(물리 재고가 없는데 판매 가능 수량을 늘리면 안 됨). 약정 복귀는 이 이벤트가 아니라 **취소 tx 의 `ReleaseAllocationInTx`(출처 기록 기반)** 가 한다(P3 §4.6, ADR-042 — 이벤트로 더하면 `deal.settled` 와 끼어들 때 이중 계상). `deal.restocked` 는 `deal.stock`·Redis 복원 신호다. `demo` 주문은 약정이 없으므로(6c 전) Redis·PG 만 복원한다. 반품·분쟁 환불은 재고를 복원하지 않는다(물리 입고는 풀필먼트 `return.received` 가 관리) |
+| 환불 진행 표식 (C1, P0 R11) | 카드 환불은 tx1(선점)·tx2(완료) 사이에 PG 호출이 있다. 그 사이 에스크로가 `held` 로 보이면 자동 해제·수령 확인이 해제→정산을 진행해 **PG 환불과 판매자 정산이 이중 지급**된다. 그래서 tx1 이 `payment → escrow` 순으로 잠그고 `escrow.pending_refund_krw = F`, `pending_refund_id = <refundId>` 를 CAS(`WHERE status IN ('held','frozen','disputed') AND pending_refund_krw = 0`)로 설정한다. **자동 해제·수령 확인·분쟁 제기·분쟁 판정·`frozen→held` 재개는 모두 `pending_refund_krw = 0` 조건**이고, 표식 해제와 부분 환불의 `frozen→held` 재개는 **환불 완료 tx2 만** 한다(`pending_refund_id` 가 일치할 때). 일시 실패(`refund_pending`)·영구 실패(`refund_failed`)·불명 동안 표식은 유지된다 — 돈이 PG 쪽에 잡혀 있는 동안 판매자에게 나가지 않는다. 시험 AC-C45 |
+| 에스크로 없는 환불 (C17) | `rejected_stock`·`late_sold_out`·`exchange_expired` 는 확정 tx 가 롤백돼 **에스크로·원장 보류가 없다**. 이 환불은 `refund_pending` 에서 만든 환불 행으로 PG 취소만 하고, 완료 tx 는 payment·`payment_refund` 만 쓴다(쌍 #7 의 escrow·ledger 참여 없음, 주문은 `expired`/`pending_payment` 그대로이므로 order 참여도 없다). `payment.refunded{full:true, refundReason}` 는 발행하지만 주문이 `paid` 였던 적이 없어 풀필먼트는 대상 FO 가 없다 |
+| 멱등 키 (해제 전 환불) | 이벤트 기원 `refund:<paymentId>:<eventId>:<asset>`, 구매자 취소 `refund:<paymentId>:cancel:<asset>`, 관리자 `refund:<paymentId>:admin:<requestId>:<asset>`, **분쟁 구매자 승 `dispute:{escrowId}:{asset}`**(분쟁 판정은 에스크로당 1회) |
 
 
 #### 6.6.1 다리별 환불 규칙 (ADR-048 E4)
@@ -940,9 +962,9 @@ flowchart TD
 |---|---|---|
 | 상태 | `held`·`released`·`refunded` | + `disputed`·`frozen`(§7.1) |
 | 생성 | `ConfirmPurchase` 의 `HoldInTx` — 다리(`escrow_leg`)별 보류, 분개 `liab:user_*` → `liab:escrow:{asset}` | 동일 |
-| 해제 | **수동만**: 구매자 `confirm-receipt`(`demo` 주문은 `paid` 에서도 허용, `MarkDelivered` 로 `delivered` 가 된 뒤에도 가능, §5.2.1) → `held→released`, `escrow.released` 발행, POINT 다리 소각 분개 | 자동 확정 타이머(`EscrowAutoRelease`, `ESCROW_TIME_SCALE` 압축 재현), 반품 기한 연동 |
+| 해제 | **수동만**: 구매자 `confirm-receipt`(`demo` 주문은 `paid` 에서도 허용, `MarkDelivered` 로 `delivered` 가 된 뒤에도 가능, §5.2.1) → `ReleaseEscrow`(쌍 #8, escrow 조율: escrow `held→released` CAS(`pending_refund_krw = 0`) → ledger 비 USDC 다리 해제 분개(POINT 소각, 키 `escrow:{escrowId}:release:{asset}`) → `order.MarkCompletedInTx`), `escrow.released` 발행. **해제 분개의 단일 소유자는 이 tx** 다 | 자동 확정 타이머(`EscrowAutoRelease`, `ESCROW_TIME_SCALE` 압축 재현), 반품 기한 연동 |
 | 환불 | 해제 전 환불(쌍 #7 활성): 구매자 취소·관리자 환불·시스템 | 반품·분쟁 환불, PG 취소 |
-| 정산 | **없음**(`settlement` 모듈 도입 전) — `escrow.released` 는 발행만 되고 USDC 다리는 `liab:escrow:USDC` 에 남는다 | `settlement-escrow-reactor` 가 시작 시 `released` 이면서 `settlement` 행이 없는 에스크로를 **스캔해 정산**(`UNIQUE(escrow_id)` 로 멱등) — outbox 보존 기간과 무관하게 Phase 3 에서 해제된 건도 처리하므로 **소급 이관 절차가 필요 없다** |
+| 정산 | **없음**(`settlement` 모듈 도입 전) — `escrow.released` 는 발행만 되고 USDC 다리는 `liab:escrow:USDC` 에 남는다(해제 tx 는 USDC 다리를 옮기지 않는다 — 정산이 판매자 지급의 재원으로 직접 차변한다, §8.5.1). 대사 불변식(§9.3)의 '해제됐으나 미정산인 USDC' 항이 이것이다 | `settlement-escrow-reactor` 가 시작 시 `released` 이면서 `settlement` 행이 없는 에스크로를 **스캔해 정산**(`UNIQUE(escrow_id)` 로 멱등) — outbox 보존 기간과 무관하게 Phase 3 에서 해제된 건도 처리하므로 **소급 이관 절차가 필요 없다** |
 
 ### 7.1 상태 머신 (ADR-016 초안 확장)
 
@@ -954,17 +976,20 @@ stateDiagram-v2
     held --> refunded: 출고 전 취소 / 시스템 환불
     held --> frozen: order.return_requested / shipment.delivery_failed (해제 동결)
     frozen --> held: return.inspected REJECTED (반품 거절, 해제 재개, release_due_at 재설정)
+    frozen --> held: 부분 환불 완료 tx (잔여 다리로 재개)
     frozen --> refunded: return.inspected 환불 판정(REJECTED 외) / 반송 후 환불
-    frozen --> disputed: 구매자 분쟁 제기
+    frozen --> disputed: 구매자 분쟁 제기 (frozen_reason = delivery_failed 만, 반품 케이스 진행 중은 금지)
     disputed --> released: 관리자 판정 판매자 승
     disputed --> refunded: 관리자 판정 구매자 승
     released --> [*]
     refunded --> [*]
 ```
 
-- `frozen` 은 **해제 타이머를 멈춘 `held`** 다(`release_due_at` 을 NULL 로, `frozen_reason` = `return`|`delivery_failed` 기록). 반품 요청(`order.return_requested`)이나 배송 실패(`shipment.delivery_failed`)가 오면 자동 해제 작업이 건드리지 않는다. `escrow-order-reactor` 가 `return.inspected{disposition}` 를 구독해, `REJECTED` 면 **`frozen→held`**(해제 기한을 `now + 1일`, 제안으로 재설정하고 `frozen_reason` 비움)로 정상 흐름을 타게 하고 환불은 하지 않는다. `RESTOCK`·`DISPOSE`·`REFUND_ONLY` 는 환불 경로(`payment-fulfillment-refunder`)가 `frozen→refunded` 를 수행한다. `frozen` 에서의 모든 전이도 `held`/`frozen` 기대 상태 조건부 UPDATE 다. 분쟁(`disputed`)은 `held`·`frozen` 에서만 열 수 있다.
+- `frozen` 은 **해제 타이머를 멈춘 `held`** 다(`release_due_at` 을 NULL 로, `frozen_reason` = `return`|`delivery_failed` 기록). 반품 요청은 **요청 tx 안의 `FreezeInTx`**(쌍 #5)로 동기 동결하고, 배송 실패(`shipment.delivery_failed`)는 `escrow-order-reactor` 가 동결한다(`order.return_requested` 소비는 멱등 보조). 자동 해제 작업은 `frozen` 을 건드리지 않는다. `escrow-order-reactor` 가 `return.inspected{disposition}` 를 구독해, `REJECTED` 면 **`frozen→held`**(해제 기한을 `now + 1일`, 제안으로 재설정하고 `frozen_reason` 비움, **`pending_refund_krw = 0` 조건**)로 정상 흐름을 타게 하고 환불은 하지 않는다. `RESTOCK`·`DISPOSE`·`REFUND_ONLY` 는 환불 경로(`payment-fulfillment-refunder`)가 수행하고, 전량이면 `frozen→refunded`, **부분이면 환불 완료 tx 가 `frozen→held` 재개까지 한다**(reactor 가 따로 재개하면 환불 in-flight 중 해제가 열린다, C1). `frozen` 에서의 모든 전이도 `held`/`frozen` 기대 상태 조건부 UPDATE 다.
+- **환불 진행 표식** `pending_refund_krw`(+`pending_refund_id`)는 상태가 아니라 열이다: `held`·`frozen`·`disputed` 어느 상태에서든 카드 환불 선점 tx 가 설정하고 완료 tx 가 지운다(§6.6). 표식이 0 이 아니면 해제·분쟁 제기·분쟁 판정·재개가 모두 0행으로 거절된다. (`frozen_reason='refund'` 로 상태를 하나 더 두는 안은 원래 상태(`held`/`disputed`)를 잃어 재개 대상이 모호해지므로 쓰지 않는다.)
+- **분쟁(`disputed`)은 `held`, 그리고 `frozen_reason='delivery_failed'` 인 `frozen` 에서만** 열 수 있다(C13). 반품·교환 케이스가 열려 있는 동안(`frozen_reason='return'`)은 `409 return_in_progress` — 분쟁과 반품 검수가 같은 대금을 두고 서로 다른 결론(해제 vs 환불)을 내는 경합을 막는다. 반품 거절로 `held` 로 돌아온 뒤에는 분쟁을 열 수 있다.
 - 에스크로는 **결제 승인과 같은 트랜잭션에서 `held` 로 생성**된다(ConfirmPurchase). 따라서 `pending` 상태는 두지 않는다. 다리별 보류액은 `escrow_leg`(§10.6)에 두고 `escrow.amount_krw` 는 KRW 환산 합계(표시용)다.
-- `released` 가 되면 `escrow.released` 이벤트(잔여 다리 `legs[]` 포함, §11)를 `settlement` 가 소비해 정산한다. `refunded` 는 결제 환불·원장 역분개와 한 트랜잭션이다(락 순서 `payment → escrow → ledger 계정`, §4.7).
+- `released` 가 되면 `escrow.released` 이벤트(잔여 다리 `legs[]` 포함, §11)를 `settlement` 가 소비해 정산한다. `refunded` 는 결제 환불·원장 역분개와 한 트랜잭션이다(락 순서 `payment → escrow → ledger 계정 → order`, §4.7). **escrow 는 `payment.refunded` 를 구독하지 않는다** — 감액은 쌍 #7 의 `RefundInTx` 가 같은 tx 에서 하므로 이벤트로 또 하면 이중 감액이다.
 
 ### 7.2 기한 값 (ADR-016 미결 해소 제안)
 
@@ -976,30 +1001,37 @@ stateDiagram-v2
 | 분쟁 제기 가능 기간 | 위 기한 안(= 해제 전까지) | — | |
 | 분쟁 판정 | 관리자 수동, **기한 없음**(시연 규모) | — | 실서비스는 SLA 필요 |
 | **시연 압축** | `…_SECONDS` 단위 설정으로 분·초 단위 압축 가능 | `ESCROW_TIME_SCALE` | DoD "재현"을 위해 며칠을 기다리지 않게 함 |
+| 반품 동결 여유 | 자동 해제는 `return_window_ends_at + RETURN_FREEZE_GRACE` 이전에 실행하지 않는다(`release_due_at = max(delivered_at + 7일, return_window_ends_at + grace)`) | `RETURN_FREEZE_GRACE_SECONDS` | 동결은 요청 tx 의 `FreezeInTx` 로 동기지만, 배송 실패 동결·알림 등 비동기 소비자 몫의 여유 |
+
+- **단일 시계 (C8)**: 예약 만료·견적 만료·교환 기한·반품 기한·자동 해제·재개 기한 등 **모든 기한은 `DemoClock` 포트 하나**로 계산한다(`now()`·`after(base, duration)`; 압축은 이 포트 안에서만 `ESCROW_TIME_SCALE` 을 적용). 기한마다 따로 압축하면 두 시계(예: 반품 기한은 실시간, 자동 해제는 압축)가 갈려 `5일 < 7일` 관계가 실효값에서 뒤집힐 수 있다. P3 의 풀필먼트 기한도 같은 포트를 쓴다.
+- **설정 검증은 압축 후 실효값으로** 한다: `RETURN_WINDOW < AUTO_RELEASE`, 그리고 `(AUTO_RELEASE − RETURN_WINDOW)·scale ≥ k × 소비자 p99 지연`(k = 3, 제안; p99 는 `pf_inbox_lag_seconds` 의 최근 값, 없으면 60초)과 `RETURN_FREEZE_GRACE·scale ≥ k × p99`. 검증 실패는 기동 실패다. 정합성의 근거는 이 여유가 아니라 동기 동결과 `MarkCompletedInTx` CAS(§7.3)이고, 여유는 비동기 표시·알림이 해제보다 늦지 않게 하는 몫이다.
 
 ### 7.3 자동 확정 작업 (`EscrowAutoRelease`)
 
 ```mermaid
 flowchart TD
-    A["worker 주기 (1분)"] --> B["held 이면서 release_due_at <= now 인 에스크로 배치 선점 (SKIP LOCKED)"]
+    A["worker 주기 (1분, DemoClock)"] --> B["held 이고 pending_refund_krw = 0 이고 release_due_at <= now 인 에스크로 배치 선점 (SKIP LOCKED)"]
     B --> C{"분쟁 없음?"}
     C -- "분쟁 중" --> C2["건너뜀 (disputed 는 대상 아님)"]
-    C -- "정상" --> D["tx: held→released 조건부 + 원장 해제 분개 + outbox escrow.released + 감사"]
-    D --> E["settlement 가 inbox 로 소비하여 정산 생성"]
+    C -- "정상" --> D["ReleaseEscrow tx (escrow → ledger → order): held→released CAS + 비 USDC 다리 해제 분개(PostJournalsInTx) + order.MarkCompletedInTx + outbox escrow.released + 감사"]
+    D --> D2{"MarkCompletedInTx 성공?"}
+    D2 -- "아니오 (주문이 return_requested 등 허용 출발 상태가 아님)" --> R["전체 롤백 — 해제 안 됨, 다음 주기에 escrow 상태 재평가"]
+    D2 -- "예" --> E["settlement 가 inbox 로 소비하여 정산 생성"]
 ```
 
-- `release_due_at` 은 `delivered_at + N일` 로 `shipment.delivered` 소비 시 설정한다(그 전에는 `shipped_at + M일` 상한만). 자동 확정 작업은 `status = 'held'` 만 대상이므로 `frozen`·`disputed` 는 자연히 제외된다. 소비자 `escrow-order-reactor` 가 `order.return_requested`·`shipment.delivery_failed`·`shipment.delivered`·`return.inspected` 를 받아 동결·기한 설정·재개를 수행한다(§11).
-- 구매자 수동 확정(`POST /api/orders/{id}/confirm-receipt`)도 같은 전이를 쓴다. 두 경로가 동시에 와도 조건부 UPDATE 로 한 번만 성공한다.
+- `release_due_at` 은 `max(delivered_at + N일, return_window_ends_at + grace)` 로 `shipment.delivered` 소비 시 설정한다(그 전에는 `shipped_at + M일` 상한만). 자동 확정 작업은 `status = 'held'` 이고 `pending_refund_krw = 0` 인 것만 대상이므로 `frozen`·`disputed`·환불 진행 중은 제외된다. 소비자 `escrow-order-reactor` 가 `shipment.delivery_failed`·`shipment.delivered`·`order.demo_delivered`·`return.inspected{REJECTED}`·`order.exchange_cancelled` 를 받아 동결·기한 설정·재개를 수행한다(§11). 반품 요청 동결은 요청 tx 의 `FreezeInTx` 가 이미 했다.
+- **해제와 반품의 경합(C8)**: 해제 tx 는 `order.MarkCompletedInTx`(`delivered→completed`; demo 는 `paid`/`delivered`, 14일 상한 경로는 `shipped`, 분쟁 판매자 승은 `disputed`)를 **마지막 참여 함수**로 부른다. 반품 요청이 먼저 커밋됐으면 escrow 는 이미 `frozen` 이라 첫 CAS 에서 0행, 반품 요청 tx 가 해제보다 늦으면 `FreezeInTx` 의 `held→frozen` 이 0행(이미 `released`)이 되어 반품은 `409 escrow_state_conflict`(구매 확정 후 반품 불가) 다. 어느 순서에서도 '반품 접수됐는데 해제됨'은 없다(AC-C49).
+- 구매자 수동 확정(`POST /api/orders/{id}/confirm-receipt`)도 같은 `ReleaseEscrow` 를 쓴다(조율자는 escrow, OD-09 는 진입점일 뿐). 두 경로가 동시에 와도 escrow CAS 로 한 번만 성공한다. 환불 진행 중(`pending_refund_krw > 0`)이면 `409 refund_in_progress`.
 
 ### 7.4 분쟁
 
 | 단계 | 내용 |
 |---|---|
-| 제기 | 구매자가 `held` 에서 사유(분류 + 자유 텍스트)로 제기. 자유 텍스트는 **ENC**(`escrow_dispute.reason_enc`, 길이 ≤ 500) |
+| 제기 | 구매자가 `held`(또는 `frozen_reason='delivery_failed'` 인 `frozen`)에서 사유(분류 + 자유 텍스트)로 제기. 자유 텍스트는 **ENC**(`escrow_dispute.reason_enc`, 길이 ≤ 500). 반품·교환 케이스가 열려 있으면(`frozen_reason='return'`) `409 return_in_progress`, 환불 진행 중이면 `409 refund_in_progress`(C13·C1) |
 | 판정 | 관리자 화면에서 증빙 텍스트·주문/배송 이력을 보고 `seller_wins`/`buyer_wins` 선택 |
-| 효과 | `seller_wins` → `released`(정산), `buyer_wins` → `refunded`(PG 취소 + 역분개). 부분 판정은 M1 범위 밖(미결) |
+| 효과 | `seller_wins` → `ReleaseEscrow`(`disputed→released`, 해제 키 `escrow:{escrowId}:release:{asset}`, 정산), `buyer_wins` → `RefundPayment(reason=dispute)`(`disputed→refunded`, 역분개 키 `dispute:{escrowId}:{asset}`, 카드는 PG 취소). 둘 다 `pending_refund_krw = 0` 조건. 부분 판정은 M1 범위 밖(미결) |
 | 감사 | `admin.dispute_resolved`(결과, 금액) |
-| 동시성 | `disputed→released/refunded` 조건부 UPDATE. 분쟁과 자동 확정이 동시에 와도 `held` 에서 한 쪽만 성공 |
+| 동시성 | `disputed→released/refunded` 조건부 UPDATE. 분쟁과 자동 확정이 동시에 와도 `held` 에서 한 쪽만 성공. 분쟁과 반품 요청은 서로 배타(위 '제기') |
 
 ### 7.5 판매자 모델
 
@@ -1016,7 +1048,7 @@ flowchart TD
 |---|---|---|---|
 | `KRW` | 원 | `bigint` | 모의 현금성 금액(카드 테스트 결제) |
 | `POINT` | 포인트 | `bigint` | 플랫폼 크레딧(모의) — **첫 로그인 지급 100,000**(`exp:demo_grant:POINT`), 관리자 지급, **USDC→POINT 단방향 교환**(`exp:points_exchanged:POINT`), Phase 2 이후 바둑 보상(`exp:points_issued`)으로 얻는다. POINT→USDC 환전은 없다. **1 POINT = 1 KRW 가치로 고정**(`POINT_KRW_RATE = 1` 상수, 설정 항목이 아니다 — 환산 함수에 비율 인자가 없다) |
-| `USDC` | micro-USDC(10⁻⁶) | `bigint` | 구매자 **모의 보유 자산**(원장 고정액 자동 지급 없음 — 환경별 `WELCOME_GRANT_USDC_MICRO`·`AdminGrant`·교환 경로, P0 U24)이자 정산 통화. Solana USDC 소수 자릿수(6)와 같다. 원장의 모의 잔액이며 온체인이 아니다 |
+| `USDC` | micro-USDC(10⁻⁶) | `bigint` | 구매자 **모의 보유 자산**(원장 고정액 자동 지급 없음 — 환경별 `WELCOME_GRANT_USDC_MICRO`·`AdminGrant`, P0 U24)이자 정산 통화. **라이브의 출처는 6d 의 devnet 입금→원장 반영 브리지(`UsdcDepositBridge`)뿐**이라 그 전까지 라이브에서는 USDC 다리·교환을 노출하지 않는다(D1, `USDC_LEG_ENABLED`; 교환은 USDC 를 소비하는 쪽이라 출처가 아니다). Solana USDC 소수 자릿수(6)와 같다. 원장의 모의 잔액이며 온체인이 아니다 |
 
 - 환율은 `numeric(20,8)` 으로 저장하고, 계산은 **정수 연산**(환율 × 10⁸ 을 `bigint` 로)으로만 한다. 부동소수점을 금액 계산에 쓰지 않는다.
 
@@ -1069,7 +1101,7 @@ exchangeCost(K)     = ceil ( K × 10^14 / rate_e8 )          // 포인트 K 를 
 |---|---|
 | 견적 | `POST /api/me/exchange/quotes {pointAmount K}` → `{exchangeQuoteId, pointAmount, usdcMicro = ceil(K×10^14/rate_e8), rate, snapshotId, expiresAt}`. 최신 accepted 스냅샷(허용 지연 15분 이내, 아니면 `503 pricefeed_stale`)을 고정하고 **만료는 60초(제안)**. `exchange_quote(id, user_id, snapshot_id, point_amount, expires_at, status)` |
 | 요청 | `POST /api/me/exchange {exchangeQuoteId, pointAmount, maxUsdcMicro}` — **헤더 `Idempotency-Key` 필수**(없으면 400). 같은 키 재요청은 같은 결과를 재생한다 |
-| 확정 | 견적이 만료·사용됨이면 `409 quote_expired`. 견적 스냅샷으로 다시 계산한 `exchangeCost` 가 `maxUsdcMicro` 를 넘으면 `409 price_moved`(상한을 넘는 비용은 확정하지 않는다). 통과하면 한 tx 에서 견적 `open→used` 조건부 + USDC 분개 + POINT 분개 + `supply_cap`(POINT) 증가 + outbox `ledger.points_exchanged` |
+| 확정 | 견적이 만료·사용됨이면 `409 quote_expired`. 견적 스냅샷으로 다시 계산한 `exchangeCost` 가 `maxUsdcMicro` 를 넘으면 `409 price_moved`(상한을 넘는 비용은 확정하지 않는다). 통과하면 한 tx 에서 견적 `open→used` 조건부 + `supply_cap`(POINT) 증가 + USDC·POINT 분개(`PostJournalsInTx` 한 번, 계정 일괄 잠금) + outbox `ledger.points_exchanged{exchangeId, pointAmount, usdcCostMicro, snapshotId}`(필드 이름 `usdcCostMicro` 가 정본, P0 §8.3). 라이브에서는 D1 에 따라 `USDC_LEG_ENABLED=off` 동안 `409 usdc_unavailable` |
 | 저널 키 | 자산별 1건, `exchange:{userId}:{idempotencyKey}:{asset}` (`USDC`·`POINT`) |
 | 속도 제한 | 등급 `write.exchange`(§16.2) |
 
@@ -1160,13 +1192,14 @@ sequenceDiagram
     S->>D: inbox 선점 → settlement 생성 (escrow_id 유일, pending)
     S->>D: tx1: pending→processing 선점 (claim_token)
     S->>S: 잔여 다리 입력 + 고정된 snapshot 의 환율로 환산 (floor) + 수수료 + dust
-    S->>D: tx2 (락 순서: settlement 행 → ledger 계정): processing→settled 조건부 + 원장 분개 (§8.5.1: 비 USDC 다리 소각 0~1건 + USDC 정산 1건) + outbox settlement.completed
+    S->>D: tx2 (락 순서: settlement 행 → ledger 계정): processing→settled 조건부 + 원장 분개 USDC 정산 1건만 (키 settlement:{escrowId}:USDC, §8.5.1 — 비 USDC 다리 소각은 해제 tx 소유) + outbox settlement.completed
     Note over S,D: 외부 호출 없음(모의). 온체인은 Phase 6-4 에서 tx1 과 tx2 사이로 이동
 ```
 
 | 규칙 | 내용 |
 |---|---|
-| 멱등 | `settlement.escrow_id` 유일. 재전달된 `escrow.released` 는 inbox PK 로 흡수 |
+| 멱등 | `settlement.escrow_id` 유일. 재전달된 `escrow.released` 는 inbox PK 로 흡수. 저널 키 `settlement:{escrowId}:USDC` |
+| 기장 소유 (C2) | **정산은 USDC 판매자 지급(차변 `liab:escrow:USDC` u_rem·`exp:point_redemption:USDC` r 또는 카드의 `fx:clearing:USDC`, 대변 지급채무·수수료·dust)만 기장**한다. POINT·KRW 다리의 해제(소각) 분개는 해제 tx(`ReleaseEscrow`, 쌍 #8)의 단독 소유이며 정산이 다시 쓰지 않는다 — 두 곳이 같은 소각을 기장하면 `liab:escrow:POINT` 가 두 번 줄어, 다른 주문의 보류액이 남아 있는 동안은 `min_balance` 에도 걸리지 않고 대사에서만 드러난다 |
 | 환율 | **에스크로 생성 시점이 아니라 결제 시작 시 고정한 스냅샷**(§8.4, **모든 결제 수단**)을 쓴다 → "이 결제는 몇 시 몇 분 스냅샷의 환율로 확정됐다"를 한 질의로 보인다(Phase 5 DoD). 혼합 결제의 정산은 **총액 차이 방식**이다: 잔여 총액 `T_rem` 전체를 같은 스냅샷으로 한 번 환산해 `gross_rem` 을 구하고, 구매자가 이미 낸 USDC 다리 `u_rem` 을 뺀 차이가 플랫폼 부담 `r` 이다(POINT 다리를 따로 환산하지 않는다, §8.5.1) |
 | 정산 입력 | **에스크로의 잔여 다리** — `escrow_leg.amount − refunded_amount`(부분 환불이 있었으면 줄어든 값). 원 결제 금액이 아니다 |
 | 실패 | 환산 입력 이상(스냅샷 없음·음수)이면 `failed` + 경보, 수동 재시도 CLI. 모든 결제가 스냅샷을 가지므로 정상 경로에서 "스냅샷 없음"은 일어나지 않는다(이전 설계의 포인트 결제 정산 영구 실패 결함 해소) |
@@ -1196,15 +1229,26 @@ dust = gross_rem − net − fee                                // ∈ {0, 1}
 
 | 단계 | 분개 (차변 / 대변), 자산별 1건 |
 |---|---|
-| 해제: POINT 다리 소각 | `liab:escrow:POINT` P_rem / `fx:clearing:POINT` P_rem |
-| 정산(USDC 자산) | `liab:escrow:USDC` u_rem + `exp:point_redemption:USDC` r / `liab:seller_payable:{s}:USDC` net + `rev:platform_fee:USDC` fee + `rev:rounding_dust:USDC` dust |
+| 해제: POINT 다리 소각 (**해제 tx `ReleaseEscrow` 소유**, 키 `escrow:{escrowId}:release:POINT`) | `liab:escrow:POINT` P_rem / `fx:clearing:POINT` P_rem |
+| 정산(USDC 자산) (**정산 tx 소유**, 키 `settlement:{escrowId}:USDC`) | `liab:escrow:USDC` u_rem + `exp:point_redemption:USDC` r / `liab:seller_payable:{s}:USDC` net + `rev:platform_fee:USDC` fee + `rev:rounding_dust:USDC` dust |
 
 - 차변 합 `u_rem + r = gross_rem` = 대변 합 `net + fee + dust` 이므로 **USDC 자산에서 항상 균형**이고, POINT 자산은 별도로 균형이다(자산별 분개, 다중 자산 복식).
 - **금액 0 인 라인은 만들지 않는다**(`posting.amount > 0` CHECK): `P_rem = 0`(POINT 다리가 전액 환불됐거나 없음)이면 POINT 소각 분개 없음, `u_rem = 0` 이면 `liab:escrow:USDC` 라인 없음, `r = 0`·`fee = 0`(`fee_bps = 0`)·`dust = 0` 이면 해당 라인 생략, `net = 0`(수수료율 100% 같은 퇴화형) 이면 `seller_payable` 라인 생략. 분개는 어떤 형태에서도 `gross_rem > 0` 이라 최소 한 개의 차변·대변 라인을 가진다.
-- **분개 수**: 해제·정산 분개는 `다리 수 + 1` 에서 USDC 다리의 해제 분개가 정산 분개에 합쳐지므로 **비 USDC 잔여 다리(POINT 또는 KRW, 0 또는 1개) + USDC 정산 분개 1건**이다 — 포인트 단독·혼합·카드는 2건, USDC 단독은 USDC 정산 분개 1건(§9.3 대사 질의가 이 형태를 기대한다).
+- **분개 수**: 해제·정산 분개는 `다리 수 + 1` 에서 USDC 다리의 해제 분개가 정산 분개에 합쳐지므로 **해제 tx 의 비 USDC 잔여 다리 분개(POINT 또는 KRW, 0 또는 1개) + 정산 tx 의 USDC 정산 분개 1건**이다 — 포인트 단독·혼합·카드는 2건(해제 1 + 정산 1), USDC 단독은 정산 1건(§9.3 대사 질의가 이 형태를 기대한다). USDC 다리는 해제 시 분개가 없고 정산까지 `liab:escrow:USDC` 에 남는다.
 - `settlement` 행은 `funded_usdc_micro`(= u_rem), `funded_point_krw`(= P_rem), `point_redemption_micro`(= r) 를 갖고 `CHECK (funded_usdc_micro + point_redemption_micro = usdc_gross_micro)` 와 `CHECK (net_micro + fee_micro + dust_micro = usdc_gross_micro)` 가 같은 식을 강제한다.
 
-**속성 시험(2026-11-05, 정수 모델, 무작위 10만 주문)**: `T ∈ [100, 5,000,000]`, 환율 `[800, 2500]`(소수 8자리), `fee_bps ∈ {0, 100, 250, 333}`, 포인트 단독·USDC 단독·혼합을 섞고, 결제 후 부분 환불 0~5단계(§6.6.1 규칙, 마지막 단계는 15% 확률로 전액) 뒤 남은 잔여 다리로 정산했다. 환불 17만 6,052단계, 정산 7만 3,538건(전액 환불로 정산이 없는 2만 6,462건 제외), `r > 0` 5만 8,604건. 결과 — 자산별 분개 차변≠대변 **0건**, `r < 0` **0건**, 에스크로·사용자 계정 음수 잔액 **0건**, 다리별 환불 합 > 낸 수량 **0건**, 정산 후 에스크로 잔액 잔존 **0건**, `dust ∉ {0,1}` **0건**. 대조군: `max(·, u_rem)` 없이 `r = floor(T_rem·c) − u_rem` 으로 계산하면 8,117건에서 `r < 0` 이 나온다(그래서 위 정의가 필요하다). 재현 스크립트는 별도 보관하지 않고 결과만 기록한다.
+**속성 시험(2026-11-05, 정수 모델, 무작위 10만 주문)**: `T ∈ [100, 5,000,000]`, 환율 `[800, 2500]`(소수 8자리), `fee_bps ∈ {0, 100, 250, 333}`, 포인트 단독·USDC 단독·혼합을 섞고, 결제 후 부분 환불 0~5단계(§6.6.1 규칙, 마지막 단계는 15% 확률로 전액) 뒤 남은 잔여 다리로 정산했다. 환불 17만 6,052단계, 정산 7만 3,538건(전액 환불로 정산이 없는 2만 6,462건 제외), `r > 0` 5만 8,604건. 결과 — 자산별 분개 차변≠대변 **0건**, `r < 0` **0건**, 에스크로·사용자 계정 음수 잔액 **0건**, 다리별 환불 합 > 낸 수량 **0건**, 정산 후 에스크로 잔액 잔존 **0건**, `dust ∉ {0,1}` **0건**. 대조군: `max(·, u_rem)` 없이 `r = floor(T_rem·c) − u_rem` 으로 계산하면 8,117건에서 `r < 0` 이 나온다(그래서 위 정의가 필요하다).
+
+**정본 식과 재검산 (C11, 2026-11-05).** `net`·`fee` 는 **유리수 `x_eff` 에서 한 번 내림**한다(위 식). ADR-040 결정 4 의 이전 문안은 `gross_rem` 을 먼저 내린 뒤 `floor(gross_rem·(10000−bps)/10000)` 로 적어 이 식과 달랐고, 이 문서의 식을 정본으로 ADR-040 을 고쳤다. 저장소 밖 임시 스크립트로 다시 돌린 결과(무작위 10만 주문, 부분 환불 0~5단계 24만 9,821단계, 정산 8만 7,426건): `x_eff` 식의 불변식(`net+fee+dust=gross`, `dust ∈ {0,1}`, `r ≥ 0`) 위반 **0건**, 환불 없는 정산 1만 6,668건에서 §8.2 식과 불일치 **0건**(환불이 없으면 `u ≤ floor(T·c)` 라 `x_eff = T·c` 이므로 같다). 이전 문안(내림 먼저)은 불변식은 지키지만(위반 0건) 환불 없는 1만 6,668건 중 **6,138건**에서 §8.2 와 `net`·`dust` 가 1씩 어긋났고, 전체로는 2만 3,467건에서 `x_eff` 식과 달랐다 — "환불이 없으면 같은 수치"라는 이전 주장은 그 문안에서는 거짓이었다.
+
+**검산 벡터는 시험 픽스처로 커밋한다**(결과 수치만 문서에 남기는 방침을 바꾼다 — 5-D 에서 `settlement-vectors` 픽스처 파일과 그것을 읽는 속성 시험을 함께 커밋하고, 무작위 시험은 시드를 고정해 재현 가능하게 한다). 픽스처 후보(모두 `rate_e8` = KRW/USDC × 10⁸):
+
+| # | 입력 | 기대값 (micro-USDC) | 노리는 것 |
+|---|---|---|---|
+| V1 | 혼합 `T=1,000,000`, `P=300,000`, `rate_e8=140,000,000,000`, `fee_bps=100`, 환불 없음 | `u=500,000,000`, gross 714,285,714, `r=214,285,714`, net 707,142,857, fee 7,142,857, dust 0 | 기본형 |
+| V2 | 포인트 단독 `T=50,000`, `rate_e8=138,765,432,100`, `fee_bps=250` | gross 36,032,028 = `r`, net 35,131,227, fee 900,800, dust **1** | dust 1 |
+| V3 | USDC 단독 `T=152,874`, `rate_e8=138,013,994,741`, `fee_bps=100`, `u=110,767,027`; 부분 환불 `F=22,531`(USDC 환불 16,325,155) | `T_rem=130,343`, `u_rem=94,441,872` > `floor(T_rem·c)=94,441,871` → gross 94,441,872, **`r=0`**, net 93,497,453, fee 944,418, dust 1 | `max(·, u_rem)` 분기 |
+| V4 | 포인트 단독 `T=388,169`, `rate_e8=118,980,735,759`, `fee_bps=250`, 환불 없음 | gross 326,245,250 = `r`, net **318,089,119**, fee 8,156,131, dust 0 (이전 문안이면 net 318,089,118·dust 1) | 내림 순서 회귀 |
 
 ### 8.6 시세 이상 시 동작 요약
 
@@ -1238,7 +1282,7 @@ classDiagram
 |---|---|
 | 상태 모델 | 오프체인 `escrow` 상태 머신이 **정본**이고 온체인 계정은 그 거울. 온체인 상태는 `status`/`watch` 로 읽어 대조 |
 | 호출 위치 | 온체인 트랜잭션은 **트랜잭션 밖**(선점 → 체인 호출 → 완료), 서명 확인/확정 깊이는 폴링 대사 |
-| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle faucet 과 Coinbase CDP faucet 이 같은 민트로 보낸다(2026-11-05 검색; Circle 문서 developers.circle.com/stablecoins/usdc-contract-addresses). 한도는 제3자 자료 기준 Circle 20 USDC/2시간/주소(Circle 자체 페이지 미확인), Coinbase CDP 1 USDC/요청·10 USDC/24시간(Coinbase 문서) — 6d 착수 전 재확인. 수수료용 SOL 은 Solana faucet. **확정(P0 U28, 2026-11-05): 정산 토큰은 자체 발행 `tUSDC`(devnet 모의 토큰, 메타데이터 이름 'Test USDC (demo)', 화면에도 `tUSDC` 명시)가 기본**이고 설정 `SETTLEMENT_MINT` 로 Circle devnet USDC 에 연결할 수 있다. 지갑 연결이 유도 경로라 외부 faucet 두 곳을 거치면 이탈하므로 사이트가 tUSDC 를 발행하고 수수료를 대납(fee payer)한다. **민트 권한 키·수수료 대납 키는 비밀**(devnet 전용, ADR-026 등재)이고 지갑당 발행 속도·횟수를 제한한다. **수수료 대납 안전장치(P0 U29 확정, 2026-11-05)**: 지갑당 대납 횟수·일일 총량 상한, 대납 키 SOL 잔액이 기준 이하이면 Discord 경보(게이지 `pf_wallet_fee_payer_balance_lamports` 제안, ADR-027), 잔액이 바닥나면 대납을 멈추고 '사용자 faucet 안내' 화면으로 자동 폴백(지갑 연결·원장 기능은 정상). 사용자 1명당 약 0.003 SOL 은 미검증 추정이며 상한 숫자는 초기값 제안, 6d 착수 시 확정 `SETTLEMENT_MINT` 가 Circle USDC 이면 사이트는 발행하지 않고 사용자가 Circle faucet 으로 받은 것을 쓴다(수수료 대납은 유지 가능). 앞서의 '권고는 Circle USDC, tUSDC 는 폴백'은 개정 이력이다. 지갑은 선택 사항이며 연결한 사용자만 이 경로를 쓴다 |
+| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle faucet 과 Coinbase CDP faucet 이 같은 민트로 보낸다(2026-11-05 검색; Circle 문서 developers.circle.com/stablecoins/usdc-contract-addresses). 한도는 제3자 자료 기준 Circle 20 USDC/2시간/주소(Circle 자체 페이지 미확인), Coinbase CDP 1 USDC/요청·10 USDC/24시간(Coinbase 문서) — 6d 착수 전 재확인. 수수료용 SOL 은 Solana faucet. **확정(P0 U28, 2026-11-05): 정산 토큰은 자체 발행 `tUSDC`(devnet 모의 토큰, 메타데이터 이름 'Test USDC (demo)', 화면에도 `tUSDC` 명시)가 기본**이고 설정 `SETTLEMENT_MINT` 로 Circle devnet USDC 에 연결할 수 있다. 지갑 연결이 유도 경로라 외부 faucet 두 곳을 거치면 이탈하므로 사이트가 tUSDC 를 발행하고 수수료를 대납(fee payer)한다. **민트 권한 키·수수료 대납 키는 비밀**(devnet 전용, ADR-026 등재)이고 지갑당 발행 속도·횟수를 제한한다. **지갑은 공짜로 무한히 만들 수 있으므로 지갑당 상한만으로는 우회된다(C16)** — 같은 상한을 **지갑을 연결한 `github_id` 단위로도** 걸고(공개키 하나는 한 사용자에게만, 한 사용자의 여러 지갑은 합산), 사이트 전체의 **전역 일일 총량**(발행량·대납 횟수)을 둔다. U29 의 '지갑당·일일 총량 상한'에 단위를 더하는 것이며 값은 그대로 6d 착수 시 확정한다. **수수료 대납 안전장치(P0 U29 확정, 2026-11-05)**: 지갑당 대납 횟수·일일 총량 상한, 대납 키 SOL 잔액이 기준 이하이면 Discord 경보(게이지 `pf_wallet_fee_payer_balance_lamports` 제안, ADR-027), 잔액이 바닥나면 대납을 멈추고 '사용자 faucet 안내' 화면으로 자동 폴백(지갑 연결·원장 기능은 정상). 사용자 1명당 약 0.003 SOL 은 미검증 추정이며 상한 숫자는 초기값 제안, 6d 착수 시 확정 `SETTLEMENT_MINT` 가 Circle USDC 이면 사이트는 발행하지 않고 사용자가 Circle faucet 으로 받은 것을 쓴다(수수료 대납은 유지 가능). 앞서의 '권고는 Circle USDC, tUSDC 는 폴백'은 개정 이력이다. 지갑은 선택 사항이며 연결한 사용자만 이 경로를 쓴다 |
 | 키 | 서버 서명 키·tUSDC 민트 권한 키·수수료 대납 키는 시크릿 파일, **devnet 키만**. 메인넷 키는 어떤 설정에도 두지 않는다. 키 관리 ADR 이 착수 선행 조건 |
 | 시험 | `InMemoryChainEscrow` 로 전 흐름을 결정적으로 시험하고 devnet 은 통합 시연으로만 |
 | 범위 | 분쟁·부분 해제 온체인화는 범위 밖 |
@@ -1247,7 +1291,7 @@ classDiagram
 
 ## 9. 원장 (`ledger`) — 복식·불변·대사
 
-> `ledger` 모듈은 **하나**다(P0 D20, §2.5). **이 절이 원장 스키마(다중 자산·복식·지연 제약)의 정본**이고([ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md)), 바둑 보상의 POINT 규칙과 `reward` 상태 머신은 [P1 §10](01-baduk.md) / ADR-037 이 이 스키마 위에 정의한다. 공개 `InTx` 는 `PostJournalInTx`·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`(시그니처 `(tx: TxContext, …) => Result`).
+> `ledger` 모듈은 **하나**다(P0 D20, §2.5). **이 절이 원장 스키마(다중 자산·복식·지연 제약)의 정본**이고([ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md)), 바둑 보상의 POINT 규칙과 `reward` 상태 머신은 [P1 §10](01-baduk.md) / ADR-037 이 이 스키마 위에 정의한다. 공개 `InTx` 는 `PostJournalsInTx`(한 tx 의 모든 저널 계정을 한 번에 잠금, P0 R10)·`PostJournalInTx`(길이 1 특수형)·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`(시그니처 `(tx: TxContext, …) => Result`).
 
 ### 9.1 모델
 
@@ -1258,14 +1302,15 @@ classDiagram
 | `ledger.posting` | `journal_id`, `line_no`, `account_id`, `direction`(`D`/`C`), `amount` `bigint > 0`, `asset` |
 | `ledger.grant` | `id`, `user_id`, `github_id`(불변 subject 사본), `kind`(`welcome` 또는 `admin:{requestId}`), `asset`, `amount`, `journal_id`, `created_at` — **`UNIQUE (github_id, kind)`**. 사용자 삭제는 소프트 삭제(톰스톤, `github_id` 유지)라 같은 GitHub 계정이 재가입해도 첫 로그인 지급이 다시 나가지 않는다 |
 | `ledger.supply_cap` | `asset` PK, `issued`, `cap` `numeric(40,0)` — 자산별 단일 행(P0 U25: `cap` 값은 signed 64-bit 최대 9223372036854775807 마이크로 단위이고, 각 잔액 컬럼이 BIGINT 인 한 합이 이를 넘을 수 없다). 발행은 `UPDATE ledger.supply_cap SET issued = issued + :amt WHERE asset = :a AND issued + :amt <= cap` 한 문장으로 **원자 강제**(0행이면 `supply_cap_exceeded` 거절 + 경보). **지급(첫 로그인·관리자)과 교환으로 발행되는 POINT 를 모두 센다**(교환은 USDC 를 소비하지만 POINT 총량을 늘리므로 포함). 바둑 보상 POINT 는 별도 정책(P1)이라 이 행에 넣지 않는다. 상한이 실질 무제한이라 이 원자 UPDATE 는 구조 방어로만 남고, 남용 방어는 사용자당 1회 지급(`github_id` 유일)과 속도 제한이 맡는다 |
-| `ledger.account_balance` | `account_id` PK, `balance`, `version` — **같은 트랜잭션**에서 조건부 갱신(`balance + Δ >= min_balance`). 한 분개가 여러 계정을 갱신할 때는 **계정 id 오름차순**으로 갱신해 교착을 막는다(락 순서 규약, §4.7). `min_balance` 가 NULL 이면 하한 없음 |
+| `ledger.account_balance` | `account_id` PK, `balance`, `version` — **같은 트랜잭션**에서 조건부 갱신(`balance + Δ >= min_balance`). 잠금은 **분개 단위가 아니라 tx 단위**다: `PostJournalsInTx(tx, journals[])` 가 그 tx 의 모든 저널이 건드리는 계정을 모아 `FOR UPDATE ORDER BY account_id` 로 한 번에 잠근 뒤 갱신한다(P0 R10 — 자산별 저널 두 건을 따로 잠그면 저널 A 의 큰 id 를 잡은 채 저널 B 의 작은 id 를 기다리는 교착이 생긴다, C4). `min_balance` 가 NULL 이면 하한 없음 |
 
 | 불변식 | 강제 수단 |
 |---|---|
 | 분개마다 자산별 차변 합 = 대변 합 | **지연 제약 트리거**(커밋 시 검사, `CONSTRAINT TRIGGER … DEFERRABLE INITIALLY DEFERRED`) — raw SQL 객체(ADR-025 레지스트리, G10 목록 관리) |
 | 추가 전용 | `journal`/`posting` 에 앱 경로 UPDATE·DELETE 없음, DB 권한도 INSERT 전용(역할 분리는 미결) |
 | 정정은 역분개 | `reversal_of_id` 로 원 분개를 가리키는 새 분개 |
-| 같은 사건 두 번 기장 금지 | `idempotency_key` 유일(`ref_type:ref_id:kind:{asset}` — 지급 `grant:welcome:{uid}:{asset}`, 결제 확정 `payment:{id}:confirm:{asset}`, 환불 `refund:{paymentId}:{eventId}:{asset}`, 교환 `exchange:{userId}:{key}:{asset}`) |
+| 같은 사건 두 번 기장 금지 | `idempotency_key` 유일(`ref_type:ref_id:kind:{asset}` — 지급 `grant:welcome:{uid}:{asset}`, 결제 확정 `payment:{id}:confirm:{asset}`, 환불 `refund:{paymentId}:{eventId}:{asset}`(구매자 취소 `refund:{paymentId}:cancel:{asset}`), 교환 `exchange:{userId}:{key}:{asset}`, **해제 `escrow:{escrowId}:release:{asset}`**(해제 tx 단독 소유, 비 USDC 다리), **정산 `settlement:{escrowId}:{asset}`**(USDC 만), **분쟁 구매자 승 환불 `dispute:{escrowId}:{asset}`**) |
+| **에스크로 ↔ 보류 계정 (C2)** | 자산별로 Σ(`held`·`frozen`·`disputed` 에스크로의 `escrow_leg.amount − refunded_amount`) + (`released` 이면서 `settlement` 가 `settled` 가 아닌 에스크로의 USDC 다리 잔여) = `liab:escrow:{asset}` 잔액. 대사 질의(§9.3)가 점검하고 어긋나면 `LedgerUnbalanced` 와 같은 등급으로 경보 |
 | **부분 환불 역분개의 합 상한** | 같은 `reversal_of_id` 를 가진 분개들의 (계정·자산별) 라인 금액 합 ≤ 원 분개 라인 금액. 지연 제약 트리거가 커밋 시 검사하고 대사 질의(§9.3)가 점검 |
 | 잔액 음수 금지(계정 유형별 `min_balance`, 아래 표) | `account_balance` 조건부 갱신 + 대조 잡. **규칙은 ledger 모듈의 계정 유형별 설정**이며 바둑 보상(P1)·상거래가 같은 표를 쓴다 |
 
@@ -1310,8 +1355,8 @@ classDiagram
 | 결제 확정(USDC 다리) | `liab:user_usdc:{u}` / `liab:escrow:USDC` |
 | 카드 승인(모의) | `asset:pg_receivable:KRW` / `liab:escrow:KRW` |
 | 환불(해제 전) | 위 분개의 **역분개**(다리별 자산별 저널, 부분 환불은 일부 금액 — 누적 합 ≤ 원 분개) |
-| 해제 → 정산 1단계 | `liab:escrow:{KRW\|POINT}` / `fx:clearing:{KRW\|POINT}` — **잔여 다리 금액**(USDC 다리는 정산 2단계에서 직접 차변, §8.5.1) |
-| 정산 2단계 | `liab:escrow:USDC`(u_rem, 혼합·USDC) + `exp:point_redemption:USDC`(r) 또는 카드 경로의 `fx:clearing:USDC`(gross) / `liab:seller_payable:{s}:USDC`(net) + `rev:platform_fee:USDC`(fee) + `rev:rounding_dust:USDC`(dust ∈ {0,1}) — 0 인 라인 생략, 대변 합 = 차변(§8.2, §8.5.1) |
+| 해제 (해제 tx `ReleaseEscrow`, 쌍 #8) | `liab:escrow:{KRW\|POINT}` / `fx:clearing:{KRW\|POINT}` — **잔여 다리 금액**, 키 `escrow:{escrowId}:release:{asset}`(USDC 다리는 분개 없음 — 정산이 직접 차변, §8.5.1) |
+| 정산 (정산 tx, 쌍 #9) | `liab:escrow:USDC`(u_rem, 혼합·USDC) + `exp:point_redemption:USDC`(r) 또는 카드 경로의 `fx:clearing:USDC`(gross) / `liab:seller_payable:{s}:USDC`(net) + `rev:platform_fee:USDC`(fee) + `rev:rounding_dust:USDC`(dust ∈ {0,1}) — 0 인 라인 생략, 대변 합 = 차변(§8.2, §8.5.1) |
 | 모의 지급 표시 | `liab:seller_payable:{s}:USDC` / `asset:payout_marked:USDC` |
 
 ### 9.3 대사 질의 (점검 잡 `LedgerReconciler`, 일 1회 + 요청 시)
@@ -1323,7 +1368,8 @@ classDiagram
 | 계정 잔액 | `account_balance` vs `posting` 합 | 일치 |
 | 음수 잔액 | `min_balance` 위반 계정 | 0건 |
 | 주문 ↔ 원장 | `order.status in (paid..)` 마다 `ref_type='order'` 보류 분개 1건 | 일대일 |
-| 해제 ↔ 정산 | `escrow.released` 마다 해제·정산 분개 = (비 USDC 잔여 다리 0~1건) + USDC 정산 1건(§8.5.1). 정산 입력이 잔여 다리와 일치 | 일대일 |
+| 해제 ↔ 정산 | `escrow.released` 마다 해제 tx 분개(비 USDC 잔여 다리 0~1건, 키 `escrow:{id}:release:*`) + 정산 tx 분개(USDC 1건, 키 `settlement:{id}:USDC`)(§8.5.1). 같은 다리의 해제 분개가 두 곳에 없음, 정산 입력이 잔여 다리와 일치 | 일대일 |
+| 에스크로 ↔ 보류 계정 | 자산별 Σ(해제 전 에스크로 다리 잔여) + (해제됐으나 미정산 USDC) vs `liab:escrow:{asset}` 잔액(§9.1) | 일치 |
 | 역분개 상한 | 원 분개 라인별 `Σ(reversal)` ≤ 원 금액 | 위반 0 |
 | 공급 상한 | `supply_cap.issued` = 지급·교환 발행 분개 합, ≤ `cap` | 일치 |
 | 재고 불변식 | (I1) `confirmed ≤ total`, (I2) `avail` 대조 | 위반 0 |
@@ -1342,13 +1388,13 @@ classDiagram
 |---|---|---|---|
 | `product` | `id`, `sku`, `name_ko`, `name_en`, `description_ko/en`, `image_ref`, `reference_price_krw`, `reference_source`(출처 이름), `reference_checked_on`(확인일), `status`(`draft`/`active`/`retired`), `version`, 시각 | `sku` 유일 | PUB·SYS |
 
-**시드 상품 (P0 U27).** 시드는 실제 쇼핑몰(네이버 쇼핑 등)의 대표 상품을 조사해 **참고 가격**을 표시하는 방식이다. `reference_price_krw` 는 참고용 KRW, `reference_source` 는 출처 이름, `reference_checked_on` 은 확인일이다. 자동 수집(스크래핑)은 하지 않고 **사람이 Phase 3 착수 시 조사해 시드 파일(`seeds/products.*`)에 기록**한다(실제 가격 수치는 아직 확보하지 못해 이 문서에 쓰지 않는다). 이미지는 쇼핑몰 것을 복사하지 않는다(저작권·약관) — 자체 일러스트 또는 무이미지. 가격은 시점 스냅샷이며 실제 거래가 아님을 화면에 표기한다. **지갑 없는 사용자는 USDC 를 받지 않으므로(P0 U24 해결, 2026-11-05 사용자 결정) POINT 단독 구매가 핵심 경험이고, 시드 상품 중 POINT 100,000 안에서 살 수 있는 상품이 다수 있어야 한다.** **가격 충돌은 해결(2026-11-05 사용자 결정): (c) 로 푼다** — 첫 로그인 POINT 지급을 1,000 → **100,000**(1 POINT = 1 KRW)으로 올리고 시드 상품은 **대략 현실 금액(참고가 그대로)** 을 쓴다. 폐기한 안: (a) 참고가 스케일링, (b) 소액 상품군 필수 포함(소액 상품을 넣는 것은 자유). 시드는 참고가 대부분이 100,000원 이하가 되도록 조사하고, 100,000원을 넘는 상품은 USDC 교환·혼합 결제의 시연 대상으로 둔다.
+**시드 상품 (P0 U27).** 시드는 실제 쇼핑몰(네이버 쇼핑 등)의 대표 상품을 조사해 **참고 가격**을 표시하는 방식이다. `reference_price_krw` 는 참고용 KRW, `reference_source` 는 출처 이름, `reference_checked_on` 은 확인일이다. 자동 수집(스크래핑)은 하지 않고 **사람이 Phase 3 착수 시 조사해 시드 파일(`seeds/products.*`)에 기록**한다(실제 가격 수치는 아직 확보하지 못해 이 문서에 쓰지 않는다). 이미지는 쇼핑몰 것을 복사하지 않는다(저작권·약관) — 자체 일러스트 또는 무이미지. 가격은 시점 스냅샷이며 실제 거래가 아님을 화면에 표기한다. **지갑 없는 사용자는 USDC 를 받지 않으므로(P0 U24 해결, 2026-11-05 사용자 결정) POINT 단독 구매가 핵심 경험이고, 시드 상품 중 POINT 100,000 안에서 살 수 있는 상품이 다수 있어야 한다.** **가격 충돌은 해결(2026-11-05 사용자 결정): (c) 로 푼다** — 첫 로그인 POINT 지급을 1,000 → **100,000**(1 POINT = 1 KRW)으로 올리고 시드 상품은 **대략 현실 금액(참고가 그대로)** 을 쓴다. 폐기한 안: (a) 참고가 스케일링, (b) 소액 상품군 필수 포함(소액 상품을 넣는 것은 자유). 시드는 참고가 대부분이 100,000원 이하가 되도록 조사하고, 100,000원을 넘는 상품은 USDC 교환·혼합 결제의 시연 대상으로 둔다 — **단 라이브에서는 6d 브리지 전까지 이 상품을 숨기거나 'USDC 입금 후 구매 가능'으로 표기**하고(D1), 혼합 결제 시연은 로컬·시험 환경에서 한다.
 
 ### 10.2 `deal`
 
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
-| `deal` | `id`, `product_id`, `seller_id`, `price_krw`(정수), `total_qty`, `per_user_limit`, `opens_at`, `closes_at`, `status`(`draft`/`publishing`/`scheduled`/`open`/`sold_out`/`rebuilding`/`closed`/`settled`, §3.2), `earmarked_qty`(약정 승인 수량), `version` | `CHECK (closes_at > opens_at AND total_qty > 0 AND price_krw >= 0)`, `(status, opens_at)` 인덱스 | PUB·SYS |
+| `deal` | `id`, `product_id`, `seller_id`, `price_krw`(정수), `total_qty`, `per_user_limit`, `opens_at`, `closes_at`, `status`(`draft`/`publishing`/`scheduled`/`open`/`sold_out`/`rebuilding`/`closed`/`settled`, §3.2), `earmarked_qty`(약정 승인 수량), `version` | `CHECK (closes_at > opens_at AND total_qty > 0 AND price_krw > 0)` — **0원 딜은 만들지 않는다**(C12: 0원 주문은 정산 `gross = 0`·분개 0 라인이 되어 "분개마다 최소 한 라인" 전제가 깨진다. 무료 증정이 필요해지면 결제·에스크로를 거치지 않는 별도 경로로 설계한다), `(status, opens_at)` 인덱스 | PUB·SYS |
 | `stock` | `deal_id` PK, `total`, `confirmed`, `version` | **`CHECK (confirmed >= 0 AND confirmed <= total)`** (I1) | SYS |
 | `reservation` | `id`, `deal_id`, `user_id`, `qty`, `status`(`active`/`confirming`/`confirmed`/`expired`/`released`), `expires_at`, `claim_token`, `claimed_by`, `lease_until`, `order_id` NULL, `method`, `idempotency_key`, 시각 | `UNIQUE (deal_id, idempotency_key)`, 부분 인덱스 `(expires_at) WHERE status='active'`, `(lease_until) WHERE status='confirming'`, `(user_id, deal_id)` | PSD(`user_id`)·SYS |
 | `user_purchase` | `(deal_id, user_id)` PK, `qty` | 개인 한도 **하드 게이트**: `UPDATE … SET qty = qty + $q WHERE qty + $q <= $limit` (확정 tx 안). **확정 구매 수량**을 센다(활성 예약은 Redis `user` 해시). 출고 전 취소 복원(`deal.restocked`, reason=`cancel`) 때만 같은 tx 에서 `qty − q` (`CHECK qty >= 0`) | PSD |
@@ -1360,10 +1406,11 @@ classDiagram
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
 | `order` | `id`, `number`, `buyer_user_id`, `status`(§5.2), `fulfillment_mode`(`demo`/`physical`, §5.2.1, 확정 시 고정), `total_krw`, `deal_id` NULL, `reservation_id`, `seller_id`, `shipping_address_enc`, **`exchange_of_order_id` NULL**(상품 교환 신규 주문이 원 주문을 가리킴, §5.5), `paid_at`, `delivered_at`, `version`, 시각 | `UNIQUE(number)`, **`UNIQUE(reservation_id)`**, `(buyer_user_id, created_at DESC)` | PSD·SYS·**ENC**(`shipping_address_enc`) |
-| `order_line` | `order_id`, `line_no`, `sku`, `name_snapshot`, `unit_price_krw`, `qty`, **`qty_returned`**(반품·교환 확정 요청 누계, 기본 0) | PK `(order_id, line_no)`, `CHECK (qty > 0)`, `CHECK (qty_returned BETWEEN 0 AND qty)` | PUB·SYS |
-| `order_exchange` | `id`, `original_order_id`, `new_order_id`, `return_id`, `status`(§5.5.2), `cancel_reason` NULL, `price_diff_krw`, `refund_krw`(반품 줄 환불 대상 F), `version`, 시각 | `UNIQUE(new_order_id)`, `UNIQUE(return_id)`, 부분 인덱스 `(original_order_id) WHERE status IN ('awaiting_payment','awaiting_return','inspecting')`, `order_exchange` 가 활성인 줄에 대한 중복 요청은 `qty_returned` 조건부 UPDATE 가 막는다 | SYS |
+| `order_line` | `order_id`, `line_no`, `sku`, `name_snapshot`, `unit_price_krw`, `qty`, **`qty_returned`**(반품·교환 확정 요청 누계, 기본 0), `price_source`(일반 주문 `DEAL:<dealId>`, 교환 신규 주문 `ORIGINAL_LINE:<orderId>/<lineNo>` 또는 `CURRENT_DEAL:<dealId>`, §5.5.1) | PK `(order_id, line_no)`, `CHECK (qty > 0)`, `CHECK (qty_returned BETWEEN 0 AND qty)` | PUB·SYS |
+| `order_exchange` | `id`, `original_order_id`, `new_order_id`, `return_id`, `status`(§5.5.2), `cancel_reason` NULL, `price_diff_krw`, `refund_krw`(반품 줄 환불 대상 F), **`payment_due_at`**(신규 주문 결제 기한 — 예약이 없으므로 이것이 정본, §5.5.1), `return_ship_due_at`, `version`, 시각 | `UNIQUE(new_order_id)`, `UNIQUE(return_id)`, 부분 인덱스 `(original_order_id) WHERE status IN ('awaiting_payment','awaiting_return','inspecting')`, `order_exchange` 가 활성인 줄에 대한 중복 요청은 `qty_returned` 조건부 UPDATE 가 막는다 | SYS |
 | `order_status_history` | `id`, `order_id`, `from_status`, `to_status`, `cause_event_id`, `at`, `actor_key` | 추가 전용, `(order_id, id)` | SYS·PSD |
 | `request_key`, `inbox_message` | 공통 | `inbox` 소비자 `order-fulfillment-reactor`(풀필먼트 이벤트), `order-reservation-reactor` | — |
+| `consumer_cursor` | `consumer`, `aggregate_id`(원천 집합체), `last_version`(적용한 마지막 봉투 `aggregate.version`) | PK `(consumer, aggregate_id)`, 이벤트 적용과 같은 tx 에서 `last_version < $v` 조건부 갱신(§5.2 이벤트 역전, C14). escrow·deal 의 상태 소비자도 자기 스키마에 같은 형태를 둔다 | SYS |
 
 ### 10.4 `pricefeed`
 
@@ -1378,7 +1425,7 @@ classDiagram
 |---|---|---|---|
 | `quote` | `id`, `order_id`, `user_id`, `krw_amount`, `snapshot_id`, `usdc_micro_ref`, `expires_at`, `status`(`open`/`used`/`expired`), `version` | `(order_id, status)`, 사용은 `UPDATE … WHERE status='open' AND expires_at > $now` | PSD·SYS |
 | `payment` | `id`, `order_id`, `method`(`ledger`/`card_test`/`usdc_escrow`), `provider`, `provider_payment_key_enc`, `amount_krw`, `quote_id`, `snapshot_id`(고정), `status`(`initiated`/`awaiting_approval`/`approving`/`approved`/`unknown`/`refund_pending`/`refunding`/`refund_failed`/`partially_refunded`/`refunded`/`failed`/`expired`, §6.3), `refunded_total`, `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at`, `version`, `approved_at` | **부분 유일 `UNIQUE (order_id) WHERE status IN ('initiated','awaiting_approval','approving','approved','unknown','refund_pending','refunding','refund_failed','partially_refunded')`**, `(status, lease_until)`, `CHECK (refunded_total BETWEEN 0 AND amount_krw)` | PSD·SYS·**ENC**(`provider_payment_key_enc`) |
-| `payment_refund` | `id`, `payment_id`, `amount_krw`, `reason`(`rejected_stock`/`late_sold_out`/`cancel`/`fulfillment_rejected`/`return`/`admin`), `status`(`pending`/`completed`/`failed`/`unknown`), `provider_ref`, `cause_event_id` NULL, `idempotency_key` | **`UNIQUE (idempotency_key)`**(이벤트 기원 환불은 `refund:<paymentId>:<eventId>`), `(status) WHERE status IN ('pending','unknown')` | SYS |
+| `payment_refund` | `id`, `payment_id`, `amount_krw`, `reason`(`rejected_stock`/`late_sold_out`/`exchange_expired`/`cancel`/`fulfillment_rejected`/`return`/`dispute`/`admin`; 앞의 셋은 에스크로 없는 환불 분기, §6.6), `full`(이 환불로 누적이 결제액에 닿았는가), `status`(`pending`/`completed`/`failed`/`unknown`), `provider_ref`, `cause_event_id` NULL, `idempotency_key` | **`UNIQUE (idempotency_key)`**(이벤트 기원 환불은 `refund:<paymentId>:<eventId>`), `(status) WHERE status IN ('pending','unknown')` | SYS |
 | `payment_leg` | `id`, `payment_id`, `asset`(`POINT`/`USDC`), `amount`(POINT 또는 micro-USDC), `krw_value`, `plan_seq` | `UNIQUE (payment_id, asset)`, `CHECK (amount > 0)`, 합계 `SUM(krw_value) = payment.amount_krw` (애플리케이션+대사) | PSD·SYS (ADR-048) |
 | `payment_refund_leg` | `id`, `refund_id`, `asset`, `amount`, `krw_value`, `idempotency_key`(= `refund:<paymentId>:<eventId>:<asset>`), `journal_id` | `UNIQUE (refund_id, asset)`, **`UNIQUE (idempotency_key)`**, 누적 `SUM(amount) ≤ payment_leg.amount` (대사) | PSD·SYS |
 | `exchange_quote` | `id`, `user_id`, `snapshot_id`, `point_amount`, `usdc_micro`, `expires_at`, `status`(`open`/`used`/`expired`) | 주문과 무관(§8.2.2), 사용은 `UPDATE … WHERE status='open' AND expires_at > $now`, 만료 60초(제안) | PSD·SYS |
@@ -1390,9 +1437,9 @@ classDiagram
 
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
-| `escrow` | `id`, `order_id`, `payment_id`, `amount_krw`(다리 KRW 가치 합, 표시용 — 별도 `currency` 컬럼은 없다), `status`(`held`/`frozen`/`disputed`/`released`/`refunded`, §7.1; Phase 3 은 `held`/`released`/`refunded` 만), `frozen_reason` NULL(`return`/`delivery_failed`), `held_at`, `release_due_at` NULL(동결 중 NULL), `released_at`, `version` | **`UNIQUE (order_id)`**, 부분 인덱스 `(release_due_at) WHERE status='held'` | SYS |
+| `escrow` | `id`, `order_id`, `payment_id`, `amount_krw`(다리 KRW 가치 합, 표시용 — 별도 `currency` 컬럼은 없다), `status`(`held`/`frozen`/`disputed`/`released`/`refunded`, §7.1; Phase 3 은 `held`/`released`/`refunded` 만), `frozen_reason` NULL(`return`/`delivery_failed`), **`pending_refund_krw`**(기본 0, 진행 중 환불 KRW 가치, §6.6·P0 R11), **`pending_refund_id`** NULL, `return_window_ends_at` NULL(배송 완료 시 `DemoClock` 으로 설정, §7.2), `held_at`, `release_due_at` NULL(동결 중 NULL), `released_at`, `version` | **`UNIQUE (order_id)`**, 부분 인덱스 `(release_due_at) WHERE status='held' AND pending_refund_krw = 0`, `CHECK ((pending_refund_id IS NULL) = (pending_refund_krw = 0))`, `CHECK (pending_refund_krw >= 0)` | SYS |
 | `escrow_leg` | `id`, `escrow_id`, `asset`(`POINT`/`USDC`/`KRW`), `amount`, `refunded_amount` | `UNIQUE (escrow_id, asset)`, `CHECK (refunded_amount BETWEEN 0 AND amount)`. 정산 입력 = `amount − refunded_amount`(§8.5.1). 혼합 결제는 다리별 보류(ADR-048) | SYS |
-| `inbox_message` | 소비자 `escrow-order-reactor`(`order.return_requested`, `shipment.delivery_failed`, `shipment.delivered`, `return.inspected`) | 7일 | SYS |
+| `inbox_message` | 소비자 `escrow-order-reactor`(`order.return_requested`(멱등 보조), `shipment.delivery_failed`, `shipment.delivered`, `order.demo_delivered`, `return.inspected`(`REJECTED` 만 재개), `order.exchange_cancelled`) — **`payment.refunded` 는 구독하지 않는다** | 7일 | SYS |
 | `escrow_dispute` | `id`, `escrow_id`, `opened_by`, `category`, `reason_enc`, `status`(`open`/`resolved`), `resolution`, `resolved_by`, 시각 | `UNIQUE (escrow_id) WHERE status='open'` | PSD·**ENC**(`reason_enc`) |
 
 ### 10.7 `settlement`
@@ -1442,7 +1489,7 @@ classDiagram
 |---|---|---|---|---|
 | `deal.published` / `deal.opened` / `deal.closed` / `deal.sold_out` / **`deal.stock_adjusted`** | 딜 관리·스케줄러 | `dealId`, `skuId`, `totalQty`, `at`, (`remaining`, `delta`) | `deal-projector`, `deal-redis-sync`, **inventory**(published=약정 **요청**, stock_adjusted=조정; **해제는 `deal.settled` 에서**), 실시간 변환기 | `deal.state` 휘발성 |
 | **`deal.scheduled`** / **`deal.publish_rejected`** / **`deal.settled`** | 약정 응답 소비자(`deal-earmark-reactor`) / 정산 판정 | `dealId`, (`reason`), `confirmedQty`, `releaseQty = total − confirmed` | `deal-projector`, 관리자 알림 / **inventory**(`deal.settled` = 약정 잔여 `releaseQty` 해제) | 없음 |
-| **`deal.restocked`** | deal 모듈 소비자 `deal-restock-reactor` 가 `fulfillment.cancelled`(구매자 취소 사유)를 소비하는 tx (`RestockOnCancel`; 예약의 `order_id` 로 수량 조회, 모듈 간 InTx 쌍이 필요 없음) | `dealId`, `orderId`, `qty`, `reason`(`cancel`) | `deal-projector`, `deal-redis-sync`(`restock.lua`), **inventory**(약정 `+qty` 복원) | `deal.state` 휘발성 |
+| **`deal.restocked`** | deal 모듈 소비자 `deal-restock-reactor` 가 **모드별 단일 트리거** — `physical` 은 `fulfillment.cancelled`(사유 무관, 6c), `demo` 는 `order.cancelled{fulfillmentMode:'demo'}`(Phase 3) — 를 소비하는 tx (`RestockOnCancel`; 예약의 `order_id` 로 수량 조회, 모듈 간 InTx 쌍이 필요 없음, 멱등 키 `restock:<orderId>`) | `dealId`, **`skuId`**(P0 §8.3 필수; inventory 대사용), `orderId`, `qty`, `reason`(`cancel`·`demo_cancel`) | `deal-projector`, `deal-redis-sync`(`restock.lua`), inventory(**약정 불변** — inbox 기록만, 약정 복귀는 취소 tx 의 할당 해제, 03 §4.6) | `deal.state` 휘발성 |
 | `reservation.created` | `ReserveStock` | `reservationId`, `dealId`, `qty`, `expiresAt` (`ownerKey`=행위자) | `deal-projector` | 없음 |
 | `reservation.confirmed` / `.expired` / `.released` | 확정 tx / 만료 스윕 / 취소 | `reservationId`, `dealId`, `qty` | `deal-projector`, `deal-redis-sync`(Redis `confirm`/`release` 동기), `order-reservation-reactor` | 없음 |
 | `stock.changed` | 위 이벤트의 파생(프로젝터) | `dealId`, `remainingApprox` | 실시간 변환기 | `deal.state` 휘발성(≤1회/초 합치기) |
@@ -1452,22 +1499,22 @@ classDiagram
 | `order.cancel_requested` | `RequestCancel` (결제 후 취소 요청) | `orderId`, `reason`, `requestedBy` | **풀필먼트**(결과: `fulfillment.cancelled`/`cancel_rejected`) | 없음 |
 | `order.return_requested` | `RequestReturn`·`RequestExchange`(반품 기한 5일 이내) | `orderId`, `returnId`, `lines`, `reason`, **`resolution`**(`REFUND`/`EXCHANGE`), `exchangeId`·`newOrderId`(교환일 때, §5.5.4) | **풀필먼트**, **`escrow-order-reactor`**(해제 동결) | 개인 알림 |
 | `order.address_corrected` | `CorrectShippingAddress` | `orderId`, `shippingAddressRef`(새 rev) | **풀필먼트** | 없음 |
-| `order.cancelled` / `order.expired` / `order.completed` / `order.disputed` | 각 usecase | `orderId`, `reason` | 풀필먼트(취소 시), 프로젝터 | 개인 알림 |
-| `payment.initiated` / `.approved` / `.failed` / `.unknown` / `.refund_pending` / `.refund_failed` / `.refunded` | 결제 usecase | `paymentId`, `orderId`, `method`, `amountKrw`, **`legs[{asset, amount, krwValue}]`**(결제 다리), `status`, `snapshotId`, (`refundReason`), **`.refund_pending`·`.refunded` 는 `refundLegs[{asset, amount, krwValue}]`**(이번 환불의 다리별 수량, 누적 아님) | 프로젝터, `payment-order-reactor`, 풀필먼트(`.refunded`) | 개인 알림 |
+| `order.cancelled` / `order.expired` / `order.completed` / `order.disputed` | 각 usecase (`cancelled` 는 `RefundPayment(reason=cancel)` 의 `MarkCancelledInTx`, `completed` 는 `ReleaseEscrow` 의 `MarkCompletedInTx` 가 같은 tx 에서) | `orderId`, `reason`, **`fulfillmentMode`**(`cancelled` — `demo` 면 `deal-restock-reactor` 의 복원 트리거) | 풀필먼트(취소 시, `physical`), **`deal-restock-reactor`**(`cancelled{demo}`), 프로젝터 | 개인 알림 |
+| `payment.initiated` / `.approved` / `.failed` / `.unknown` / `.refund_pending` / `.refund_failed` / `.refunded` | 결제 usecase | `paymentId`, `orderId`, `method`, `amountKrw`, **`legs[{asset, amount, krwValue}]`**(결제 다리), `status`, `snapshotId`, (`refundReason`), **`.refund_pending`·`.refunded` 는 `refundLegs[{asset, amount, krwValue}]`**(이번 환불의 다리별 수량·KRW 가치, 누적 아님)와 **`full: boolean`**(누적 환불액이 결제액에 닿았는가) | 프로젝터, `payment-order-reactor`, 풀필먼트(`.refunded` 를 **`full=true` 일 때만** FO 전체 취소(`EXTERNAL`)로 소비). **escrow 와 order 는 `.refunded` 로 상태를 바꾸지 않는다**(쌍 #7 의 같은 tx) | 개인 알림 |
 | `payment.amount_mismatch` | 웹훅 처리 | `paymentId`, `expectedKrw`, `observedKrw` | 감사/경보 | 없음 |
 | `quote.issued` / `quote.used` | 견적 usecase | `quoteId`, `snapshotId`, `expiresAt` | 프로젝터 | 없음 |
-| `escrow.held` / `.frozen` / `.disputed` / `.released` / `.refunded` | 에스크로 usecase(자기 `escrow_leg` 를 읽어 채운다) | `escrowId`, `orderId`, `amountKrw`, **`legs[{asset, amount, krwValue}]`**(`.released` 는 **잔여 다리**, `.refunded` 는 환불된 다리; `currency` 필드는 없다), (`resolution`) | `settlement-escrow-reactor`(`.released`), 프로젝터, 알림 | 개인 알림 |
+| `escrow.held` / `.frozen` / `.disputed` / `.released` / `.refunded` | 에스크로 usecase(자기 `escrow_leg` 를 읽어 채운다) | `escrowId`, `orderId`, `amountKrw`, **`legs[{asset, amount, krwValue}]`**(`.released` 는 **잔여 다리**, `.refunded` 는 환불된 다리; `currency` 필드는 없다), (`resolution`), (**`.frozen`**: `frozenReason` ∈ `return`·`delivery_failed`) | `settlement-escrow-reactor`(`.released`), 프로젝터, 알림 | 개인 알림 |
 | `settlement.completed` / `.failed` | `SettlementExecutor` | `settlementId`, `escrowId`, `usdcNetMicro`, **`fundedUsdc`**(= u_rem), **`fundedPoint`**(= P_rem, KRW), **`r`**(= point_redemption_micro), `snapshotId` | 프로젝터, 알림 | 없음 |
 | `pricefeed.snapshot_accepted` / `.snapshot_held` | 수집기 | `snapshotId`, `pair`, `rateE8`, (`holdReason`) | 프로젝터, 경보 | 없음 |
-| `ledger.journal_posted` | `ledger.PostJournalInTx` | `journalId`, `kind`, `refType`, `refId`, `asset` | `ledger_read` 프로젝터 | 없음 |
+| `ledger.journal_posted` | `ledger.PostJournalsInTx`(저널마다 1건) | `journalId`, `kind`, `refType`, `refId`, `asset` | `ledger_read` 프로젝터 | 없음 |
 | `ledger.demo_granted` | `ClaimWelcomeGrant`·`AdminGrant`(같은 tx outbox) | **자산별 1건**: `grantId`, `kind`(`welcome`/`admin`), `asset`(단수), `amount` (`ownerKey`=수혜자) | `ledger_read` 프로젝터, 알림 | 개인 알림 |
-| `ledger.points_exchanged` | `ExchangeUsdcToPoint`(같은 tx outbox) | `exchangeId`, `pointAmount`, `usdcMicro`, `snapshotId` (`ownerKey`=행위자) | `ledger_read` 프로젝터 | 개인 알림 |
+| `ledger.points_exchanged` | `ExchangeUsdcToPoint`(같은 tx outbox) | `exchangeId`, `pointAmount`, **`usdcCostMicro`**(정본 이름, P0 §8.3 — `usdcMicro` 는 쓰지 않는다), `snapshotId` (`ownerKey`=행위자) | `ledger_read` 프로젝터 | 개인 알림 |
 
 - **소비자 순서**: 같은 집합체(`orderId`, `reservationId`)의 이벤트는 F13 의 집합체 선두 규칙으로 순서를 지킨다. 풀필먼트가 발행하는 `fulfillment.*`·`shipment.*`·`return.*` 의 outbox 집합체 키는 **`orderId`** 로 통일되어 `accepted` → `shipment.*` → `return.*` 순서가 보장된다.
-- **환불 트리거 소비자**: `payment-fulfillment-refunder`(payment 모듈)가 `fulfillment.rejected`·`fulfillment.cancelled`·`return.inspected`(`REJECTED` 제외)를 구독해 §6.6 의 `RefundPayment` 를 호출한다. 같은 이벤트를 `order-fulfillment-reactor`(order 모듈)도 구독해 주문 상태를 바꾼다. 두 소비자는 독립이며 환불 멱등 키는 이벤트 id 에서 파생한다.
-- **에스크로 소비자** `escrow-order-reactor`: `shipment.delivered`·`order.demo_delivered`(해제 기한 설정), `order.return_requested`·`shipment.delivery_failed`(`held→frozen` 동결), `return.inspected`(`disposition=REJECTED` 면 `frozen→held` 해제 재개·`release_due_at` 재설정, 그 외는 환불 경로). Phase 5 에서 활성이다(Phase 3 의 최소 에스크로는 이 소비자 없이 `confirm-receipt`·`MarkDelivered` 로만 움직인다).
+- **환불 트리거 소비자**: `payment-fulfillment-refunder`(payment 모듈)가 `fulfillment.rejected`·`fulfillment.cancelled`(**`reason=EXTERNAL` 은 제외** — 우리 `payment.refunded{full:true}` 의 결과라 재환불하지 않는다)·`return.inspected`(`REJECTED` 제외)를 구독해 §6.6 의 `RefundPayment` 를 호출한다. 같은 이벤트를 `order-fulfillment-reactor`(order 모듈)도 구독해 풀필먼트 주도 전이(`fulfilling→cancelled` 등)를 한다. 두 소비자는 독립이며 환불 멱등 키는 이벤트 id 에서 파생하고, 환불 후 주문의 `→refunded` 는 환불 tx 의 `MarkRefundedInTx` 가 한다.
+- **에스크로 소비자** `escrow-order-reactor`: `shipment.delivered`·`order.demo_delivered`(해제 기한·`return_window_ends_at` 설정), `shipment.delivery_failed`(`held→frozen` 동결), `order.return_requested`(동결은 요청 tx 의 `FreezeInTx` 가 이미 했으므로 멱등 보조), `return.inspected`(`disposition=REJECTED` 면 `frozen→held` 해제 재개·`release_due_at` 재설정, **`pending_refund_krw = 0` 일 때만**; 그 외는 환불 경로가 처리), `order.exchange_cancelled`(같은 재개). **`payment.refunded` 는 구독하지 않는다.** Phase 5 에서 활성이다(Phase 3 의 최소 에스크로는 이 소비자 없이 `confirm-receipt`·`MarkDelivered` 로만 움직인다).
 - **약정 응답 소비자** `deal-earmark-reactor`: `inventory.earmark_changed`(→ `scheduled`), `inventory.earmark_rejected`(→ `draft`, `deal.publish_rejected`).
-- Redis 동기(`deal-redis-sync`)는 `reservation.confirmed/expired` 를 받아 `confirm.lua`/`release.lua` 를 **멱등으로** 실행한다. 이 소비자가 늦거나 실패해도 정합성은 PG 가 지킨다(Redis 는 사본).
+- Redis 동기(`deal-redis-sync`)는 `reservation.confirmed/expired` 를 받아 `confirm.lua`/`release.lua` 를 **멱등으로** 실행한다. 이 소비자가 늦거나 실패해도 정합성은 PG 가 지킨다(Redis 는 사본). 이벤트가 PG 커밋 뒤에만 나오므로 이 경로의 `release` 는 언제나 PG CAS 이후다(§4.5 순서 규칙).
 
 ---
 
@@ -1509,7 +1556,7 @@ sequenceDiagram
 
 | 방향 | 이벤트 | 필요한 계약 |
 |---|---|---|
-| 상거래 → 풀필먼트 | `order.paid`(`fulfillmentMode='physical'` 만 소비), `order.cancel_requested`, `order.return_requested`, `order.address_corrected`, `order.cancelled`/`order.disputed`/`payment.refunded`(출고 중단 근거) | 결제 후 취소는 **요청**이고 결과는 `fulfillment.cancelled`/`cancel_rejected`. 출고 후는 반품 경로. 풀필먼트는 `order.cancelled`·`disputed`·`payment.refunded` 도 구독해 이미 환불·분쟁 처리된 주문의 출고를 멈춘다 |
+| 상거래 → 풀필먼트 | `order.paid`(`fulfillmentMode='physical'` 만 소비), `order.cancel_requested`, `order.return_requested`, `order.address_corrected`, `order.cancelled`/`order.disputed`/`payment.refunded`(출고 중단 근거) | 결제 후 취소는 **요청**이고 결과는 `fulfillment.cancelled`/`cancel_rejected`. 출고 후는 반품 경로. 풀필먼트는 `order.cancelled`·`disputed`·`payment.refunded` 도 구독해 이미 환불·분쟁 처리된 주문의 출고를 멈춘다 — **`payment.refunded` 는 `full=true` 일 때만** FO 전체 취소(`fulfillment.cancelled{reason:'EXTERNAL'}`)로 소비하고 부분 환불(반품·교환 줄)은 무시한다(C10). 그 `EXTERNAL` 취소는 payment refunder 가 재환불하지 않고, `deal-restock-reactor` 는 출고 전이면 재고를 복원한다 |
 | 풀필먼트 → 상거래 | `fulfillment.accepted`(`allocation(FULL\|PARTIAL\|PENDING)`·`lines[{lineId, qtyAllocated}]`), `fulfillment.rejected/cancelled/cancel_rejected`(`allocated` 는 `accepted` 에 병합), `shipment.dispatched/delivered/delivery_failed`, `return.received/inspected`(페이로드에 **`orderId`** 포함) | 순서 보장 단위는 `orderId`(풀필먼트 outbox 집합체 키). 중복 허용(멱등). **상거래가 소비하는 거절 신호는 `fulfillment.rejected` 하나**(`inventory.allocation_failed` 는 풀필먼트 내부 신호). 반송(`RETURNED_TO_SENDER`)은 P3 가 `return.received`(reason=`rts`)로 흘려 보내 환불·재입고 경로를 탄다 |
 | 재고 이중 원장 | 딜 재고(판매 가능 수량, 상거래) vs 창고 재고(물리, 풀필먼트) | **타임딜 총량 ≤ 풀필먼트 약정 상한**: 이 규칙은 **상거래(deal)가 받는다.** 딜 게시 시 `deal_read.sku_capacity`(inventory 이벤트로 유지)로 1차 검증하고, 약정(`EarmarkStock`)이 `allocated + earmarked ≤ available` 조건부 UPDATE 로 최종 심판한다. 거절(`inventory.earmark_rejected`)이면 딜은 `publishing → draft` 로 **되돌아가고** `deal.publish_rejected` 가 발행된다(약정 없는 딜이 `scheduled` 가 되지 않는다). 약정 해제는 딜 `settled` 시 `total − confirmed` 만이다. `deal → inventory` 동기 호출은 없다(층 규칙) |
 
@@ -1518,7 +1565,7 @@ sequenceDiagram
 | 항목 | 계약(P0 §2.5·D20 로 확정) |
 |---|---|
 | 소유 | `ledger` 모듈 **하나**. 스키마 정본은 §9 / ADR-040, 바둑 보상의 POINT 규칙·`reward` 상태 머신은 P1 §10 / ADR-037 |
-| 공개 API | `OpenAccount`, `GetBalance`(조회) + `PostJournalInTx`·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`(B12 쌍 #3·#6~#9) |
+| 공개 API | `OpenAccount`, `GetBalance`(조회) + `PostJournalsInTx`(다중 저널, 계정 일괄 잠금 — P0 R10)·`PostJournalInTx`(길이 1 특수형)·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`(B12 쌍 #3·#6~#9) |
 | 자산 | `POINT` 를 바둑 보상과 상거래 포인트 결제가 같이 쓴다. 바둑 보상은 `PENDING` 동안 기장이 없고 `CONFIRMED` 때 기장(종결)되며, `FLAGGED→REVOKED` 는 PENDING 무효화일 뿐 **기장이 없다** → 확정된 보상의 역분개나 음수 포인트 잔액은 존재하지 않는다(P1 §10, ADR-037, S1) |
 | 변환 | 포인트→원 환산은 **1:1 고정**(상수 `POINT_KRW_RATE=1`). 환율 개념은 상거래 쪽(USDC)에만 있다 |
 | 음수 방지 | 계정 유형별 `min_balance` 표(§9.2): 사용자 포인트·에스크로·판매자 지급채무·PG 미수금은 0, 환산 청산·수익·비용·지급 표시 계정은 하한 없음 |
@@ -1651,8 +1698,7 @@ classDiagram
 classDiagram
     class TransitionTable~S,E~ {
         +allowed(from, to) bool
-        +rank(state) int
-        +isRegression(from, to) bool
+        +isStale(lastVersion, eventVersion) bool
     }
     class OrderTransitionTable
     class PaymentTransitionTable
@@ -1668,7 +1714,7 @@ classDiagram
     ConditionalTransition ..> TransitionTable
 ```
 
-모든 집합체의 상태 전이는 `ConditionalTransition`(기대 상태+버전 조건부 UPDATE)과 `TransitionTable`(허용·순위) 한 쌍을 거친다. 순위가 낮아지는 전이(`isRegression`)는 `NOOP`.
+모든 집합체의 상태 전이는 `ConditionalTransition`(기대 상태+버전 조건부 UPDATE)과 `TransitionTable`(허용 전이) 한 쌍을 거친다. **역전 판정은 상태 순위가 아니라 원천 집합체 순번**이다(C14, §5.2): 이벤트 소비자는 `consumer_cursor` 의 `last_version` 과 봉투 `aggregate.version` 을 비교해 오래된 것(`isStale`)을 `NOOP` 으로 흡수하고, 나머지는 허용 표에 있는 전이만 적용한다. 정당한 역방향 전이(`return_requested→delivered`, `frozen→held`, `sold_out→open`, `confirming→active`, `refunding→refund_pending`)는 표의 명시적 엣지다. 순번이 없는 외부 상태(PG 웹훅의 결제 상태, §6.5)만 `PaymentTransitionTable` 의 PG 상태 순위로 비교한다.
 
 ### 13.3 usecase·포트
 
@@ -1751,12 +1797,15 @@ classDiagram
 | `PriceFeedStaleError` | 503 | `pricefeed_stale` |
 | `RefundExceedsPaidError` | 409 | `refund_exceeds_paid` |
 | `ReturnWindowClosedError` | 409 | `return_window_closed` |
-| `ExchangeNotAllowedError` | 409 | `exchange_not_allowed` (타임딜 신규 줄·`demo` 주문·이미 활성 교환 등, §5.5.1) |
+| `ExchangeNotAllowedError` | 409 | `exchange_not_allowed` (가격 근거 없음 — 다른 상품인데 열린 딜 없음·`demo` 주문·이미 활성 교환 등, §5.5.1) |
 | `ExchangeStockUnavailableError` | 409 | `exchange_stock_unavailable` (사전 ATP 확인 실패) |
 | `ReturnQuantityExceededError` | 409 | `return_quantity_exceeded` (`qty_returned` 조건부 UPDATE 0행) |
 | `ExchangeQuoteExpiredError` / `PriceMovedError` | 409 | `quote_expired` / `price_moved` (교환 견적 만료 / 확정 비용이 `maxUsdcMicro` 초과, §8.2.2) |
 | `SupplyCapExceededError` | 409 | `supply_cap_exceeded` |
 | `EscrowStateError` | 409 | `escrow_state_conflict` |
+| `RefundInProgressError` | 409 | `refund_in_progress` (환불 in-flight 중 새 환불·수령 확인·분쟁 제기, §6.3·§6.6) |
+| `ReturnInProgressError` | 409 | `return_in_progress` (반품·교환 케이스 진행 중 분쟁 제기, §7.4) |
+| `UsdcUnavailableError` | 409 | `usdc_unavailable` (라이브에서 6d 브리지 전 USDC 다리·교환, D1) |
 | `ProviderUnavailableError` | 503 | `provider_unavailable` |
 
 ---
@@ -1776,17 +1825,17 @@ classDiagram
 | CT-05 | **재고 선점** | `POST /api/deals/{id}/reservations` | `ReserveStock`, `StockReservation` | Redis, `deal.reservation` | P3 |
 | CT-06 | 예약 영속 기록·고아 회수 | CT-05 내부, 대조 잡 | `PersistReservation`, `OrphanReleaser` | `deal.reservation` | P3 |
 | CT-07 | 예약 취소 | `DELETE /api/reservations/{id}` | `ReleaseReservation` | Redis, `deal.reservation` | P3 |
-| CT-08 | 예약 만료 복원(스윕) | worker 주기(5초) | `ExpireReservationsJob` | Redis, `deal.reservation` | P3 |
+| CT-08 | 예약 만료 복원(스윕) — **PG `active→expired` CAS 커밋 후에만 `release.lua`**(§4.5) | worker 주기(5초) | `ExpireReservationsJob` | Redis, `deal.reservation` | P3 |
 | CT-09 | 재고 확정(구매 확정 tx 일부) | `ConfirmPurchase` | `StockConfirmPort` | `deal.stock`, `deal.reservation`, `deal.user_purchase` | P3 |
 | CT-10 | Redis 재구성 | 자동/수동 | `RebuildStockJob` | Redis, `deal.deal` | P3 |
-| CT-11 | 재고 대조·불변식 점검 | worker 주기 | `StockReconciler` | (읽기) 지표 | P3 |
+| CT-11 | 재고 대조·불변식 점검(불일치 교정은 CT-10 재구성으로만, `rebuilding` 차단 아래) | worker 주기 | `StockReconciler` | (읽기) 지표 | P3 |
 | CT-12 | 딜·재고 프로젝션 | inbox | `DealProjector` | `deal_read.deal_view` | P3 |
 | CT-13 | Redis 사본 동기 | inbox | `DealRedisSync` | Redis | P3 |
 | CT-14 | 입장 토큰 버킷(폭주 제어) | CT-05 진입 | `AdmissionController` | Redis | P3 |
 | CT-15 | 개인 한도 검사(빠른+하드) | CT-05, CT-09 | `PurchaseLimitPolicy` | Redis, `deal.user_purchase` | P3 |
 | CT-16 | 늦은 결제 **새 예약** 생성(부활 없음) | PY-10 | `ReserveForLatePayment` | Redis, `deal.reservation` | P5 |
 | CT-17 | 딜 종료·`settled` 판정·약정 잔여 해제 요청 | 스케줄러/관리자 | `CloseDeal`, `SettleDeal` | `deal.*`, outbox `deal.settled` | P3 |
-| CT-18 | 출고 전 취소 재고 복원 | inbox `fulfillment.cancelled` 후 환불 완료 | `RestockOnCancel`, `restock.lua` | `deal.stock`, `deal.user_purchase`, Redis, outbox `deal.restocked` | P5 |
+| CT-18 | 출고 전 취소 재고 복원(환불과 독립) | inbox — `demo`: `order.cancelled{fulfillmentMode:'demo'}`, `physical`: `fulfillment.cancelled`(모드별 단일 트리거, §6.6) | `RestockOnCancel`, `restock.lua` | `deal.stock`, `deal.user_purchase`, Redis, outbox `deal.restocked{skuId}` | P3(demo)·6c(physical) |
 | CT-19 | 약정 응답 반응(`publishing→scheduled`/`draft`) | inbox `inventory.earmark_changed`·`rejected` | `DealEarmarkReactor` | `deal.deal`, outbox | P3 |
 
 ### 14.2 OD — 주문
@@ -1796,19 +1845,19 @@ classDiagram
 | OD-01 | 주문 생성(예약→주문) | `POST /api/orders` | `CreateOrder`, `OrderNumberGenerator` | `order.order`, `order_line`, outbox | P3 |
 | OD-02 | 내 주문 목록·상세 | `GET /api/orders(/{id})` | `ListMyOrders`, `GetOrder` | 읽기 `order_view` | P3 |
 | OD-03 | 구매 확정 오케스트레이션 | PY-01/PY-05 | `ConfirmPurchase` | 여러 모듈(§4.7) | P3 |
-| OD-04 | 주문 취소 | `POST /api/orders/{id}/cancel` | `CancelOrder` | `order.order`, 환불 사가 | P3·P5 |
+| OD-04 | 주문 취소 — 진입점만 order. `pending_payment` 는 order 단독, `paid`(demo)는 **payment 조율 `RefundPayment(reason=cancel)` 단일 tx**(payment → escrow → ledger → `order.MarkCancelledInTx`, 쌍 #7), `physical` 은 `RequestCancel` → `order.cancel_requested` | `POST /api/orders/{id}/cancel` | `CancelOrder`(라우팅), `RefundPayment`, `RequestCancel` | `order.order`, `payment.*`, `escrow.*`, `ledger.*` | P3·6c |
 | OD-05 | 미결제 주문 만료 반응 | inbox `reservation.expired` | `OrderReservationReactor` | `order.order` | P3 |
 | OD-06 | 풀필먼트 이벤트 반응(`fulfilling→cancelled`, `return_requested` 포함) | inbox `fulfillment.*`·`shipment.*`·`return.*` | `OrderFulfillmentReactor` | `order.order`, 이력 | P5 |
 | OD-07 | 배송지 입력·암호화 | `PUT /api/orders/{id}/shipping` | `SetShippingAddress`, `FieldCipher` | `order.order` | P3 |
 | OD-08 | 배송지 조회(내부) | 풀필먼트 호출 | `GetShippingAddress` | (읽기+감사) | P5 |
-| OD-09 | 구매 확정(수령 확인, `demo` 주문은 `paid` 에서도 허용) | `POST /api/orders/{id}/confirm-receipt` | `ConfirmReceipt` | `escrow.escrow` | P3 |
+| OD-09 | 구매 확정(수령 확인, `demo` 주문은 `paid` 에서도 허용) — 진입점만 order, **조율자는 escrow `ReleaseEscrow`**(escrow → ledger → `order.MarkCompletedInTx`, 쌍 #8) | `POST /api/orders/{id}/confirm-receipt` | `ConfirmReceipt`(라우팅), `ReleaseEscrow` | `escrow.escrow`, `ledger.*`, `order.order` | P3 |
 | OD-10 | 주문 프로젝션·알림 | inbox | `OrderProjector` | `order_read.order_view` | P3 |
 | OD-11 | 배송지 익명화(보관 규칙, `demo` 는 종결 후 30일) | worker 주기 | `AnonymizeShipping` | `order.order` | P5 |
 | OD-12 | `demo` 주문 배송 완료 처리(관리자) | `POST /api/admin/orders/{id}/mark-delivered` | `MarkDelivered` | `order.order`, outbox `order.demo_delivered` | P3 |
-| OD-13 | 상품 교환 요청(반품 줄 + 신규 주문 생성, 사전 재고 확인) | `POST /api/orders/{id}/exchanges` | `RequestExchange`, `CheckExchangeAvailability`(P3 읽기 포트) | `order.order`, `order_line`, `order_exchange`, outbox `order.return_requested` | P5·6c |
+| OD-13 | 상품 교환 요청(반품 줄 + 신규 주문 생성, 사전 재고 확인, 같은 tx 에서 원 에스크로 `FreezeInTx`, 가격은 D2 — 같은 상품은 원 줄 단가·다른 상품은 현재 딜가) | `POST /api/orders/{id}/exchanges` | `RequestExchange`, `CheckExchangeAvailability`(P3 읽기 포트) | `escrow.escrow`(쌍 #5), `order.order`, `order_line`, `order_exchange`, outbox `order.return_requested` | P5·6c |
 | OD-14 | 교환 상태 조회·취소 | `GET /api/orders/{id}/exchange`, `POST …/exchange/cancel` | `GetExchange`, `CancelExchange` | `order_exchange`, outbox `order.exchange_cancelled` | P5·6c |
 | OD-15 | 교환 진행 반응(신규 결제·`return.received`·`return.inspected`·`fulfillment.rejected` → 상태 전이, 완료/취소 발행) | inbox | `ExchangeReactor` | `order_exchange`, outbox `order.exchange_completed`/`cancelled` | P5·6c |
-| OD-16 | 교환 기한 스윕(결제 만료·발송 기한 초과 → `cancelled`) | worker 주기 | `ExchangeDeadlineSweeper` | `order_exchange` | P5·6c |
+| OD-16 | 교환 기한 스윕(결제 만료·발송 기한 초과 → `cancelled`; 결제 만료는 **`order_exchange` 를 잠근 같은 tx 에서 신규 주문 `pending_payment→cancelled`**) | worker 주기(`DemoClock`) | `ExchangeDeadlineSweeper` | `order_exchange`, `order.order` | P5·6c |
 | OD-17 | 분할 배송 합성(주문 상세의 `fulfillment.shipments[]`) | `GET /api/orders/{id}` | `ComposeFulfillmentView`(P3 `tracking_view` 읽기) | (읽기) | 6c |
 
 ### 14.3 PY — 결제·견적
@@ -1821,7 +1870,7 @@ classDiagram
 | PY-04 | 웹훅 수신(저장만) | `POST /api/webhooks/pg/{provider}` | `PaymentWebhookReceiver`, `WebhookGuard` | `payment.inbox_message` | P5 |
 | PY-05 | 웹훅 처리(권위 조회·전이) | inbox | `PaymentWebhookProjector` | `payment.payment`, `payment_event` | P5 |
 | PY-06 | 결제 대사 | worker 주기 | `PaymentReconciler` | `payment.payment` | P5 |
-| PY-07 | 환불·취소(락 순서 payment → escrow → ledger 계정) | 관리자/주문 취소/시스템 | `RefundPayment` | `payment.payment_refund`, `escrow.*`, `ledger.*` | P3(원장 결제 — 쌍 #7)·P5(PG 취소) |
+| PY-07 | 환불·취소(락 순서 payment → escrow → ledger 계정 → order; 카드는 tx1 에서 `pending_refund_krw` 설정, 에스크로 없는 환불은 payment 만) | 관리자/주문 취소/분쟁 구매자 승/시스템 | `RefundPayment` | `payment.payment_refund`, `escrow.*`, `ledger.*`, `order.order`(`MarkCancelledInTx`·`MarkRefundedInTx`) | P3(원장 결제 — 쌍 #7)·P5(PG 취소) |
 | PY-08 | 결제 조회 | `GET /api/payments/{id}` | `GetPayment` | 읽기 | P5 |
 | PY-09 | 금액 불일치 처리 | PY-05 | `HandleAmountMismatch` | `payment.payment` | P5 |
 | PY-10 | 늦은 결제 처리(새 예약 또는 자동 환불) | PY-03/05 | `HandleLatePayment` | `payment.payment`, 예약 | P5 |
@@ -1837,12 +1886,13 @@ classDiagram
 | ES-01 | 에스크로 보류 생성(다리별 `escrow_leg`) | OD-03 | `EscrowHoldPort`, `HoldEscrow` | `escrow.escrow`, `escrow.escrow_leg` | P3 |
 | ES-02 | 해제 기한 설정 | inbox `shipment.delivered`·`order.demo_delivered` | `SetReleaseDue` | `escrow.escrow` | P5 |
 | ES-03 | 자동 확정 | worker 주기 | `EscrowAutoRelease` | `escrow.escrow`, `ledger.*` | P5 |
-| ES-04 | 수동 구매 확정(해제, POINT 다리 소각 분개) | OD-09 | `ReleaseEscrow` | `escrow.escrow`, `ledger.*` | P3 |
+| ES-04 | 해제(수동 확정·자동 확정·분쟁 판매자 승 공통 조율자; 비 USDC 다리 해제 분개의 단일 소유자, `pending_refund_krw = 0` 조건) | OD-09·ES-03·ES-06 | `ReleaseEscrow` | `escrow.escrow`, `ledger.*`, `order.order`(`MarkCompletedInTx`) | P3 |
 | ES-05 | 분쟁 제기 | `POST /api/orders/{id}/disputes` | `OpenDispute` | `escrow_dispute`, `escrow.escrow` | P5 |
 | ES-06 | 분쟁 판정(관리자) | `POST /api/admin/disputes/{id}/resolve` | `ResolveDispute` | `escrow_dispute`, `escrow.escrow` | P5 |
-| ES-07 | 에스크로 환불(해제 전) | PY-07 연동 | `RefundEscrow` | `escrow.escrow`, `escrow.escrow_leg` | P3 |
+| ES-07 | 에스크로 환불(해제 전) — 쌍 #7 참여 함수 `RefundInTx`(선점 시 `pending_refund_krw` 설정, 완료 시 감액·해제·부분 재개) | PY-07 연동 | `RefundInTx` | `escrow.escrow`, `escrow.escrow_leg` | P3 |
+| ES-10 | 반품 요청 동결(`held→frozen`, 요청 tx 안) — 쌍 #5 참여 함수 | OD-13·반품 요청 | `FreezeInTx` | `escrow.escrow` | P5 |
 | ES-08 | 에스크로 조회 | `GET /api/orders/{id}/escrow` | `GetEscrow` | 읽기 | P3 |
-| ES-09 | 해제 동결(`held→frozen`)·재개(`frozen→held`, `REJECTED`)(반품 요청·배송 실패·반품 검수) | inbox `order.return_requested`, `shipment.delivery_failed`, `return.inspected` | `EscrowOrderReactor` | `escrow.escrow` | P5 |
+| ES-09 | 배송 실패 동결(`held→frozen`)·재개(`frozen→held`, `REJECTED`·교환 취소, `pending_refund_krw = 0` 조건)·반품 동결 멱등 보조 | inbox `shipment.delivery_failed`, `return.inspected`, `order.exchange_cancelled`, `order.return_requested` | `EscrowOrderReactor` | `escrow.escrow` | P5 |
 
 ### 14.5 ST — 시세·견적·정산·원장
 
@@ -1853,7 +1903,7 @@ classDiagram
 | ST-03 | 최신 스냅샷 조회·신선도 판정 | PY-11 | `LatestSnapshotReader` | (읽기) | P5 |
 | ST-04 | 환산 함수 | 정산·견적 | `Converter` | — | P5 |
 | ST-05 | 정산 생성(잔여 다리 입력; 시작 시 `released` 이면서 정산 없는 에스크로 스캔 포함) | inbox `escrow.released` | `CreateSettlement` | `settlement.settlement` | P5 |
-| ST-06 | 정산 실행 | worker | `SettlementExecutor` | `settlement`, `ledger.*` | P5 |
+| ST-06 | 정산 실행(USDC 판매자 지급 분개만, 키 `settlement:{escrowId}:USDC`) | worker | `SettlementExecutor` | `settlement`, `ledger.*` | P5 |
 | ST-07 | 정산 내역 조회 | `GET /api/admin/settlements` | `ListSettlements` | 읽기 | P5 |
 | ST-08 | 원장 분개·계정 관리 | 각 usecase | `LedgerPostPort` | `ledger.*` | P3 |
 | ST-09 | 원장 대사 | worker 일 1회 | `LedgerReconciler` | (읽기) | P3 |
@@ -1900,13 +1950,19 @@ classDiagram
 | 포인트 잔액 | 동시 결제 | `account_balance` 조건부 갱신(`balance + Δ >= min_balance`) |
 | 개인 한도 | 다기기 동시 | Lua 빠른 검사 + `user_purchase` 조건부 갱신(하드) |
 | 확정 경로 간 경합 | API 승인·웹훅·대사가 같은 결제를 동시에 확정 | 예약 CAS 1회 + `ConfirmStockResult.AlreadyConfirmed` NOOP(결제 취소 금지) |
-| 확정 vs 환불 vs 정산 락 순서 | 서로 다른 순서로 행을 잠그면 교착 | 전역 락 순서 규약(§4.7): reservation→deal.stock→user_purchase→payment→escrow→ledger 계정 id 오름차순→order (환불은 payment→escrow→계정, 정산은 settlement→계정) |
+| 확정 vs 환불 vs 정산 vs 취소 vs 수령 확인 락 순서 | 서로 다른 순서로 행을 잠그면 교착 | 전역 락 순서 규약(§4.7, P0 R9): reservation→deal.stock→user_purchase→payment→escrow→ledger 계정 id 오름차순→order_exchange→order (환불·취소는 payment→escrow→계정→order, 수령 확인·자동 해제는 escrow→계정→order, 반품 요청은 escrow→order, 정산은 settlement→계정). order 쓰기는 항상 마지막 참여 함수 |
+| 다중 저널 계정 잠금 | 혼합 결제·다리별 환불·교환이 자산별 저널을 따로 잠가 역순 교착 | `PostJournalsInTx` 가 tx 의 모든 계정을 한 번에 `ORDER BY id FOR UPDATE`(P0 R10), `40P01` 은 조율자 최대 3회 재시도 후 거절(AC-C46) |
+| 환불 in-flight vs 해제 | 카드 환불 tx1~tx2 사이(PG 호출 중) 자동 해제·수령 확인·분쟁 판정이 해제→정산 | tx1 이 `payment → escrow` 로 잠그고 `pending_refund_krw` CAS, 해제·분쟁·재개는 `pending_refund_krw = 0` 조건, 재개는 환불 완료 tx 만(P0 R11, AC-C45) |
+| 반품 요청 vs 자동 해제 (동기) | 동결 소비 지연 동안 해제 | 요청 tx 의 `FreezeInTx` + 해제 tx 의 `MarkCompletedInTx` CAS(주문 `delivered` 조건) — 어느 순서든 한쪽만(AC-C49) |
+| 분쟁 vs 반품 케이스 | 같은 대금에 해제·환불 결론이 갈림 | 반품 케이스 진행 중(`frozen_reason='return'`) 분쟁 제기 금지 `409 return_in_progress`(AC-C50) |
+| 교환 신규 주문 확정 vs 결제 만료 | 예약 CAS 가 없음 | 두 경로가 같은 `order_exchange` 행을 잠그고 `awaiting_payment` 조건, 중복 확정은 payment 행 CAS(AC-C53) |
+| 대조 교정 vs 동시 `reserve`·만료 스윕 | 교정 계산과 쓰기 사이에 들어온 선점·복원이 덮임 | 교정은 `rebuilding` 차단 아래 재구성으로만, 만료 스윕은 PG CAS 후 `release.lua`(§4.5, AC-C47) |
 | 환불 이중 실행 | 같은 이벤트 재전달·두 소비자 | 환불 멱등 키 `refund:<paymentId>:<eventId>`(다리별 `:<asset>`) 유일 |
 | 지급 이중 실행·상한 | 로그인 중복·재가입·관리자 동시 지급 | `ledger.grant UNIQUE (github_id, kind)` + 자산별 저널 키 + `supply_cap` 단일 문장 조건부 UPDATE |
 | 교환 이중 실행 | 같은 요청 재전송·견적 재사용 | `Idempotency-Key` + 저널 키 `exchange:{userId}:{key}:{asset}` + `exchange_quote` `open→used` 조건부 |
 | 같은 줄의 반품·교환 동시 요청 | 두 요청이 같은 수량을 동시에 가져감 | `order_line.qty_returned + q ≤ qty` 조건부 UPDATE(0행이면 `return_quantity_exceeded`) |
 | 교환 취소 vs `return.inspected` | 구매자 취소와 검수 완료가 동시 | `order_exchange` `status`·`version` CAS 로 한쪽만 성공, 환불 키로 환불은 한 번 |
-| 에스크로 해제 vs 반품 요청 | 자동 해제와 반품이 동시 | `held→frozen` 조건부 전이와 `held→released` 조건부 전이 중 하나만 성공. 반품 기한(5일) < 자동 해제(7일) 불변. 반품 거절 시 `frozen→held` 로 재개 |
+| 에스크로 해제 vs 반품 요청 | 자동 해제와 반품이 동시 | 요청 tx 안의 `held→frozen`(`FreezeInTx`)과 해제 tx 의 `held→released` 조건부 전이 중 하나만 성공(위 '동기' 행). 반품 기한(5일) < 자동 해제(7일) 불변은 `DemoClock` 실효값으로 검증. 반품 거절 시 `frozen→held` 로 재개 |
 | 약정 해제 vs 늦은 `order.paid` | 딜 `settled` 와 결제 확정 소비 사이 순서 없음 | 해제량 = `total − confirmed`(미판매분만), 해제는 `settled`(활성 예약 0·미결제 주문 0) 이후 |
 
 ### 15.2 실패 모드
@@ -1952,7 +2008,7 @@ classDiagram
 
 | 추가 | 내용 |
 |---|---|
-| 등급 `write.purchase` | 예약: 세션당 10회/분 burst 3(제안) |
+| 등급 `write.purchase` | 예약: 세션당 10회/분 burst 3(제안), 같은 값을 계정(`github_id`)당으로도 건다(IP 미확인 시 대체, 아래 표) |
 | 등급 `write.checkout` | 주문 생성·결제 시작·승인: 세션당 20회/분(제안) |
 | 등급 `write.refund` | 관리자 환불·분쟁 판정: 관리자당 30회/분(제안) |
 | 등급 `write.exchange` | USDC→POINT 교환·교환 견적: 세션당 10회/분(남용 방어 속도 제한). 교환 금액 한도는 없다(P0 U26 확정: 무제한). `Idempotency-Key` 필수 |
@@ -1961,6 +2017,15 @@ classDiagram
 | 쓰기 잠금 | 예약·주문·결제 시작은 M1 쓰기 잠금 대상. 환불·분쟁 판정·웹훅 처리는 **잠금 중에도 허용**(진행 중 건 정리) |
 
 nginx 추가(제안): `limit_req_zone … zone=pf_purchase:10m rate=5r/s`, `pf_webhook:10m rate=20r/s`. 웹훅 경로는 `proxy` 에서 **외부 공개되지만 다른 경로와 분리**한다.
+
+**클라이언트 IP 를 확보하지 못할 때 (C16, ADR-003 G14 미확인)**: Funnel 뒤에서 실제 접속 주소를 얻지 못하면 주소 기준 `limit_req` 는 사실상 전역 한도가 되어 정상 구매자를 함께 막는다. 그래서 키를 고정해 둔다.
+
+| 대상 | 기본 키 | IP 미확인 시 대체 키 |
+|---|---|---|
+| `pf_purchase`(nginx, 예약·결제) | `$binary_remote_addr` | **세션 쿠키 해시**(`map` 으로 `$cookie_pf_session` 의 SHA-256 앞 16바이트) — 쿠키가 없으면 로그인 전이라 구매 경로에 오지 못하므로 공유 버킷(낮은 한도)에 넣는다 |
+| 앱 `write.purchase`·`write.checkout`·`write.exchange` | 세션 | **계정(`github_id`)** — 로그인 필수 경로이므로 세션을 새로 만들어도 한도가 이어진다. 익명 세션 발급 자체의 전역 토큰버킷·PoW 는 ADR-003·F14 정본 |
+| `pf_webhook` | **구매 zone 과 분리된 별도 zone**, 키는 `provider` 경로(PG 별 고정 키) | 같음 — PG 서버의 주소에 의존하지 않고 권위 재조회(§6.5)가 위조를 막는다. 구매 폭주가 웹훅 처리량을 잠식하지 않게 zone 을 공유하지 않는다 |
+| 지급·대납(6d) | 지갑 | 지갑 + 연결한 `github_id` + 전역 일일 총량(§8.7) |
 
 ### 16.3 개인정보·보호 등급 추가분 (ADR-026 확장 제안)
 
@@ -2031,6 +2096,9 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | `pf_payment_duration_seconds` | histogram | `method` | 시작→승인 시간(TTL 보정 근거) |
 | `pf_payment_late_total` | counter | `outcome`(`new_reservation`/`refunded`) | 늦은 결제 |
 | `pf_escrow_frozen` | gauge | `reason`(`return`/`delivery_failed`) | 동결 중 에스크로 |
+| `pf_escrow_refund_pending` | gauge | — | `pending_refund_krw > 0` 인 에스크로 수(해제 차단 중, 오래 남으면 `refund_failed` 확인) |
+| `pf_tx_deadlock_retry_total` | counter | `usecase`,`result`(`retried`/`exhausted`) | `40P01`·`40001` 재시도(R10) |
+| `pf_transition_rejected_total` | counter | `aggregate`,`from`,`to` | 허용 표 밖 전이·오래된 이벤트로 NOOP 된 건(C14) |
 | `pf_exchange_total` | counter | `result`(`completed`/`cancelled_*` 열거 `cancel_reason`) | 상품 교환 결과 |
 | `pf_exchange_gate_age_seconds` | histogram | — | 신규 주문의 출고 게이트 대기(할당 유지) 시간 |
 | `pf_refund_total` | counter | `reason`,`result` | 환불 결과 |
@@ -2108,25 +2176,35 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | AC-C25 | `shipment.delivery_failed` 후 14일 경과 → 자동 해제 안 됨(`frozen`) |
 | AC-C37 | 배송 완료 후 **5일을 넘긴**(예: 6일째) 반품 요청 → `409 return_window_closed`, 에스크로는 `held` 그대로 7일째 정상 자동 해제 |
 | AC-C38 | `return.inspected{disposition:'REJECTED'}` → 환불 없음, 에스크로 `frozen→held` 와 `release_due_at` 재설정, 주문 `return_requested→delivered`, 반품 재요청 거절, 이후 정상 자동 해제 |
-| AC-C39 | 교환 요청 → 반품 케이스 생성(`resolution=EXCHANGE`), 원 에스크로 `held→frozen`, 신규 주문 `pending_payment`(`exchange_of_order_id` 설정, `deal_id`·`reservation_id` NULL), 신규 줄에 타임딜을 넣으면 `409 exchange_not_allowed`, 같은 `Idempotency-Key` 재전송은 같은 결과 | L3 |
-| AC-C40 | 신규 > 원: 신규 결제 → 신규 에스크로 `held` → 검수 환불 판정 후 원 환불 F → 순 차액(`priceDiffKrw > 0`)이 구매자 순 지출과 일치. 신규 < 원: 순 차액이 환불됨. 어느 tx 도 두 에스크로를 동시에 잠그지 않음(락 순서 시험, 교착 0) | L3 |
-| AC-C41 | 신규 주문은 `return.inspected` 환불 판정 전에 풀필먼트 웨이브에 들어가지 않고(출고 게이트), `REJECTED` 면 신규 주문 취소·환불과 원 에스크로 `frozen→held`(`release_due_at` 재설정), 발송 기한 초과도 같은 복귀 | L3 |
-| AC-C42 | 부분 교환 후 원 에스크로: `escrow_leg.refunded_amount` 증가·`frozen→held`, 해제 시 정산 입력이 잔여 다리이며 `r ≥ 0`·`net+fee+dust=gross`(AC-C34 속성 시험에 교환 환불 시퀀스 포함) | 속성 L2 + L3 |
-| AC-C43 | 같은 줄에 반품·교환 동시 N 건 → `qty_returned ≤ qty` 유지(성공 합이 `qty` 이하), 교환 취소와 검수 완료 경합에서 환불 정확히 1건 | L3 동시성 |
-| AC-C44 | 분할 배송: 주문 상세가 배송 N건(`shipments[]`, `pendingLines`)을 보이고, 일부만 `delivered` 인 동안 주문은 `shipped`·에스크로 `release_due_at` 미설정, `allDelivered` 에서 `delivered`·기한 설정, 반품 기한은 그 시각부터 5일 | L3 |
-| AC-C26 | 출고 전 취소만 `deal.restocked` 발행(약정 +q 짝), `fulfillment.rejected(OUT_OF_STOCK)` 는 복원 안 함; 같은 이벤트 재전달에도 복원 1회 |
+| AC-C39 | 교환 요청 → 반품 케이스 생성(`resolution=EXCHANGE`), 원 에스크로가 **요청 tx 안에서** `held→frozen`, 신규 주문 `pending_payment`(`exchange_of_order_id` 설정, `deal_id`·`reservation_id` NULL), **같은 상품 교환의 단가 = 원 줄 결제 단가, 다른 상품 = 요청 시점 열린 딜가, 가격 근거 없으면 `409 exchange_not_allowed`**(D2), 신규 줄이 딜 재고(`confirmed`)·개인 한도를 바꾸지 않음, 같은 `Idempotency-Key` 재전송은 같은 결과 (L3) |
+| AC-C40 | 신규 > 원: 신규 결제 → 신규 에스크로 `held` → 검수 환불 판정 후 원 환불 F → 순 차액(`priceDiffKrw > 0`)이 구매자 순 지출과 일치. 신규 < 원: 순 차액이 환불됨. 어느 tx 도 두 에스크로를 동시에 잠그지 않음(락 순서 시험, 교착 0) (L3) |
+| AC-C41 | 신규 주문은 `return.inspected` 환불 판정 전에 풀필먼트 웨이브에 들어가지 않고(출고 게이트), `REJECTED` 면 신규 주문 취소·환불과 원 에스크로 `frozen→held`(`release_due_at` 재설정), 발송 기한 초과도 같은 복귀 (L3) |
+| AC-C42 | 부분 교환 후 원 에스크로: `escrow_leg.refunded_amount` 증가·`frozen→held`, 해제 시 정산 입력이 잔여 다리이며 `r ≥ 0`·`net+fee+dust=gross`(AC-C34 속성 시험에 교환 환불 시퀀스 포함) (속성 L2 + L3) |
+| AC-C43 | 같은 줄에 반품·교환 동시 N 건 → `qty_returned ≤ qty` 유지(성공 합이 `qty` 이하), 교환 취소와 검수 완료 경합에서 환불 정확히 1건 (L3 동시성) |
+| AC-C44 | 분할 배송: 주문 상세가 배송 N건(`shipments[]`, `pendingLines`)을 보이고, 일부만 `delivered` 인 동안 주문은 `shipped`·에스크로 `release_due_at` 미설정, `allDelivered` 에서 `delivered`·기한 설정, 반품 기한은 그 시각부터 5일 (L3) |
+| AC-C26 | 출고 전 취소만 `deal.restocked` 발행(재고·Redis 복원 신호; 약정 복귀는 취소 tx 의 할당 해제 — 이벤트로 약정을 더하지 않음), `fulfillment.rejected(OUT_OF_STOCK)` 는 복원 안 함; 같은 이벤트 재전달에도 복원 1회 |
 | AC-C27 | 포인트 결제 주문도 결제 시작 시 스냅샷이 고정되어 정산이 `failed` 가 되지 않음; 정산 `net+fee+dust = gross`, dust ∈ {0,1} |
 | AC-C28 | 딜 게시 후 약정 거절 → `publishing→draft` 복귀 + `deal.publish_rejected`, 약정 없는 딜은 `open` 이 되지 않음 |
 | AC-C29 | 딜 `settled` 시 약정 해제량 = `total − confirmed`, 결제는 확정됐으나 `order.paid` 가 아직 소비되지 않은 주문의 약정은 건드리지 않음 |
-| AC-C30 | 첫 로그인 지급: `ClaimWelcomeGrant` 는 사용자당 1회(`UNIQUE (github_id, kind)` + 멱등 키 `grant:welcome:{uid}:{asset}`, 재호출은 같은 응답 재생, 계정 소프트 삭제 후 재가입에도 재지급 없음)이고 지급된 자산(POINT, 설정상 USDC 포함 시 USDC)의 저널이 각각 차변=대변이며 감사 기록이 남는다. 바둑 보상 없이 혼합 결제 구매가 끝까지 시연된다(**Phase 3 DoD**) |
+| AC-C30 | 첫 로그인 지급: `ClaimWelcomeGrant` 는 사용자당 1회(`UNIQUE (github_id, kind)` + 멱등 키 `grant:welcome:{uid}:{asset}`, 재호출은 같은 응답 재생, 계정 소프트 삭제 후 재가입에도 재지급 없음)이고 지급된 자산(POINT, 설정상 USDC 포함 시 USDC)의 저널이 각각 차변=대변이며 감사 기록이 남는다. 바둑 보상 없이 **POINT 단독 결제 구매가 라이브에서 끝까지** 시연된다(**Phase 3 DoD**, D1). 혼합 결제·교환 구매는 **로컬·시험 환경**(`WELCOME_GRANT_USDC_MICRO > 0`, `USDC_LEG_ENABLED=on`)에서 시연하고, 라이브는 6d 의 devnet 입금→원장 반영 브리지 이후다. 라이브에서 `USDC_LEG_ENABLED=off` 일 때 USDC 다리가 필요한 결제·교환은 `409 usdc_unavailable` 이고 100,000원 초과 상품은 숨김 또는 'USDC 입금 후 구매 가능' 표기 |
 | AC-C31 | 혼합 결제: 포인트 우선 차감 후 나머지를 USDC 로 낸다. 한 다리라도 잔액이 모자라면 전체 롤백되고 어느 계정도 음수가 되지 않는다 |
 | AC-C32 | 교환: USDC→POINT 만 존재하며 `exchangeCost` 는 올림이고, 같은 스냅샷에서 교환 후 포인트 결제가 직접 USDC 결제보다 싼 경우가 무작위 20만 건에서 0건이다. `Idempotency-Key` 없는 요청은 400, 같은 키 재요청은 1회만 반영, 만료 견적은 `quote_expired`, 확정 비용이 `maxUsdcMicro` 초과면 `price_moved` |
 | AC-C33 | 정산 균형: 혼합 결제의 USDC 분개는 `u_rem + r = net + fee + dust` 이고 `r ≥ 0`, POINT 분개는 별도로 균형이다(자산별 시산표 0). 금액 0 라인은 생략되고 분개 수는 §8.5.1 형태(포인트·혼합·카드 2건, USDC 단독 1건)와 일치한다 |
 | AC-C34 | 다리별 환불 **및 부분 환불 후 정산**: 낸 자산으로 돌려주고, 부분 환불 1~5단계 어떤 순서에서도 다리별 합이 낸 수량을 넘지 않으며 전액 환불은 낸 수량과 일치한다. 환불 뒤 정산은 **잔여 다리**를 입력으로 하고 자산별 차변=대변·`r ≥ 0`·음수 잔액 0건(무작위 10만 주문, §8.5.1 시험 결과 위반 0건)이며, 부분 환불 역분개 합이 원 분개를 넘지 않는다 |
 | AC-C35 | 지급 총량(운영 `cap` 은 실질 무제한이라 시험은 낮춘 `cap` 으로 구조를 검증한다): `supply_cap` 단일 행 조건부 UPDATE 로 총 발행 상한(지급+교환 POINT 포함)을 넘는 신규 지급·교환은 거절되고 경보가 나며, 동시 100건 지급에서도 상한을 넘지 않는다. 모든 화면에 "모의" 표시가 있다 |
 | AC-C36 | 지갑 연결(선택, **6d**): 서명 챌린지는 1회용·5분 만료·사용자 바인딩이며 재사용·다른 사용자 서명이 거절된다. 지갑 없이 모든 구매가 가능하다 |
+| AC-C45 | **환불 in-flight 경합**(C1): 카드 결제의 환불 tx1 커밋 후 `FakeGateway` 가 PG 취소를 지연(또는 일시 실패 → `refund_pending`, 영구 실패 → `refund_failed`)시키는 동안 자동 해제 스윕·`confirm-receipt`·분쟁 제기·분쟁 판정·`return.inspected{REJECTED}` 재개를 동시에 실행 → **모두 거절**(해제 0, `409 refund_in_progress`), 같은 결제의 두 번째 환불 요청도 `409 refund_in_progress`. 취소 성공 후 tx2 가 표식을 지우고 부분이면 `frozen→held` 재개, 이후 해제·정산 입력 = 잔여 다리. 전 과정에서 **PG 환불액 + 판매자 정산 KRW 가치 ≤ 결제액**(이중 지급 0), `pending_refund_krw` 가 남은 채 `released` 인 에스크로 0건 (L3 동시성) |
+| AC-C46 | **교착 주입**(C4): ① 계정 id 가 역순인 두 혼합 결제·환불 tx 를 장벽(barrier)으로 동시에 진입시켜도 `PostJournalsInTx` 일괄 잠금 덕에 `40P01` 0건 ② `FaultInjector`(`ledger.post_journals.before_lock`)로 저널 단위 잠금 변형을 켜면 같은 시험이 교착을 검출(가드 되돌림 시 실패 증명) ③ 강제로 `40P01` 을 1·2·3·4회 주입 → 3회까지는 재시도 후 성공, 4회째는 `503` 거절, 어느 경우에도 부분 기장·음수 잔액 0 (L3) |
+| AC-C47 | **교정 중 동시 reserve 카오스**(C7): L1 부하 중 `avail` 을 인위적으로 ±k 어긋나게 만든 뒤 대조 교정(재구성)을 트리거하고 동시에 `reserve` 폭주·만료 스윕을 계속 → 교정 동안 `reserve` 는 `UNAVAILABLE` 만, 교정 후 `pf_redis_stock_drift = 0`, (I1)·(I2) 위반 0, 초과 판매 0. 대조군: 만료 스윕을 '`release.lua` 먼저, PG CAS 나중'으로 바꾼 변형은 확정과 겹친 복원으로 (I2) 위반을 검출해야 한다 (L3 카오스) |
+| AC-C48 | **취소·수령 확인 직렬화**(C3): `demo` 주문에 `cancel` 과 `confirm-receipt` 를 동시에 N회 → 한쪽만 성공(다른 쪽 `409 escrow_state_conflict`), 교착 0, 주문·에스크로·원장 상태가 일치(취소면 주문 `refunded`·에스크로 `refunded`·역분개, 확정이면 주문 `completed`·에스크로 `released`·POINT 소각 분개) (L3 동시성) |
+| AC-C49 | **반품 요청 vs 자동 해제**(C8): `DemoClock` 압축 상태에서 반품 기한 마지막 순간의 반품 요청과 자동 해제를 동시에 → 어느 순서든 '반품 접수됐는데 `released`' 0건. 설정 검증은 압축 후 실효값으로 `RETURN_WINDOW < AUTO_RELEASE`·여유 ≥ k × p99 를 검사하고 위반 설정에서 기동 실패 (L3) |
+| AC-C50 | **분쟁 vs 반품**(C13): 반품·교환 케이스 진행 중(`frozen_reason='return'`) 분쟁 제기 → `409 return_in_progress`; 반품 거절로 `held` 복귀 후에는 분쟁 가능; 배송 실패 동결(`delivery_failed`)에서는 분쟁 가능 (L3) |
+| AC-C51 | **잔여 0·0원**(C12): 부분 환불 여러 번으로 누적이 결제액에 닿으면 결제 `refunded`·에스크로 `refunded`·`payment.refunded{full:true}` 이고 정산이 생기지 않음; `price_krw = 0` 딜 생성은 `CHECK` 로 거절 (L3) |
+| AC-C52 | **정산 검산 벡터**(C11): §8.5.1 픽스처 V1~V4 가 `Converter`·정산 함수에서 정확히 일치하고, V4 는 `gross` 를 먼저 내리는 변형에서 실패한다(회귀 가드 증명). 시드 고정 무작위 10만 주문에서 불변식 위반 0 (속성 L2) |
+| AC-C53 | **교환 신규 주문 확정 vs 만료**(C5): 결제 기한 경계에서 `ConfirmPurchase`(API·웹훅·대사 세 경로)와 `ExchangeDeadlineSweeper` 를 동시에 → 교환은 `awaiting_return` 또는 `cancelled(PAYMENT_EXPIRED)` 중 하나, 확정은 최대 1회(payment CAS), 만료가 이기면 카드 결제는 `refund_pending(exchange_expired)` 후 PG 취소, 원장 결제는 차감 0 (L3 동시성) |
+| AC-C54 | **이벤트 역전과 역방향 전이**(C14): `return.inspected{REJECTED}`(→`delivered`, `frozen→held`)·예약 만료 복원(`sold_out→open`)·임대 만료(`confirming→active`)가 적용되고, 같은 이벤트 재전달·더 낮은 `aggregate.version` 의 늦은 이벤트는 NOOP, 종결 후 도착한 이벤트는 `pf_transition_rejected_total` 증가 (L3) |
 
-> **AC 단계 배정**: AC-C30·C31·C32·C35 는 Phase 3(3-C1/3-C2), AC-C34 의 환불 부분은 Phase 3(3-C3)·정산 이후 부분은 Phase 5, AC-C33 은 Phase 5(5-D), AC-C36 은 6d. AC-C24·C25·C37·C38 은 Phase 5(반품·동결 확장, 풀필먼트 이벤트는 6c 이후).
+> **AC 단계 배정**: AC-C30·C31·C32·C35 는 Phase 3(3-C1/3-C2 — C31·C32 의 USDC 경로는 로컬·시험 환경, D1), AC-C34 의 환불 부분은 Phase 3(3-C3)·정산 이후 부분은 Phase 5, AC-C33 은 Phase 5(5-D), AC-C36 은 6d. AC-C24·C25·C37·C38 은 Phase 5(반품·동결 확장, 풀필먼트 이벤트는 6c 이후). AC-C46·C47·C48·C51(0원 딜) 은 Phase 3(3-B·3-C3), AC-C45·C49·C50·C52·C54 는 Phase 5(5-B·5-D), AC-C53 은 6c-X.
 
 ### 19.2 계층
 
@@ -2142,7 +2220,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 
 ### 19.3 시험 지원
 
-`FakeGateway`(결정적 지연·오류·중복 주입), `FakePriceSource`, `FakeClock`(예약·견적 만료), `FaultInjector` 지점(`deal.reserve_stock.after_redis`, `order.confirm_purchase.before_commit`, `payment.approve.after_provider_call`), Redis 컨테이너 하니스(Testcontainers 는 병렬 실행에서 래퍼 공유 패턴, G9 실측).
+`FakeGateway`(결정적 지연·오류·중복 주입, **PG 취소 지연·일시/영구 실패 주입** — AC-C45), `FakePriceSource`, `FakeClock`(= `DemoClock` 포트의 시험 구현, 모든 기한 공통), `FaultInjector` 지점(`deal.reserve_stock.after_redis`, `order.confirm_purchase.before_commit`, `payment.approve.after_provider_call`, **`payment.refund.between_tx1_tx2`**, **`ledger.post_journals.before_lock`**(교착·`40P01` 주입), **`deal.expire_sweep.after_pg_cas`**, **`deal.reconcile.during_rebuild`**), 정산 검산 픽스처(`settlement-vectors`, §8.5.1), Redis 컨테이너 하니스(Testcontainers 는 병렬 실행에서 래퍼 공유 패턴, G9 실측).
 
 ---
 
@@ -2171,18 +2249,18 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | 3-A | `catalog`·`deal` 조회, 딜 스케줄러, 관리자 생성 | 딜 목록/상세, 오픈/마감 자동 전이 |
-| 3-B | Redis(재고 영역) + Lua 4종 + `ReserveStock` + 만료 스윕 + 재구성 + 대조 | AC-C02~C07, §4.6 시험 항목을 시험 코드로 재작성 |
+| 3-B | Redis(재고 영역) + Lua 4종 + `ReserveStock` + 만료 스윕(PG CAS 먼저) + 재구성 + 대조(교정은 `rebuilding` 차단 아래) | AC-C02~C07, AC-C47, §4.6 시험 항목을 시험 코드로 재작성·커밋 |
 | 3-C1 | `ledger` 도입(POINT·USDC 다중 자산) + **지급**(`ClaimWelcomeGrant`·`AdminGrant`, `ledger.grant`·`supply_cap`) + **교환**(`exchange_quote`, `ExchangeUsdcToPoint`) | AC-C30, AC-C32, AC-C35, AC-C19(소규모) |
-| 3-C2 | 최소 `pricefeed`(`FixedRateSource`, 스냅샷 고정) + 최소 `payment`(`LedgerGateway`, 혼합 결제·시작 응답 확인 단계) + `order` + `ConfirmPurchase`(쌍 #2·#3·#4) | AC-C01(소규모), AC-C08, AC-C31, AC-C27(포인트 결제 스냅샷) |
-| 3-C3 | 최소 `escrow`(`HoldInTx` 쌍 #5, `release`, `refund`) + 원장 환불(`RefundPayment` 쌍 #7, 다리별 역분개) + `confirm-receipt`·`MarkDelivered` | AC-C34(환불 부분), 구매→보류→수령 확인→해제, 구매→환불 시연 |
-| 3-D | k6 L1~L10, 카오스, 결과표 | **AC-C01 대규모, 초과 판매 0, 결과표** → Phase 3 DoD |
+| 3-C2 | 최소 `pricefeed`(`FixedRateSource`, 스냅샷 고정) + 최소 `payment`(`LedgerGateway`, 혼합 결제·시작 응답 확인 단계 — USDC 다리는 `USDC_LEG_ENABLED` 뒤, 라이브 off) + `order` + `ConfirmPurchase`(쌍 #2·#3·#4, `PostJournalsInTx`) | AC-C01(소규모), AC-C08, AC-C31(로컬·시험), AC-C27(포인트 결제 스냅샷) |
+| 3-C3 | 최소 `escrow`(`HoldInTx` 쌍 #5, `ReleaseEscrow` 쌍 #8 + `MarkCompletedInTx`, `RefundInTx`) + 원장 환불·취소(`RefundPayment` 쌍 #7 + `MarkCancelledInTx`·`MarkRefundedInTx`, 다리별 역분개) + `confirm-receipt`·`MarkDelivered` + demo 취소 재고 복원(`RestockOnCancel`, `order.cancelled{demo}`) | AC-C34(환불 부분), AC-C46, AC-C48, AC-C51, 구매→보류→수령 확인→해제, 구매→취소·환불 시연 |
+| 3-D | k6 L1~L10, 카오스, 결과표 | **AC-C01 대규모, 초과 판매 0, 결과표**, AC-C30(POINT 단독 라이브 시연) → Phase 3 DoD |
 | 5-A | `pricefeed` 수집·검증·견적 | AC-C13~C15 |
 | 5-B | `PaymentGateway` 포트 + `FakeGateway` + 웹훅 inbox + 대사 | AC-C09~C11 |
 | 5-C | PG 테스트 어댑터(선정 후) + CSP/위젯 | 실제 테스트 결제 왕복 |
-| 5-D | `escrow` 확장(분쟁·`frozen`/`held` 재개·자동 확정 타이머·`ESCROW_TIME_SCALE`) + `settlement`(잔여 다리 입력) + 원장 정산 분개 | AC-C17~C19, AC-C24·C25·C33·C34(정산 부분)·C37·C38 |
+| 5-D | `escrow` 확장(분쟁·`frozen`/`held` 재개·`FreezeInTx`·`pending_refund_krw`·자동 확정 타이머·`DemoClock`/`ESCROW_TIME_SCALE`) + `settlement`(잔여 다리 입력, USDC 정산만) + 원장 정산 분개 + 검산 픽스처 커밋 | AC-C17~C19, AC-C24·C25·C33·C34(정산 부분)·C37·C38, AC-C45·C49·C50·C52·C54 |
 | 5-E | UI(주문·에스크로·관리자), 면책, 압축 시간 시연 | AC-C18 → Phase 5 DoD |
-| 6c-X | **상품 교환(U23)**·분할 배송 노출 — 반품(P3 W5)과 풀필먼트 사가가 선행. `RequestExchange`·`ExchangeReactor`·출고 게이트·`ComposeFulfillmentView` | AC-C39~C44, AC-WM 교환 시험(P3) |
-| 6-4 | `EscrowChainPort` + InMemory + devnet 어댑터 | devnet 왕복 (키 관리 ADR 선행) |
+| 6c-X | **상품 교환(U23)**·분할 배송 노출 — 반품(P3 W5)과 풀필먼트 사가가 선행. `RequestExchange`·`ExchangeReactor`·출고 게이트·`ComposeFulfillmentView` | AC-C39~C44, AC-C53, AC-WM 교환 시험(P3) |
+| 6-4 | `EscrowChainPort` + InMemory + devnet 어댑터 + **devnet 입금→원장 반영 브리지 `UsdcDepositBridge`**(연결 지갑의 tUSDC 입금을 감시해 `liab:user_usdc` 에 기장 — 차변 계정·확정 깊이는 6d 착수 시 키 관리 ADR 과 함께 정한다. 이것이 생겨야 라이브 `USDC_LEG_ENABLED` 를 켠다, D1) | devnet 왕복 (키 관리 ADR 선행), 라이브 혼합 결제·교환 시연 |
 
 ### 20.3 위험
 
@@ -2205,7 +2283,8 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 예약 TTL(포인트 60초/카드 10분) 보정 | 결제 시간 측정 후 |
 | 입장 토큰 버킷 N | k6 로 PG 쓰기 한계 측정 후 |
 | **캡차/가상 대기열 도입 여부 — 사용자 결정**(권장: M1 규모에서는 도입하지 않고 입장 토큰 버킷 + 속도 제한으로 충분한지 부하 시험 후 판단; 영향: 봇 대응력 vs 구현·UX 비용) | 부하 시험 결과 후 사용자 확인 |
-| 교환 신규 결제 방식: 전액 결제 후 환불(채택) vs 원 에스크로 잔여분 이월(미채택, 두 에스크로 동시 잠금 필요) / 출고 게이트 시점(`return.inspected` 채택 vs `return.received`) / 타임딜 신규 줄 허용 여부 | 6c 착수 전 사용자 확인 |
+| 교환 신규 결제 방식: 전액 결제 후 환불(채택) vs 원 에스크로 잔여분 이월(미채택, 두 에스크로 동시 잠금 필요) / 출고 게이트 시점(`return.inspected` 채택 vs `return.received`). 신규 줄 판매가는 **확정(D2, 2026-11-05)**: 같은 상품은 원 줄 결제 단가, 다른 상품만 현재 딜가 | 6c 착수 전 사용자 확인(가격은 확정) |
+| Phase 3 결제 범위 | **확정(D1, 2026-11-05)**: Phase 3 DoD 는 POINT 단독 결제. USDC 다리·교환·혼합 결제는 코드·로컬 시연까지, 라이브 노출은 6d `UsdcDepositBridge` 이후 (확정) |
 | KEK/DEK 상향 | Phase 5 착수 |
 | 첫 로그인 지급(POINT 100,000 만 확정; USDC 는 환경별 공급)·재충전 정책(P0 U24). 하위 질문(지갑 없는 라이브 사용자의 USDC)은 **해결(2026-11-05 사용자 결정)**: 지갑 없는 사용자는 USDC 를 받지 않고, 화면에서 지갑 연결을 유도하며, POINT 100,000 으로 살 수 있는 시드 상품을 다수 둔다. 시장 참고가와 지급액의 충돌은 **해결(P0 U27 (c): 지급 100,000 으로 상향, 시드는 참고가 그대로)** | 하위 질문·가격 충돌 모두 해결(2026-11-05) |
 | 총 발행 상한 `supply_cap`(U25: 실질 무제한)·교환 한도(U26: 무제한) | 확정(2026-11-05) |
@@ -2234,6 +2313,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 대상 | 요청 |
 |---|---|
 | P0 플랫폼 | (조정 완료) Redis **단일 인스턴스**(D6) 기준으로 문서 정정. 이 문서가 호출하는 `…InTx` 쌍(#2~#5, #7~#9)이 P0 §2.4 표와 맞는지 확인함. 추가 요청: 이벤트 정본 표(§8.3)에 `deal.scheduled`·`deal.publish_rejected`·`deal.settled`·`deal.restocked`·`payment.refund_pending`·`payment.refund_failed`·`order.demo_delivered`·`escrow.frozen`·`ledger.demo_granted`(자산별 1건)·`ledger.points_exchanged` 반영(payment/escrow/settlement 이벤트의 `legs`·`refundLegs`·`fundedUsdc`/`fundedPoint`/`r` 포함), `escrow-order-reactor`·`payment-fulfillment-refunder`·`deal-earmark-reactor` 소비자 등재, `order.cancelled`/`disputed`/`payment.refunded` 의 fulfillment 소비자 표기, 층 배치에서 `escrow`/`payment` 가 `ledger` 락 순서 규약(`payment → escrow → ledger 계정`)을 따름과 Phase 3 최소 `escrow`(쌍 #5·#7 활성), escrow 의 `return.inspected` 구독(`frozen→held`)을 반영 |
+| P0 플랫폼 (3차 검토 반영, 2026-11-05) | 이 문서는 P0 §2.4 의 R9(`order_exchange` 포함)·R10(`PostJournalsInTx`)·R11(`pending_refund_krw`), 쌍 #5 `FreezeInTx`, #7 `MarkCancelledInTx`, #8 `MarkCompletedInTx` 를 따른다. 확인 요청: ① 쌍 #8 서술의 "해제 tx 가 POINT·USDC 다리의 소각/해제 분개" — 이 문서는 **USDC 다리에 해제 분개를 두지 않고**(정산이 `liab:escrow:USDC` 를 직접 차변) 해제 tx 는 비 USDC 다리(POINT·KRW)만 기장한다. 쌍 #9 의 대사 불변식('해제됐으나 미정산 USDC 가 `liab:escrow:USDC` 에 남음')과 맞추려면 쌍 #8 문구를 'POINT·KRW(비 USDC) 다리'로 ② `escrow.frozen.frozenReason` 의 `refund` 값 — 이 문서는 `frozen_reason='refund'` 를 쓰지 않고 상태와 독립인 `pending_refund_krw` 열만 쓴다(R11 의 '또는' 대안 미채택) ③ `order.cancelled` 페이로드에 `fulfillmentMode`(demo 재고 복원 트리거) 추가 ④ `payment.refunded.refundLegs` 는 `krwValue` 포함으로 확정 ⑤ `PostJournalsInTx` 를 쌍 #3·#7·#8·#9 의 참여 함수 이름에 반영(#9 는 현재 `PostJournalInTx` 표기) |
 | P1 바둑 | (조정 완료) 단일 `ledger` 모듈, `ConfirmRewardInTx` 등 공개 `InTx`, 보상 분개를 POINT 자산으로 — P1 §10 이 반영함 |
-| P3 풀필먼트 | (조정 완료) `order.paid`·`order.cancel_requested`·`order.return_requested`·`order.address_corrected` 발행, `fulfillment.*`/`shipment.*`/`return.*` 소비, 딜 총량 ≤ 약정 상한은 deal 이 `sku_capacity` 로 받는다(§12.1). **추가 요청**: `order.paid` 는 `fulfillmentMode`(`demo`/`physical`)를 싣고 풀필먼트는 `physical` 만 소비, `fulfillment.accepted` 는 P3 판본(`allocation(FULL\|PARTIAL\|PENDING)`·`lines[{lineId, qtyAllocated}]`, `PENDING` 은 접수 후 대기)이 정본(`allocated` 병합), 약정 해제는 `deal.settled` 의 `releaseQty = total − confirmed` 만, `deal.restocked` 소비해 약정 `+qty`, `return.inspected` 페이로드에 `orderId`·`disposition`(`RESTOCK`/`DISPOSE`/`REFUND_ONLY`/`REJECTED`, `REJECTED` 도 발행), 반송(`RETURNED_TO_SENDER`)은 `return.received`(reason=`rts`)로 연결, `order.cancelled`/`disputed`/`payment.refunded` 구독, `fulfillment.*` outbox 집합체 키 = `orderId` |
+| P3 풀필먼트 | (조정 완료) `order.paid`·`order.cancel_requested`·`order.return_requested`·`order.address_corrected` 발행, `fulfillment.*`/`shipment.*`/`return.*` 소비, 딜 총량 ≤ 약정 상한은 deal 이 `sku_capacity` 로 받는다(§12.1). **추가 요청**: `order.paid` 는 `fulfillmentMode`(`demo`/`physical`)를 싣고 풀필먼트는 `physical` 만 소비, `fulfillment.accepted` 는 P3 판본(`allocation(FULL\|PARTIAL\|PENDING)`·`lines[{lineId, qtyAllocated}]`, `PENDING` 은 접수 후 대기)이 정본(`allocated` 병합), 약정 해제는 `deal.settled` 의 `releaseQty = total − confirmed` 만, `deal.restocked` 는 약정을 바꾸지 않고(inbox 기록만) 약정 복귀는 취소 tx 의 할당 해제가 한다, `return.inspected` 페이로드에 `orderId`·`disposition`(`RESTOCK`/`DISPOSE`/`REFUND_ONLY`/`REJECTED`, `REJECTED` 도 발행), 반송(`RETURNED_TO_SENDER`)은 `return.received`(reason=`rts`)로 연결, `order.cancelled`/`disputed`/`payment.refunded` 구독, `fulfillment.*` outbox 집합체 키 = `orderId` |
 | P4 채팅 | `order.GetOrderSummaryForSupport` 공개 usecase 사용, 배송지·결제 키 제외 |

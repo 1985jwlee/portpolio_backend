@@ -10,7 +10,7 @@ CS 채팅은 일반 대화방과 달리 **작업 단위(티켓)** 가 있다: �
 
 ## 결정 (잠정)
 1. **모듈 분리**: `chat`(범용 방·메시지 엔진)과 `support`(티켓 수명주기·배정·SLA)를 나눈다. `support` 가 `chat` 의 공개 `…InTx` 함수(`OpenRoomInTx`, `PostMessageInTx`, `CloseRoomInTx`, `AddParticipantInTx`, `RemoveParticipantInTx`)를 호출하고, `chat` 은 `support` 를 모른다(`support.*` 이벤트도 구독하지 않는다).
-2. **티켓 상태 머신**: `open → assigned → in_progress → resolved → closed`, `resolved → reopened(→ in_progress)`. 모든 전이는 **조건부 UPDATE**(`WHERE status = $기대 AND version = $v`).
+2. **티켓 상태 머신**: `open → assigned → in_progress → resolved → closed`, `resolved → open`(재오픈은 대기열로, 새 `claim_token`·새 `claimed_at`). `resolved`·`closed` 전이는 같은 tx 로 상담원을 `RemoveParticipantInTx` 하고 `claim_token` 을 교체한다. 모든 전이는 **조건부 UPDATE**(`WHERE status = $기대 AND version = $v`).
 3. **배정은 당기기(pull) 방식**이 기본이다: 상담원이 대기열에서 티켓을 **선점(claim)** 한다(CAS). 자동 배정(최소 부하)은 같은 CAS 를 호출하는 선택 잡으로 둔다.
 4. **선점에는 임대가 있다**: 상담원 **REST 활동**(메시지 전송, `POST /agent/tickets/{id}/heartbeat`)마다 `lease_until` 이 연장된다. **`typing` 은 연장 신호가 아니다**(WS 인바운드는 DB 에 쓰지 않고 gateway 에 쓰기 경로가 없다). 연장에는 **총 상한**이 있다: `lease_until ≤ claimed_at + 2시간`(제안) — 상한을 넘기면 임대가 만료되어 티켓이 대기열로 돌아가고 다시 `ClaimTicket` 해야 한다(무응답 상담원이 티켓을 영구히 붙잡는 일을 막음). 임대가 만료된 **`assigned`·`in_progress` 티켓은 모두** `open` 으로 되돌린다(reaper 잡). 되돌릴 때는 `claim_token` 을 바꿔 이전 상담원의 늦은 응답이 상태를 덮지 못하게 한다(ADR-021 펜싱). 상담원의 임대 연장 근거는 M1 ADR-021(토큰 조건 연장 허용)이며 간격은 임대의 1/3 이하.
 5. **역할**: 일반 사용자 `customer`, 상담원 `agent`, 관리자 `admin`(P0 D11: `agent`·`operator`·`admin` 은 모두 설정 허용목록, DB 권한 플래그 없음). 상담원 목록은 M1 관리자와 같은 방식의 **설정 허용목록**(`AGENT_GITHUB_IDS`)으로 시작한다(Passkey 도입 시 재검토). 고객은 **로그인 사용자만** 티켓을 열 수 있다(주문과 연결하려면 신원이 필요).
@@ -32,7 +32,7 @@ stateDiagram-v2
     in_progress --> in_progress : 메시지 교환(임대 연장)
     in_progress --> open : ReleaseTicket 또는 임대 만료(무응답) 회수
     in_progress --> resolved : 상담원 해결 처리
-    resolved --> in_progress : 고객 재오픈(7일 이내)
+    resolved --> open : 고객 재오픈(7일 이내, 새 토큰·새 배정 시각)
     resolved --> closed : 7일 경과(close 잡) 또는 고객 종료
     open --> closed : 고객 취소(접수 직후)
     closed --> [*]
@@ -80,7 +80,7 @@ sequenceDiagram
 
 ## 검증 방법
 - 동시성: 두 상담원이 동시에 claim → 한 명만 성공. 임대 만료 후 이전 상담원 resolve 거절.
-- 상태 머신: 허용되지 않는 전이는 `409`. 재오픈 창 경계(7일).
+- 상태 머신: 허용되지 않는 전이는 `409`. 재오픈 창 경계(7일). 해결 뒤 이전 상담원의 REST 열람이 `403`, 재오픈 티켓의 `claimed_at + 2시간` 상한이 새 배정 시각부터 다시 계산됨.
 - 통합: 접수 → 배정 → 대화 → 해결 → 종료의 end-to-end, 재접속 복구.
 
 ## 실서비스라면

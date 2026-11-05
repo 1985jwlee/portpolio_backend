@@ -12,7 +12,7 @@ ADR-010 은 Redis Lua 로 선점하고 확정은 outbox 소비자가 **비동기
 1. **두 게이트로 역할을 나눈다.** Redis `avail`(Lua 원자)은 폭주를 DB 앞에서 거르는 **빠른 게이트**, Postgres `deal.stock` 의 `CHECK (confirmed >= 0 AND confirmed <= total)` 와 조건부 UPDATE 는 **하드 게이트**다. 초과 판매 방지의 근거는 하드 게이트다.
 2. **재고 확정 수량은 구매 확정 트랜잭션 안에서 동기 갱신한다**(ADR-010 조정). 소비자는 읽기 모델·Redis 확정 동기화·알림을 맡는다.
 3. **Redis 스크립트 4종**(`reserve`, `confirm`, `release`, `restock`)을 멱등으로 설계하고, 시간 판정은 스크립트 안 `TIME` 으로 한다. 키는 딜 단위 해시 태그 `{deal:<id>}`. `restock` 은 **출고 전 취소로 되돌아온 확정 수량**을 복원한다(멱등 키 `restock:<orderId>`).
-4. **키가 없으면 fail-closed.** Redis 유실 직후 구매가 새어 나가지 않는다. 자동 재구성(PG 기준)으로 복구한다.
+4. **키가 없으면 fail-closed.** Redis 유실 직후 구매가 새어 나가지 않는다. 자동 재구성(PG 기준)으로 복구한다. **순서 규칙(2026-11-05 3차 검토 C7)**: 만료 스윕은 PG `active→expired` CAS 를 커밋한 **뒤에만** `release.lua` 를 부르고(뒤집으면 같은 예약의 확정과 복원이 겹친다), 대조 잡이 찾은 `avail` 불일치의 교정은 제자리 수정이 아니라 **`rebuilding` 으로 구매를 차단한 재구성으로만** 한다(차단 없는 교정은 계산과 쓰기 사이의 `reserve` 를 덮는다).
 5. **예약은 종결 후 되살리지 않는다.** 만료·해제된 예약에 늦은 결제가 오면 새 예약을 만들거나 환불한다(I3·I4 에 예외 없음).
 6. 구매 확정은 여러 모듈을 한 트랜잭션에 묶기 위해 **`*InTx` 공개 usecase**를 쓴다. 규칙의 정본은 [ADR-030](ADR-030-service-boundary-criteria.md) / [phases/00 §2.4](../design/phases/00-platform-evolution.md)(경계 규칙 **B12**)이고, 이 경로는 허용 쌍 #2(order→deal `ConfirmStockInTx`, 직접)·#3(order→ledger `PostJournalInTx`, 직접)·#4(order→payment `RecordPaymentInTx`, **order 소유 포트로 의존 역전**)·#5(order→escrow `HoldInTx`, 역전)다. 조율자는 `order.ConfirmPurchase` 하나이고 중첩 `uow.run` 은 없다.
 7. **타임딜 총량은 풀필먼트 약정 상한을 넘지 못한다.** 이 규칙은 상거래(`deal`)가 받는다: 딜 게시 시 `deal_read.sku_capacity`(inventory 의 `inventory.earmark_changed` 이벤트로 유지)로 1차 검증하고, 최종 심판은 `inventory` 의 약정 조건부 UPDATE(`allocated + earmarked ≤ available`)다. `deal` 은 `inventory` 를 동기 호출하지 않는다(층 규칙). 게시는 `draft→publishing→scheduled`(약정 승인 뒤), 거절이면 `draft` 로 복귀하고, 약정 해제는 딜 `settled` 시 **`total − confirmed` 만**이다(판매된 수량의 약정은 `order.paid` 소비가 쓴다).
@@ -21,7 +21,7 @@ ADR-010 은 Redis Lua 로 선점하고 확정은 outbox 소비자가 **비동기
 ## 설계 상세
 - 불변식: (I1) `confirmed ≤ total`(DB), (I2) `confirmed + Σ활성 예약 ≤ total`(빠른 게이트, 대조 점검), (I3) 예약은 확정과 만료/해제 중 하나로만 끝나고 되돌아오지 않음(CAS), (I4) 복원은 예약당 최대 1회.
 - 확정 결과는 `Confirmed` / `AlreadyConfirmed`(같은 예약·주문의 중복 확정 → NOOP, **결제 취소 금지**) / `Exhausted`(재고 소진 → 롤백, 카드는 `refund_pending` 후 PG 취소) 셋이다. **결제 환불 상태**는 `approving → refund_pending → refunding`, `refunding` 의 일시 실패는 `refund_pending` 으로 돌아가 재시도(횟수 상한), 영구 실패는 `refund_failed`(수동 처리 큐·경보)이며 `refunding → approved` 전이는 없다(활성 결제 유일 인덱스에 `refund_pending`·`refunding`·`refund_failed` 포함). 웹훅·대사 경로는 inbox `claim_token` + payment `version` CAS 로 직렬화한다.
-- 확정 tx 의 행 잠금 순서는 전역 규약 `reservation → deal.stock → user_purchase → payment → escrow → ledger 계정(id 오름차순) → order` 이고(ADR-040 결정 5), 환불·정산 tx 도 같은 순서를 따른다.
+- 확정 tx 의 행 잠금 순서는 전역 규약 `reservation → deal.stock → user_purchase → payment → escrow → ledger 계정(id 오름차순) → order_exchange → order` 이고(ADR-040 결정 5, P0 R9), 환불·취소·수령 확인·정산 tx 도 그 부분 수열을 따른다. 다리별 저널의 계정은 `PostJournalsInTx` 가 tx 단위로 한 번에 잠근다(P0 R10). 예약이 없는 교환 신규 주문의 확정은 `ConfirmStockInTx` 대신 `order_exchange` 행 잠금(`awaiting_payment` 조건)과 payment 행 CAS 로 직렬화한다(P2 §4.7).
 - 예약은 응답 전에 PG 에 영속 기록한다. Redis 에만 있는 예약은 누구에게도 약속되지 않은 것이라 회수해도 안전하다.
 - 재구성: 구매 차단 → PG 의 `total`, `confirmed`, 활성 예약으로 `avail`·`res`·`exp`·`user` 재작성 → 차단 해제. 유실 시점에 PG 영속 전이던 예약은 사라진다(응답을 받지 못한 구매자에게만 영향).
 - 로컬 사전 시험 결과(합격선 아님, 참고): 재고 100·동시 5,000명 → OK 100/SOLD_OUT 4,900. 같은 멱등 키 500회 → 예약 1. 개인 한도·복원 20회 동시·확정 대 해제 경합 모두 의도대로. PG 하드 게이트 재고 100·동시 3,000건 → 확정 100, 조건 없는 UPDATE 는 CHECK 가 차단. 핫 로우 확정 처리량 약 590 tps(성공 연속, WSL2·도커 볼륨)이다. **이 값은 `stock` 행 하나만 갱신한 것이고 전체 확정 경로(결제·에스크로·원장·주문 포함)는 측정하지 않았다.** 모든 구매 확정이 같은 시스템 계정(`liab:escrow:*` 등) 잔액 행을 갱신하는 전역 핫 로우도 있어, 필요하면 샤드 계정으로 분할한다(L1 전체 경로 결과 후 판정).
@@ -45,7 +45,7 @@ ADR-010 은 Redis Lua 로 선점하고 확정은 outbox 소비자가 **비동기
 | TTL 오설정 | 결제 시간 측정 후 보정(포인트 60초/카드 10분 제안) |
 
 ## 검증 방법
-Phase 3 DoD: k6 L1~L10(설계 문서 §4.9), 불변식 위반 0, 초과 판매 0. 카오스(Redis 유실, api 강제 종료, 확정 중 DB 단절).
+Phase 3 DoD: k6 L1~L10(설계 문서 §4.9), 불변식 위반 0, 초과 판매 0. 카오스(Redis 유실, api 강제 종료, 확정 중 DB 단절, **교정 중 동시 reserve — AC-C47**, 만료 스윕 순서를 뒤집은 변형이 (I2) 위반을 검출하는지로 가드 검증). 사전 시험 수치는 결과만 남았으므로 3-B 에서 시험 코드로 다시 써서 커밋한다.
 
 ## 실서비스라면
 Redis 복제·센티넬과 재고 샤딩, 대기열(번호표), 결제수단별 TTL 분포 기반 설정.

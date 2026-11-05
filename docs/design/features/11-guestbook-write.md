@@ -159,7 +159,7 @@ classDiagram
 | `OwnerWriteUseCase` | `authorize` = **로그인 사용자**여야 함(익명 → 403). 본인 소유 확인은 4단계 로드 후 도메인 정책이 한다 |
 | `AdminWriteUseCase` | `authorize` = `ctx.actor.isAdmin` (아니면 403) |
 | `locksWrites()` | `PostEntry`·`EditEntry`·`AddReaction`·`ReportEntry` 만 `true`. 삭제·취소·관리 명령은 잠금 중에도 허용(스팸 정리를 막지 않는다) |
-| `fingerprint(input)` | 멱등 키 충돌 검사용. `SHA-256( 메서드 + 경로 + 정규화된 입력 JSON )`, 키 순서 고정·공백 제거 |
+| `fingerprint(input)` | 멱등 키 충돌 검사용. 정규화 입력 `메서드 + 경로 + 정규화된 입력 JSON`(키 순서 고정·공백 제거)을 **서버 비밀 키 HMAC-SHA256** 으로 서명한 `<kid>:<hex>`. 키 없는 SHA-256 은 방명록 본문 같은 저엔트로피 입력이 덤프에서 역산되므로 쓰지 않는다(database-schema `request_key`) |
 
 ---
 
@@ -577,7 +577,7 @@ sequenceDiagram
 
 - 영속 행의 `status` 는 사실상 항상 `done` 이다(`in_progress` 는 한 트랜잭션 안에서만 존재). 컬럼은 진단용으로 두되 읽는 쪽은 `done` 만 신뢰한다.
 - 키 범위는 `(actor_key, key)` 이므로 다른 행위자가 같은 uuid 를 써도 충돌하지 않는다.
-- `request_hash` 는 `fingerprint()` 결과다. `Idempotency-Key` 가 없으면 가드가 400 으로 막는다(usecase 는 키가 있다고 가정).
+- `request_hash` 는 `fingerprint()` 결과(HMAC `<kid>:<hex>`)다. 키 회전은 현재+직전 키 2개를 두고 비교는 행의 `kid` 로 재계산한다(직전 키는 행 보관 24시간+1시간 뒤 폐기). 비밀 키는 DB·백업에 없고 `request_key` 는 백업 제외 대상이다. `Idempotency-Key` 가 없으면 가드가 400 으로 막는다(usecase 는 키가 있다고 가정).
 
 ### 6.2 속도 제한 등급 (AC-007)
 

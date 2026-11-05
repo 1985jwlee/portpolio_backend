@@ -9,7 +9,7 @@
 
 ## 결정
 1. **모듈 간은 코레오그래피, 모듈 안은 오케스트레이션**(하이브리드).
-   - commerce ↔ fulfillment: 이벤트로만 만난다 (`order.paid` → `fulfillment.accepted | rejected` → `shipment.dispatched` → `shipment.delivered`; 결제 후 취소 `order.cancel_requested`(또는 외부 사유 `order.cancelled`·`order.disputed`·`payment.refunded`) → `fulfillment.cancelled | cancel_rejected`; 반품 `order.return_requested` → `return.received` → `return.inspected`; 주소 정정 `order.address_corrected`). 이름은 [phases/00 §8.3](../design/phases/00-platform-evolution.md) 정본이다. 배송지는 이벤트에 싣지 않고 `shippingAddressRef` 로만 받아 **`AcceptOrder` 시점**에 `order.GetShippingAddress` 로 읽어 풀필먼트 자기 봉투로 다시 암호화한다.
+   - commerce ↔ fulfillment: 이벤트로만 만난다 (`order.paid` → `fulfillment.accepted | rejected` → `shipment.dispatched` → `shipment.delivered`; 결제 후 취소 `order.cancel_requested`(또는 외부 사유 `order.cancelled`·`order.disputed`·`payment.refunded{full=true}` — 부분 환불 `full=false` 는 FO 를 취소하지 않는다) → `fulfillment.cancelled | cancel_rejected`; 반품 `order.return_requested` → `return.received` → `return.inspected`; 주소 정정 `order.address_corrected`). 이름은 [phases/00 §8.3](../design/phases/00-platform-evolution.md) 정본이다. 배송지는 이벤트에 싣지 않고 `shippingAddressRef` 로만 받아 **`AcceptOrder` 시점**에 `order.GetShippingAddress` 로 읽어 풀필먼트 자기 봉투로 다시 암호화한다.
    - **`AcceptOrder` 는 단일 트랜잭션**이다: 접수 + 할당(`AllocateInTx`) + 상태 확정 + outbox 를 함께 커밋하고, `fulfillment.accepted` 는 **할당 성공 후에만** 발행한다(실패하면 같은 tx 에서 `rejected`). 그래서 "수락 후 거절"과 "접수만 되고 할당 전 크래시"가 없다. 수락 뒤의 중단은 `fulfillment.cancelled`(상거래 주문은 `fulfilling → cancelled` 로 받는다). 이벤트의 outbox 집합체 키는 `orderId` 로 통일해 주문 단위 순서를 보장한다.
    - fulfillment 안: `FulfillmentOrder` 애그리거트가 **프로세스 매니저**. 상태와 다음 단계를 한 행(`version` 조건 갱신)이 갖고, 작업(PickTask, Package, Shipment)과 이벤트가 구동한다.
 2. **모든 단계는 멱등이고 재시작에 안전**하다 (inbox PK, 유일 키, 상태 조건부 UPDATE).

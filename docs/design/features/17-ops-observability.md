@@ -1124,7 +1124,7 @@ server {
 | 쓰기·읽기·`pf_auth`·`pf_wsup` 키 | `$binary_remote_addr` (위 설정 그대로) | **상수 키**(`map "" $pf_all { default all; }`) 전역 상한. 한 사용자가 아니라 사이트 전체의 폭주 방어이며 값은 §9.1 보다 크게 잡는다(S6-4 부하 시험으로 확정) |
 | `/ws/` 주소별 `limit_conn pf_ws` | 사용 | **제거**. WS 제한은 gateway 의 세션 기준(탭 상한 `4409`·메시지 `4429`·전체 `WS_MAX_CONNECTIONS`, 04)으로 이동 |
 | 정적 자원(`/_next/static/`, 이미지·폰트) | `limit_req` 제외(캐시 가능 자원이라 별도 location) | 같음 — 전역 한도가 정적 자원 한 페이지 로드에 소진되는 것을 막는다 |
-| 세션 발급(`/api/me`) | `pf_me` 주소별 | **전역 토큰 버킷** 한 개(예: 10r/s, burst 30, 제안값) + 앱의 세션 기준 제한 |
+| 세션 발급(`/api/me`) | `pf_me` 주소별 | **전역 토큰 버킷** 한 개(예: 10r/s, burst 30, 제안값) + 앱의 세션 기준 제한. 버킷이 상한에 근접하면 **작업증명(PoW) 챌린지**를 요구해 익명 세션 무한 생성을 억제한다(ADR-003 B16). 버킷 고갈 시 기존 세션은 영향이 없고 새 익명 세션만 `429` |
 | 주소 헤더 | Funnel 이 넣는 헤더만 신뢰. `X-Forwarded-For` 처럼 **덧붙임 방식**이면 `real_ip_recursive off` 로 **마지막 홉(Funnel 이 붙인 값)만** 신뢰하고 클라이언트가 앞에 넣은 값은 무시 | 사용 안 함, `X-Real-IP` 는 로컬 주소 |
 
 G7 ② 시험 보강: 클라이언트가 위조 `X-Forwarded-For` 를 앞에 붙이고 Funnel 이 덧붙이는 경우 마지막 홉만 `$remote_addr` 로 채택되는지 확인한다. G14 시험에 '한 주소에서 50명 동시 접속(동시 50 = AC-013)이 한도에 걸리지 않는지'를 추가한다(tech-stack 관문부).
@@ -1381,6 +1381,7 @@ flowchart TD
 | 읽기 모델 `*_read` | 이벤트로 재구성(`rebuild`, GB-26) |
 | `events` 의 이력 테이블(outbox·trace·flow 등, 7일 휘발) — **`audit_log` 는 제외하지 않는다** | 휘발 |
 | `realtime` 스키마(inbox·change_log) | 휘발 |
+| **`request_key`**(멱등 키 표) — 구조만 덤프 | 24시간 휘발. `request_hash` 가 요청 지문이라 저엔트로피 입력(마스킹 원문·짧은 상담 문장)의 역산 표적이 되고, 복원해도 쓸모가 없다(HMAC 비밀 키는 덤프에 없다 — database-schema §4-2 `request_key`). 센티널 시험에 '덤프 안에 센티널 문자열의 SHA-256 이 존재하지 않음'을 둔다 |
 
 - 제외 목록의 정본은 `infra/backup/tables.json` 이다. 모든 Drizzle 스키마 테이블이 `include` 또는 `exclude(이유)` 로 **분류돼 있지 않으면 CI 가 실패한다**(`config check` 잡의 검사, 09 §2). 새 테이블을 추가한 PR 은 분류를 함께 적어야 하므로 백업 누락이 조용히 생기지 않는다.
 - `backup.sh` 는 이 파일에서 `pg_dump` 인자(`--exclude-table-data=…`, `--exclude-schema=realtime`)를 만든다.
@@ -1724,6 +1725,7 @@ flowchart TD
 6. **해제**: 같은 경로로 `locked:false`. 쓰기 정상화 확인.
 7. **기록**: 시각·사유·조치를 운영 메모에 남긴다(변경자·시각은 `write_lock` 행에 자동).
 8. **api 자체가 응답하지 않을 때(비상)**: `infra/nginx/conf.d/90-write-block.conf` 에 `if ($request_method ~ ^(POST|PUT|PATCH|DELETE)$) { return 503; }`(제안)를 채우고 `nginx -s reload`. 이 파일은 평소 비어 있고 저장소에는 빈 상태로 있다.
+9. **클럭 정지(`clock_freeze`) 런북**: 계획된 재배포는 배포 스크립트가 정비 구간을 기록하고, 계획 외 api 중단(단절 구간 감지)은 worker 가 같은 보정을 한다 — 종료 후 진행 중 대국의 `deadline_at`·`turn_started_at` 을 정지 구간만큼 이동(대국별 `game.clock_adjusted`)한다. 장기 장애로 보정이 부적절하면 **진행 중 대국을 abandoned 로 일괄 종료**한다(P0 §10.1).
 
 ### 15.2 시퀀스
 

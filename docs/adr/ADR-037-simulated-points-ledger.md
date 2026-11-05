@@ -15,7 +15,7 @@
 3. 분개는 **멱등 키**(`reward:{rewardId}:confirm`)로 한 번만 기장한다. 같은 이벤트 재전달·중복 분석에도 잔액이 한 번만 움직인다.
 4. 잔액은 `ledger.account_balance`(같은 트랜잭션의 조건부 갱신, ADR-040)이며 표시용 사본 `ledger_read.balance_view` 는 이벤트로 갱신한다. 정합성 점검 잡이 `posting` 합계와 대조하고 불일치는 지표·경보.
 5. 모든 화면과 API 에 **"모의 포인트, 실제 가치 없음"** 표기를 의무로 한다(ADR-015).
-6. 보상 자격(어뷰징 방지)은 서버 규칙이고 **`ledger` 의 `EligibilityPolicy` 가 소유**한다(`game`(L3)은 `ledger`(L4)를 호출할 수 없으므로): 로그인 사용자 간 레이팅 대국, 최소 수 수, 일일 한도, 같은 상대 반복 한도. 입력은 `game.finished` 페이로드(레이팅 여부, 수 수, 종료 사유, 참가자 `userId`·로그인 여부)와 ledger 자신의 `reward` 집계다.
+6. 보상 자격(어뷰징 방지)은 서버 규칙이고 **`ledger` 의 `EligibilityPolicy` 가 소유**한다(`game`(L3)은 `ledger`(L4)를 호출할 수 없으므로): 로그인 사용자 간 레이팅 대국, 색당 최소 수, 일일 한도, 같은 상대 반복 한도, 승자만 보상(패자 0)·scoring 시한 경과를 거친 대국 제외. 입력은 `game.finished` 페이로드(레이팅 여부, 색별 수 수, 종료 사유, scoring 시한 경과 횟수, 참가자 `userId`·로그인 여부)와 ledger 자신의 `reward` 집계다.
 
 ## 설계 상세
 보상 상태 머신·시퀀스·점검 쿼리는 [phases/01-baduk.md](../design/phases/01-baduk.md) §10~11, 원장 테이블은 [phases/02-commerce.md](../design/phases/02-commerce.md) §9(ADR-040)가 정본이다.

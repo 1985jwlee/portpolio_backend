@@ -12,7 +12,7 @@
 1. **세 가지 수량을 분리한다.** ① 물리 재고(원장에서 파생) ② 약정(주문 할당 + 채널 약정) ③ 판매 가능 재고(상거래 소유, 약정을 넘지 못함). `available_total` 은 **ISSUE 로 건물을 떠나기 전까지의 판매 대상 위치**(`SELLABLE_KINDS = STORAGE·PICK_FACE·STAGING`)의 AVAILABLE 합이다 — `PICK`·`PUTBACK`·`MOVE` 같은 집합 안 이동은 합계를 바꾸지 않는다.
 2. **물리 재고의 정본은 추가 전용 이동 원장**(`inventory.ledger_entry`)이다. 잔고(`stock_balance`)와 포지션(`sku_position`)은 같은 트랜잭션에서 갱신하는 **물질화된 파생값**이고 대사로 검증한다. 모든 이동은 `from → to` 쌍이고 창고 밖은 가상 위치 `EXTERNAL` 이다.
 3. **할당은 2단계**다. (a) SKU 수준 약정: `sku_position` 조건부 UPDATE 가 **불변식 `allocated + earmarked ≤ available` 의 단일 심판**. (b) 로케이션 수준 계획: 출고 지시 시점에 로트·위치를 고른다. (b) 가 실패해도 (a) 는 유지되고 쇼트 피킹 예외로 푼다.
-4. **채널 약정(earmark)**: 타임딜은 게시(`deal.published`) 시 `inventory` 에 물리 재고를 먼저 묶는다(`EarmarkStock`, 조건부 UPDATE; 실패 시 `inventory.earmark_rejected`). **판매 가능 총량은 약정을 넘지 못한다 — 이 상한 규칙은 상거래(`deal`)가 받는다**(`deal_read.sku_capacity` 1차 검증 + 약정이 최종 심판, 동기 호출 없음). 주문 결제 시 약정이 할당으로 소비된다. **약정 해제 규칙**: 딜 `closed` 는 약정을 바꾸지 않고, 딜 `settled`(`deal.settled {confirmedQty}`)에서 **`totalQty − confirmedQty` 만 해제**한다 — 결제는 확정됐지만 `order.paid` 가 아직 소비되지 않은 주문이 있어도 약정이 이미 사라진 일이 없게 하려는 것이다. 취소로 풀린 재고의 판매 가능 복원은 `deal.restocked` 로 약정 `+qty` 와 쌍이다. 이벤트 이름은 [phases/00 §8.3](../design/phases/00-platform-evolution.md) 정본(`deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked` 수신).
+4. **채널 약정(earmark)**: 타임딜은 게시(`deal.published`) 시 `inventory` 에 물리 재고를 먼저 묶는다(`EarmarkStock`, 조건부 UPDATE; 실패 시 `inventory.earmark_rejected`). **판매 가능 총량은 약정을 넘지 못한다 — 이 상한 규칙은 상거래(`deal`)가 받는다**(`deal_read.sku_capacity` 1차 검증 + 약정이 최종 심판, 동기 호출 없음). 주문 결제 시 약정이 할당으로 소비되고 **할당 행에 출처(`origin_ref`: `earmark:deal:<id>` | `free`)를 기록**한다. **약정 해제 규칙**: 딜 `closed` 는 약정을 바꾸지 않고, 딜 `settled`(`deal.settled {confirmedQty}`)에서 **소비 대기분(`confirmedQty` − 채널 누계 `consumed−returned`)을 뺀 나머지만 해제**한다(정상이면 `totalQty − confirmedQty` 와 같다) — 결제는 확정됐지만 `order.paid` 가 아직 소비되지 않은 주문이 있어도 약정이 이미 사라진 일이 없게 하려는 것이다. 취소로 풀린 할당의 약정 복귀는 이벤트(`deal.restocked`)가 아니라 **`ReleaseAllocationInTx` 의 같은 트랜잭션**에서 출처를 보고 한다(미정산 약정이면 `earmarked +q`, 정산 후면 자유 재고로) — 해제와 복귀 사이에 `deal.settled` 가 끼면 약정이 새거나 이중 계상되기 때문이다. `deal.restocked`(사유 `cancel`·`demo_cancel`)는 상거래의 `deal.stock`·Redis 복원 신호이고 약정을 바꾸지 않으며, demo 주문은 약정을 소비한 적이 없다. 이벤트 이름은 [phases/00 §8.3](../design/phases/00-platform-evolution.md) 정본(`deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked` 수신).
 5. **트랜잭션 경계**: 1단계 할당은 `fulfillment.AcceptOrder`(조율자)가 **한 트랜잭션**에서 접수·`inventory.AllocateInTx`(줄마다 `sku_id` 오름차순)·상태 확정·outbox(`fulfillment.accepted | rejected`)를 함께 커밋하는 B12 허용 쌍 #10 이다. 같은 쌍의 다른 호출은 `ReleaseAllocationInTx`·`IssueInTx`·`RecordMovementInTx`(PICK·PUTBACK·RETURN_RECEIPT·RESTOCK·DISPOSE)이고 목록은 phases/03 §8.4 이다. `inventory` 는 상위 모듈을 호출하지 않는다.
 6. **대사 6종**(R1~R6)을 정기 실행한다. 파생값(R1~R3)은 자동 재계산, 두 정본이 다른 경우(R4)·보존 법칙 위반(R5)·실사 차이(R6)는 사람 개입 큐로 보낸다.
 
@@ -60,7 +60,7 @@ UPDATE inventory.sku_position
 |---|---|
 | 핫 SKU 포지션 행 경합 | 처리량 측정(W2), 필요 시 슬롯 분할(미결) |
 | 다품목 주문 간 포지션 행 교착 | `sku_id` 오름차순 갱신 규칙(CI 코드 리뷰 체크, AC-WM-14 동시성 시험) |
-| 딜 마감과 늦은 `order.paid` 사이에 약정이 사라짐 | 약정 해제는 `settled` 에서 `totalQty − confirmedQty` 만(AC-WM-15) |
+| 딜 마감과 늦은 `order.paid` 사이에 약정이 사라짐 | 약정 해제는 `settled` 에서 소비 대기분을 뺀 만큼만(AC-WM-15), 취소 복귀는 해제 tx 와 같은 tx(AC-WM-19) |
 | 원장 증가 | 파티셔닝 후보(미결), 월별 요약 테이블 |
 | 두 정본 불일치(R4) | 약정 이벤트 + 대사 + 경보, 사람 개입 큐 |
 | 파생값 드리프트 | 같은 tx 갱신 + R1~R3 자동 재계산 + `pf_wms_invariant_violations_total` |
