@@ -34,8 +34,8 @@
 | 2026-11-04 | [ADR-026](ADR-026-data-protection.md) | 데이터 보호: 5등급 분류, 전송·해시·서명·백업(age)·시크릿, 필드 암호화는 report.note 만(AES-256-GCM, 키 ID·회전) | Accepted |
 | 2026-11-04 | [ADR-025](ADR-025-query-layer.md) | 쿼리 계층: Drizzle 빌더 기본, 같은 tx 의 sql 템플릿(T1), 트랜잭션 밖 별도 연결(T2), raw 레지스트리 | Accepted |
 | 2026-11-04 | [ADR-024](ADR-024-redis-seam.md) | Redis: M1 제외, 포트 뒤 도입 이음새, 도입 기준·장애 거동 | Accepted |
-| 2026-11-04 | [ADR-023](ADR-023-operational-policies.md) | 운영 정책 선제 확정: 임대·백오프, 길이 상한, IP 미저장, 보관, 그림자 재구성, 2단계 폴백, 알림, 백업 | Accepted |
-| 2026-11-04 | [ADR-022](ADR-022-tech-stack-definition.md) | 전체 기술 스택 확정, 추천에서 바뀐 곳(web=Bun, nginx), 구현 초기 관문 G1~G10 | Accepted |
+| 2026-11-04 | [ADR-023](ADR-023-operational-policies.md) | 운영 정책 선제 확정: 임대·백오프, 길이 상한, IP 미저장, 보관, 그림자 재구성, 2단계 폴백(2026-11-05 수동 전환 대체 페이지로 갱신), 알림, 백업 | Accepted |
+| 2026-11-04 | [ADR-022](ADR-022-tech-stack-definition.md) | 전체 기술 스택 확정, 추천에서 바뀐 곳(web=Bun, nginx), 구현 초기 관문 G1~G10(G1 은 Funnel 교체로 폐기, 대체 G14) | Accepted |
 | 2026-11-03 | [ADR-021](ADR-021-concurrency-control.md) | 동시성: 처리 전 `processing` 선점(CAS) + 임대 + 토큰 + 낙관적 버전 | Accepted |
 | 2026-11-03 | [ADR-020](ADR-020-inbox.md) | Inbox: 수신 메시지를 먼저 저장하고 선점해서 한 번만 처리 | Accepted |
 | 2026-11-03 | [ADR-019](ADR-019-layered-architecture.md) | 모듈 내부 구조: domain · service · usecase (usecase → service → domain) | Accepted |
@@ -54,7 +54,7 @@
 | 2026-11-03 | [ADR-006](ADR-006-event-delivery-layer.md) | 이벤트 전달 계층: Postgres 폴링에서 Redis Streams 또는 Kafka 로 | **Proposed** |
 | 2026-11-03 | [ADR-005](ADR-005-outbox-idempotent-consumer.md) | Outbox: 쓰기와 이벤트는 한 트랜잭션, 수신 쪽은 inbox(개정) | Accepted |
 | 2026-11-03 | [ADR-004](ADR-004-tech-stack.md) | Bun+Elysia / Next.js+R3F / WebSocket 단일 / 공유 타입 | Accepted |
-| 2026-11-03 | [ADR-003](ADR-003-free-hosting.md) | 완전 무료 호스팅, 집 PC 와 Oracle 양쪽 지원, 정적 폴백 | Accepted |
+| 2026-11-03 | [ADR-003](ADR-003-free-hosting.md) | 완전 무료 호스팅, 집 PC 단일 호스트(Oracle 미추진), Tailscale Funnel 노출(도메인 미구입, 2026-11-05 갱신), 정적 폴백·수동 전환 대체 페이지 | Accepted |
 | 2026-11-03 | [ADR-002](ADR-002-runtime-compose-live-k3d-verified.md) | 라이브는 Compose, K8s 는 로컬 k3d 검증본, Gateway API | Accepted |
 | 2026-11-03 | [ADR-001](ADR-001-modular-monolith.md) | 모듈러 모놀리스 + 다중 엔트리포인트 | Accepted |
 

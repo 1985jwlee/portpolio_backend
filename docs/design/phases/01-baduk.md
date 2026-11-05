@@ -3,7 +3,7 @@
 로드맵 Phase 1(바둑 실시간 코어)과 Phase 2(KataGo 워커 + 모의 포인트 원장)의 아키텍처 설계다. 상태는 **제안(Proposed)** 이며 근거 ADR 은 [ADR-034](../../adr/ADR-034-baduk-rules-engine.md) · [035](../../adr/ADR-035-game-state-and-realtime-protocol.md) · [036](../../adr/ADR-036-katago-analysis-worker.md) · [037](../../adr/ADR-037-simulated-points-ledger.md) 이다(모두 사용자 확정 대기).
 M1 의 규약(모듈러 모놀리스, CQRS, domain·service·usecase, outbox·inbox, CAS·임대·낙관적 버전, 모든 쓰기는 트랜잭션, 데이터 보호 등급, 감사, `pf_` 지표)을 그대로 따른다. 기존 문서와 어긋나는 점은 §17 에 모았다.
 
-> **구현 순서: 마지막 (P0 D24).** 이 문서의 Phase 1·2 는 로드맵 번호일 뿐 구현은 **M1 → 3 → 4 → 5 → 6a~6d 다음**에 한다(Phase 1 이 6번째, Phase 2 가 7번째, 이어서 6e 마작). 따라서 이 문서는 아래 기반이 **이미 존재한다는 전제**로 쓰였다 — ① `chat` 코어와 `/ws/room`·룸 포트(`RoomAccessPolicy` 등, 6a) ② `ledger`·POINT 계정·데모 포인트 지급(Phase 3) ③ B12 `InTx` 틀과 `tx-pairs.json`(Phase 3) ④ Redis(Phase 3, 이 문서는 쓰지 않음) ⑤ `agent`/`RolePolicy` 일반화(6a). 이 문서가 **추가하는 것**은 `game` 모듈, 대국 룸 종류(`game:*`, 대국 채팅 룸), `GameRoomPolicy`·`RoomEventSource`, 바둑 보상(`EligibilityPolicy`·reward)과 `analysis` 이다. 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
+> **구현 순서: 마지막 (P0 D24).** 이 문서의 Phase 1·2 는 로드맵 번호일 뿐 구현은 **M1 → 3 → 4 → 5 → 6a~6d 다음**에 한다(바둑 계열(Phase 1·2)이 마지막이고 Phase 1 이 6번째, Phase 2 가 7번째이며, 마작(6e)은 그 뒤다). 따라서 이 문서는 아래 기반이 **이미 존재한다는 전제**로 쓰였다 — ① `chat` 코어와 `/ws/room`·룸 포트(`RoomAccessPolicy` 등, 6a — 6a 는 CS 룸(본문 없는 알림 push + REST)만 실행하므로 **평문 본문 push·관전자 비공개·`ChatRoomPolicy` 는 Phase 1 에서 처음 실행**한다) ② `ledger`·POINT 계정·데모 포인트 지급(Phase 3) ③ B12 `InTx` 틀과 `tx-pairs.json`(Phase 3) ④ Redis(Phase 3, 이 문서는 쓰지 않음) ⑤ `agent`/`RolePolicy` 일반화(6a). 이 문서가 **추가하는 것**은 `game` 모듈, 대국 룸 종류(`game:*`, 대국 채팅 룸), `GameRoomPolicy`·`RoomEventSource`, 바둑 보상(`EligibilityPolicy`·reward)과 `analysis` 이다. 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
 
 > **공통 결정(P0 정본 반영, 2026-11-04 조정)**: 모듈러 모놀리스 유지 · KataGo 워커는 첫 서비스 분리 · **이벤트 전달은 Postgres outbox + inbox 이고 Phase 2 의 분석 큐는 Postgres inbox 선점(DB 큐)이다 — Redis Streams 판정은 Phase 3**(P0 D4·D6·D23) · 실시간은 `/ws/public`·`/ws/private` 에 더해 **room 범위 연결 `/ws/room`**(인증 필수, 한 연결에 여러 room) · **WebSocket 은 push 전용, 대국 명령은 REST**(P0 D8·채팅 ADR-045) · **모듈 간 한 트랜잭션은 `*InTx` 허용 쌍만**(P0 §2.4, 경계 규칙 B12) · **원장은 `ledger` 모듈 하나**(P0 §2.5, ADR-040/037) · 이벤트 이름은 P0 §8.3 정본 표를 따른다.
 > 외부 조사 근거는 2026-11-04 에 확인한 공식 저장소·npm 메타데이터이며, 확인하지 못한 값은 **미확인** 으로 표기했다. ADR-015 에 따라 이 저장소 밖의 다른 프로젝트 코드는 참고하지 않았다.
@@ -14,7 +14,7 @@ M1 의 규약(모듈러 모놀리스, CQRS, domain·service·usecase, outbox·in
 
 | 단계 | 로드맵 내용 | 완료 기준(DoD) | 이 문서 절 |
 |---|---|---|---|
-| Phase 1-A | 서버·프로토콜: 룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF | 서버가 규칙·시계·승패를 권위로 판정, 두 클라이언트가 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화 | §3~8, §11~13 |
+| Phase 1-A | 서버·프로토콜: 룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF | 서버가 규칙·시계·승패를 권위로 판정, 두 클라이언트가 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **롤링 배포 중 룸 재구독 시험**(`room.join { resume }` 로 누락 없이 복구), **평문 본문 push·관전자 비공개 대국 채팅의 첫 실행**(`ChatRoomPolicy`) | §3~8, §11~13 |
 | Phase 1-B | three.js 3D 클라이언트 | **두 브라우저에서 3D 대국 완료**, 새로고침·끊김 후 복구, 관전자 동기화 | §7 |
 | Phase 2 | KataGo 워커 + 바둑 보상(모의 포인트 원장은 **Phase 3 에서 도입**, 여기서는 보상 `PENDING → CONFIRMED/FLAGGED` 추가) | **대국 종료 → 비동기 분석 → 보상 확정 end-to-end**, 실패·재시도 확인 | §9~10 |
 
@@ -72,7 +72,7 @@ flowchart TB
 ```
 
 - 대국 명령은 **`api` 의 REST 라우트**가 받아 명령 usecase 를 호출한다(§5.2). `ws-gateway` 는 M1 과 같이 **읽기·push 전용**이다 — DB 쓰기가 없고, `game` 모듈의 읽기 포트(`RoomEventSource`·`RoomSnapshotProvider`)로 `game_event` 와 `game` 스냅샷을 읽을 뿐이다(§5.10).
-- KataGo 워커는 `analysis_job` 을 **Postgres 에서 조건부 UPDATE 로 선점**하는 소비자일 뿐(Phase 2 에 Redis 없음, P0 D23) 대국 서버와 같은 DB 에 쓴다. 쓰는 범위는 **`analysis` 스키마(작업·결과·의심도 보고)와 B12 쌍 #6 을 통한 `ledger` 보상 전이**(`ConfirmRewardInTx`·`FlagRewardInTx`, 같은 트랜잭션) 둘뿐이고, 그 외 스키마에는 DB 역할 권한이 없다(분석 워커 전용 DB 역할, 최소 권한). 이미지는 P0 ADR-033 대로 서버 래퍼 이미지와 분리된 `pf-analysis` 다.
+- KataGo 워커는 `analysis_job` 을 **Postgres 에서 조건부 UPDATE 로 선점**하는 소비자일 뿐(Phase 2 에 Redis 없음, P0 D23) 대국 서버와 같은 DB 에 쓴다. 쓰는 범위는 **`analysis` 스키마(작업·결과·의심도 보고), B12 쌍 #6 을 통한 `ledger` 보상 전이**(`ConfirmRewardInTx`·`FlagRewardInTx`, 같은 트랜잭션), **`events.outbox_event`(+`inbox`)**, **`audit`** 뿐이고, 그 외 스키마에는 DB 역할 권한이 없다(분석 워커 전용 DB 역할, 최소 권한). 이미지는 P0 ADR-033 대로 서버 래퍼 이미지와 분리된 `pf-analysis` 다.
 
 ### 2.3 모듈 지도 확장
 
@@ -80,7 +80,7 @@ flowchart TB
 |---|---|---|---|---|
 | `game` | `game` | `game_read` | `game-projector` | `identity`(세션·사용자), `events`(outbox·audit 포트), `realtime`(읽기 `GetRoomPresence` — **표시 전용**, L2), `baduk-rules`(패키지) — **`chat`·`ledger` 는 임포트하지 않는다**(방 개설은 `chat` 이 `game.started` 를 구독, 보상은 `ledger` 가 `game.finished` 를 구독). 이탈 판정 신호는 `game` 이 소유한다(§8, 플레이어 heartbeat) |
 | `ledger` (**Phase 3 에서 이미 도입 — 여기서는 바둑 보상 추가분**) | `ledger` | `ledger_read` | `ledger-projector`, `reward-settler`(`game.finished` 구독 → **`EligibilityPolicy` 판정**(ledger 소유) → 통과 시 `reward PENDING` 생성 → `reward.pending_created` 발행) | `identity`, `events` (공개 `InTx`: P0 §2.5) |
-| `analysis` | `analysis` | — | `analysis-job-creator`(`reward.pending_created` 구독 → `analysis_job` 멱등 생성), `analysis-runner`(KataGo 워커, 작업 선점) | `game`(공개 조회 포트: 기보), `ledger`(`ConfirmRewardInTx`·`FlagRewardInTx`, B12 쌍 #6), `events` |
+| `analysis` | `analysis` | — | `analysis-job-creator`(`reward.pending_created` 구독 → `analysis_job` 멱등 생성), `analysis-runner`(KataGo 워커, 작업 선점) | `game`(공개 조회 포트: 기보), `ledger`(`ConfirmRewardInTx`·`FlagRewardInTx`, B12 쌍 #6; 조율자는 `CompleteAnalysis`, `AnalysisRunner` 는 내부 실행기), `events` |
 | 패키지 `baduk-rules` | — | — | — | 아무것도 임포트하지 않음(순수, kernel 만) |
 
 - `game` 은 `ledger`·`chat`·`analysis` 를 직접 호출하지 않는다(상위 층이거나 이벤트 관계). 대국 종료는 **`game.finished` 한 이벤트**로 알리고, **소비 순서는 의존 체인**이다: ① `ledger` 가 `EligibilityPolicy` 로 자격을 판정해 통과하면 보상 `PENDING` 을 만들고(`UNIQUE (game_id, user_id)`) `reward.pending_created {gameId, rewards:[{rewardId,userId,color}]}` 를 발행한다 → ② `analysis` 가 **이 이벤트**를 소비해 `analysis_job` 을 만든다(`UNIQUE (game_id)`) → ③ 분석이 끝나면 `ConfirmRewardInTx`/`FlagRewardInTx` 가 `rewardId` 로 호출된다. `chat` 은 `game.finished` 로 방 공개 전환을 한다. 자격 미달 대국(비레이팅 등)은 보상이 없으므로 **분석도 하지 않는다**. reward 행이 존재한 뒤에만 분석 작업이 생기므로 "분석이 보상보다 먼저 끝나는" 순서 의존이 구조적으로 없다. 별도 `game.review.requested` 는 폐기했다(ADR-009 개정).
@@ -130,7 +130,7 @@ flowchart TB
 | `@sabaki/sgf` 3.5.0 | MIT | 2026-07 | SGF 파싱·직렬화 | 파싱 성공(문자열 라운드트립은 정규화 차이로 불일치 → 의미 비교) | **채택**(SGF) |
 | `@sabaki/deadstones` 2.2.0 | MIT | 2026-07 | 몬테카를로 사석 추정(WASM) | 임포트 성공, 동작 미시험 | 선택(사석 제안) |
 
-시험 스크립트는 scratchpad 의 `p1-rules/` 에 있다. 이 시험은 5x5 한 가지 패 시나리오와 자충 한 가지뿐이라 **정확성의 근거가 아니라 "Bun 에서 돌아간다"는 근거** 일 뿐이다.
+재현 스크립트는 별도 보관하지 않고 결과만 기록한다. 이 시험은 5x5 한 가지 패 시나리오와 자충 한 가지뿐이라 **정확성의 근거가 아니라 "Bun 에서 돌아간다"는 근거** 일 뿐이다.
 
 ### 3.2 결정(제안): 직접 구현 + 라이브러리를 차분 시험 기준으로
 
@@ -238,7 +238,7 @@ classDiagram
 |---|---|---|
 | `Room`(도전/방) | 집합체 | 대국을 만들기 전 로비 항목: 판 크기, 규칙, 시간 설정, 레이팅 여부, 공개/초대, 개설자 |
 | `Game` | 집합체 루트 | 한 판. `version`, `eventSeq`, 상태, 현재 국면, 시계, 참가자 2명, 결과 |
-| `GameEvent` | 도메인 이벤트(추가 전용 로그 행) | `seq` 순서: `started`, `move_played`, `passed`, `resigned`, `timed_out`, `scoring_started`, `dead_marked`, `score_confirmed`, `play_resumed`, `finished`, `abandoned` |
+| `GameEvent` | 도메인 이벤트(추가 전용 로그 행) | `seq` 순서: `started`, `move_played`, `passed`, `resigned`, `timed_out`, `scoring_started`, `dead_marked`, `score_confirmed`, `resume_requested`, `resume_accepted`, `play_resumed`, `scoring_timed_out`, `finished`, `abandoned` (`scoring_timed_out` 은 scoring 시한 경과 종국의 사유 행이며 시계 패배의 `timed_out` 과 구분한다) |
 | `Participant` | 값 | 색, `user_id` 또는 `session_id`, 접속 상태, 남은 시간 |
 | `TimeControl` | 값 객체 | `byoyomi`(주 시간 + 초읽기 횟수 × 초) 또는 `fischer`(주 시간 + 증분) |
 | `Move` | 값 | `(color, point | pass)`, `moveId`(멱등) |
@@ -267,10 +267,11 @@ stateDiagram-v2
 - 전이는 모두 **`version` 조건 갱신**이다. 같은 상태에서 동시에 일어나는 두 전이(착수와 시간 초과, 기권과 상대 착수)는 먼저 커밋된 쪽만 성공한다. **`game.version` 은 마지막 `game_event.seq` 와 같다**(S11). 종국 전이는 사유 행(`resigned`/`timed_out`/`score_confirmed`…)과 `finished` 행을 **같은 트랜잭션**에 쓰므로 한 번의 종국 전이로 `seq`·`version` 이 **+2** 된다(`FinalizeGame` 은 별도 tx 가 아니라 같은 tx 안의 단계다). 모든 명령은 `expectedVersion`(= 클라이언트가 본 마지막 `seq`)을 싣고, 불일치는 `version_conflict`, 이미 끝난 대국은 `game_over` 로 응답한다(§5.2).
 - `finished` 와 `abandoned` 는 종결 상태다. 결과는 **불변**이다(ADR-009). 이후 분석은 보상 상태만 바꾼다.
 - **계가와 재개 규칙(S9, ADR-035)**
-  - `scoring` 에서는 양측이 `SubmitDeadStones` 로 사석을 표시하고 일치하면 `ConfirmScore` 로 종국한다. 표시가 **2회 연속 불일치**하면 자동으로 재개(`ResumePlay`)된다.
+  - `scoring` 에서는 양측이 `SubmitDeadStones` 로 사석을 표시하고 일치하면 `ConfirmScore` 로 종국한다. 표시가 **연속 2회 불일치**하면 자동으로 재개(`ResumePlay`)된다(재개 상한을 쓰는 재개로 센다). 재개가 일어나면 **불일치 카운터는 0으로 초기화**된다. 재개 상한(2회)을 소진한 뒤 불일치가 연속 2회 쌓여도 **자동 재개는 하지 않고** 아래 scoring 시한(10분) 경과 종국으로 진행한다.
   - 어느 쪽이든 `ResumePlay` 를 요청할 수 있으나 **상대의 수락**(`resume-accept`)이 있어야 재개된다(일방 재개 불가). 대국당 재개는 **최대 2회**다.
+  - `resume-requests`(`resume_requested`)·`resume-accept`(`resume_accepted` 뒤 `play_resumed`)·`dead-marks`(`dead_marked`)는 각각 `game_event` 행을 쓰므로 **`version`/`seq` 를 소비**한다(수락 재개는 `resume_accepted`+`play_resumed` 로 seq +2). 시한 경과 종국은 `scoring_timed_out`+`finished` 로 seq +2 이다(S11).
   - 재개 후 선수는 **마지막으로 패스한 쪽의 상대**다. 착수 시계는 `scoring` 중 정지하고 재개 시 이어서 흐른다.
-  - `scoring` 시한(제안 10분)이 지나면 현재 국면에서 **사석 제거 없이 모든 돌을 생존으로 보는 영역 계가(Tromp-Taylor 방식, 엔진 기본 판정)** 를 적용해 종결한다. 사석을 방치하면 불리해지므로 합의 유도가 되고, 서버는 항상 결정적 결과를 낸다.
+  - `scoring` 시한(제안 10분)이 지나면 현재 국면에서 **사석 제거 없이 모든 돌을 생존으로 보는 영역 계가(Tromp-Taylor 방식, 엔진 기본 판정)** 를 적용해 종결한다(`scoring_timed_out` 사유). 사석을 방치하면 불리해지므로 합의 유도가 되고, 서버는 항상 결정적 결과를 낸다.
 
 ### 4.3 시간 제어
 
@@ -514,7 +515,7 @@ flowchart TD
     N["WS 불가 · 느림"] -.->|"폴백"| REST["GET /api/games/ID 와 /events?after="]
 ```
 
-- 스냅샷은 `game` 행(현재 국면 직렬화 + 시계 + `event_seq`)에서 만든다 — `GameSnapshotProvider`(`RoomSnapshotProvider` 구현)가 `game` 모듈의 조회 usecase 로 읽는다. 읽기 모델이 아니라 **쓰기 모델을 읽는 문서화된 예외 E1** 이다: 스냅샷의 `game` 행뿐 아니라 `RoomEventSource.after` 의 `game_event` 조회, `SyncGame` 쿼리, `GET /api/games/{id}/events` 가 모두 쓰기 스키마 `game` 의 `game_event`(= 방 로그)를 읽는다. 이유는 `head`·`seq` 가 쓰기 모델과 정확히 일치해야 하고 복제 시 fast lane 의 이점이 사라지기 때문이다(M1 의 `LoadEntryForConflict` 와 같은 종류). E1 은 P0 §2.4 에 등재하고 M1 database-schema §1 예외 목록 반영은 §17 변경 요청에 포함한다.
+- 스냅샷은 `game` 행(현재 국면 직렬화 + 시계 + `event_seq`)에서 만든다 — `GameSnapshotProvider`(`RoomSnapshotProvider` 구현)가 `game` 모듈의 조회 usecase 로 읽는다. 읽기 모델이 아니라 **쓰기 모델을 읽는 문서화된 CQRS 예외 X1** 이다: 스냅샷의 `game` 행뿐 아니라 `RoomEventSource.after` 의 `game_event` 조회, `SyncGame` 쿼리, `GET /api/games/{id}/events` 가 모두 쓰기 스키마 `game` 의 `game_event`(= 방 로그)를 읽는다. 이유는 `head`·`seq` 가 쓰기 모델과 정확히 일치해야 하고 복제 시 fast lane 의 이점이 사라지기 때문이다(M1 의 `LoadEntryForConflict` 와 같은 종류). X1 은 P0 §2.4 의 '문서화된 CQRS 예외' 표에 등재하고 M1 database-schema §1 예외 목록 반영은 §17 변경 요청에 포함한다.
 - 진행 중 대국의 이벤트는 대국이 끝날 때까지 전부 보관되므로 재생은 항상 가능하다. 종료 후 보관 정리 뒤에는 스냅샷 + SGF 로만 조회한다(§11 보관).
 - **플레이어 이탈**: 연결이 끊겨도 시계는 계속 간다. 접속 상태가 끊기면 `room.presence`(표시 전용)로 상대에게 알린다. 끊긴 플레이어는 시간 초과로 패하거나 재접속한다. **`abandoned` 의 근거는 presence 가 아니라 `game` 이 소유한 신호다(S3)**: 플레이어 클라이언트가 20초마다 `POST /api/games/{id}/heartbeat` 를 보내 `game_player.last_seen_at` 을 갱신하고(착수·패스 등 모든 명령도 같은 갱신을 함), `TimeoutSweeper` 가 **양측의 `last_seen_at` 이 모두 `grace`(제안 5분) 넘게 갱신되지 않은** 대국을 `abandoned`(무효, 보상 없음)로 닫는다. presence 는 근사값이고 gateway 가 둘 이상이 되면 합산이 안 되므로 판정에 쓰지 않는다. REST 착수·heartbeat 는 WS 연결이 없어도 가능하다.
 
@@ -527,7 +528,7 @@ flowchart TD
 | 빠른 매칭 | M1 범위: 같은 설정의 열린 도전에 자동 수락. 레이팅 기반 매칭은 후속(범위 밖) |
 | 만료 | `open` 은 15분 후 자동 `cancelled`(제안) |
 | 로비 조회 | `game_read.lobby_view`(읽기 모델). 새 도전·시작·종료는 이벤트로 갱신하고 WS `/ws/public` 로 요약 푸시(공개 정보만) |
-| 익명 대국 | 익명 세션도 비레이팅 대국 가능. **보상·레이팅은 GitHub 로그인 사용자 간 대국만**(§10) |
+| 익명 대국 | 익명 세션도 비레이팅 대국 가능. **보상·레이팅은 GitHub 로그인 사용자 간 대국만**(§10). 익명 허용의 정본은 이 절(§5.7)이다 |
 
 ### 5.8 명령 검증 순서도 (REST 가드 체인 → usecase)
 
@@ -592,12 +593,12 @@ REST 로 명령을 받으므로 **요청이 서버에 닿기까지의 지연**�
 
 | 구간 | 값 | 근거 |
 |---|---|---|
-| 터널 편도 + 프록시 (클라이언트 ↔ 서버) | 5–15ms | G1 임시 터널 WS RTT 최소/중앙/최대 8/10/15ms 의 절반(측정) |
+| 터널 편도 + 프록시 (클라이언트 ↔ 서버) | 5–15ms | 폐기된 G1(Cloudflare 임시 터널) WS RTT 최소/중앙/최대 8/10/15ms 의 절반(측정) — Funnel 에는 적용되지 않아 G14 에서 재측정 |
 | api: 가드 체인·세션·룰·tx 커밋 | 10–25ms | 추정(로컬 Postgres, 단일 행 CAS + insert 2건) |
 | 커밋 → NOTIFY 도착 | p50 0.31 / p99 8–17ms | G4 LISTEN 수신 지연(측정) |
 | gateway: `game_event` 조회 + 매핑 + 직렬화 | 3–8ms | 추정 |
 | gateway → 구독자 팬아웃 (같은 호스트) | p50 2.6–3.7 / p99 7–65ms | G2 소크 전달 지연, 1000연결·초당 20건(측정) |
-| 터널 편도 (서버 → 상대) | 5–8ms | G1 RTT 의 절반(측정) |
+| 터널 편도 (서버 → 상대) | 5–8ms | 폐기된 G1 RTT 의 절반(측정) — G14 에서 재측정 |
 
 → `T_click→peer` p95 는 대략 **40–140ms**(추정). 같은 호스트·단일 사용자 조건이라 실제 인터넷 구간(회선 지연)은 별도다.
 
@@ -608,7 +609,7 @@ REST 로 명령을 받으므로 **요청이 서버에 닿기까지의 지연**�
 2. 명령 트랜잭션이 `pg_notify('room_changed', {room, seq})` 를 한 줄 추가한다(커밋 때 전달). 게이트웨이는 **`RoomEventSource.after(room, lastSent)`** 로 `game_event` 를 읽는다.
 3. `RoomEventSource` 는 P0 ADR-032 의 `realtime` 소유 포트이고 **`game` 이 구현**한다(의존 역전, P0 D9). → P0 §6.7 이 예고했던 "명령이 `realtime.AppendRoomLog` 를 호출"하는 경로는 **미사용 예약**이다(S6): 쓰게 되면 `AppendRoomLogInTx` 로 개명하고 허용 쌍 #11 을 ADR-030 개정과 함께 추가해야 한다. 이 설계는 필요 없으므로 경계 규칙 예외가 늘지 않는다.
 4. NOTIFY 는 깨우기 신호일 뿐이다(ADR-023). 유실돼도 구독자가 있는 방은 1초 폴링으로 보완한다(M1 F14 `WakeSignal` 과 같은 규칙). 정확성은 `game_event` 의 순번이 지킨다.
-5. **되돌리는 조건**: Phase 1 부하 시험에서 표준 경로의 `T_click→peer` p95 가 150ms 이하로 측정되면 fast lane 은 단순화를 위해 제거할 수 있다(그때까지는 유지). 반대로 fast lane 으로도 p95 가 250ms 를 넘으면 원인은 터널·클라이언트 구간이다.
+5. **되돌리는 조건**: Phase 1 부하 시험에서 표준 경로의 `T_click→peer` p95 가 150ms 이하로 측정되면 fast lane 은 단순화를 위해 제거할 수 있다(그때까지는 유지). 반대로 fast lane 으로도 p95 가 250ms 를 넘으면 원인은 Funnel·클라이언트 구간이다.
 
 - 시험: k6 로 REST 착수 + 두 WS 클라이언트 push 도착 시각을 서버 `Date.now()` 로 대조(§16.3). 지표 `pf_game_push_latency_seconds`.
 
@@ -896,7 +897,7 @@ sequenceDiagram
     W->>K: 질의 {moves, rules, komi, analyzeTurns, maxVisits}
     K-->>W: 턴별 moveInfos / rootInfo (비동기)
     W->>W: SuspicionScorer 로 일치율 · 승률 손실 · 의심도 계산
-    W->>D: tx: 색별 analysis_result 저장 + 색별 보상 전이 (claim_token 일치 조건, B12 쌍 #6)
+    W->>D: tx: CompleteAnalysis — 색별 analysis_result 저장 + 색별 보상 전이 (claim_token 일치 조건, B12 쌍 #6)
     D->>L: ConfirmRewardInTx 또는 FlagRewardInTx (rewardId 키, 같은 tx)
 ```
 
@@ -929,7 +930,7 @@ flowchart TD
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 호스트 | 집 PC(AVX2 가정) 우선, Oracle ARM 은 측정 후 | 이 머신 6코어·16GB(WSL2) 기준 시험 가능 |
+| 호스트 | 집 PC(AVX2 가정), Oracle ARM 은 미추진 | 이 머신 6코어·16GB(WSL2) 기준 시험 가능 |
 | 컨테이너 한도 | CPU 2코어, 메모리 한도는 **S0 스파이크 후 확정**(P0 자원 추정 범위 0.5–3GiB, 가정 1.5GiB 이므로 2GB 는 OOM 여지가 있는 잠정값) | 신경망·캐시 크기 미확인 |
 | 동시 분석 | **1건**(ADR-033 정본; 스파이크에서 CPU 여유가 확인되면 2건으로 상향 검토) | CPU 격리 |
 | 분석량 | 250수 대국 기준 1단계는 신경망 평가 250회 수준 | 정확한 시간은 **미확인** |
@@ -1003,7 +1004,7 @@ classDiagram
 
 ## 10. 모의 포인트 원장 — 바둑 보상 (Phase 2, ADR-037; 원장 자체는 Phase 3 도입)
 
-> **구현 순서 (D24)**: `ledger` 모듈·POINT 계정·`liab:user_points:{uid}` 는 **Phase 3 에서 이미 도입**되어 있고 첫 포인트 출처는 **첫 로그인 지급(POINT 1,000 + 모의 USDC 10,000)·USDC→POINT 교환**(`exp:demo_grant:POINT`, P0 §1.4 G1·ADR-048)이다. 이 절의 바둑 보상은 구현 순서상 **마지막 출처**(`exp:points_issued`)이며 출처들은 계정으로 구분해 대사한다.
+> **구현 순서 (D24)**: `ledger` 모듈·POINT 계정·`liab:user_points:{uid}` 는 **Phase 3 에서 이미 도입**되어 있고 첫 포인트 출처는 **첫 로그인 지급(POINT 100,000)·USDC→POINT 교환**(`exp:demo_grant:POINT`, P0 §1.4 G1·ADR-048)이다. 이 절의 바둑 보상은 구현 순서상 **마지막 출처**(`exp:points_issued`)이며 출처들은 계정으로 구분해 대사한다.
 
 > **모든 화면·API·문서에 "모의 포인트, 실제 가치 없음" 을 표기한다**(ADR-015). 환전·출금·거래 기능은 없다.
 
@@ -1056,7 +1057,7 @@ sequenceDiagram
     participant R as AnalysisRunner
     participant D as Postgres
     participant A as 관리자
-    R->>D: tx(B12 #6): analysis_result 저장 (claim_token 일치)
+    R->>D: tx(B12 #6, CompleteAnalysis): analysis_result 저장 (claim_token 일치)
     alt CLEAN
         R->>D: reward PENDING→CONFIRMED (WHERE status=PENDING)
         R->>D: ledger.ConfirmRewardInTx → journal+posting 2개 기장 (POINT, 멱등 키 reward:{id}:confirm)
@@ -1301,7 +1302,7 @@ classDiagram
 | 실패 | 영향 | 복구 |
 |---|---|---|
 | `ws-gateway` 재시작/배포 | push 중단(연결 끊김). **착수는 REST 라 계속 가능** | `bye` + 지터 재접속 → `room.join { resume }`(DB 정본이라 상태 손실 없음) |
-| `api` 중단/배포 | 착수 불가(시계는 계속) | 롤링 배포(readyz 503 후 요청 완료), 중단 중에도 `TimeoutSweeper` 가 `deadline_at + lagGrace` 로 판정 |
+| `api` 중단/배포 | 착수 불가(시계는 계속) | 롤링 배포(readyz 503 후 요청 완료), 중단 중에도 `TimeoutSweeper` 가 `deadline_at + lagGrace + commitMargin` 으로 판정 |
 | `NOTIFY` 유실 | push 지연 | 구독자가 있는 방은 1초 폴링으로 `game_event` 조회(M1 `WakeSignal` 규칙) |
 | DB 장애 | 대국 정지 | 시계는 `deadline_at` 기준이라 복구 후 만료 판정이 정확, 장기 장애는 `abandoned` 정책 필요(미결) |
 | worker 중단 | 시간 초과 판정 지연, 투영 지연 | 착수 시 재검사로 공백 완화, 재시작 후 스윕이 따라잡음 |
@@ -1347,7 +1348,7 @@ classDiagram
 | AC-BD-05 | 같은 `moveId` 중복 전송은 한 수만 반영된다 |
 | AC-BD-06 | 착수와 시간 초과가 동시에 일어나도 결과가 하나로 정해진다 |
 | AC-BD-07 | 서버 재시작 후에도 시간 초과가 `deadline_at` 기준으로 판정된다 |
-| AC-BD-08 | 연속 패스 후 사석 합의, 재개(상대 수락·대국당 최대 2회), scoring 시한 초과 시 엔진 기본 판정이 동작한다 |
+| AC-BD-08 | 연속 패스 후 사석 합의, 재개(상대 수락·대국당 최대 2회), 사석 불일치 연속 2회 자동 재개와 재개 뒤 카운터 초기화, 재개 상한 소진 후 불일치는 자동 재개 없이 scoring 시한(10분) 경과 시 엔진 기본 판정(`scoring_timed_out`)으로 종국하며, `resume_requested`·`resume_accepted`·`dead_marked` 가 각각 version/seq 를 소비한다 |
 | AC-BD-09 | 룰 시험 세트와 차분 퍼징에서 불일치 0(또는 판정된 예외만) |
 | AC-BD-10 | 대국 종료 → 분석 → 보상 `CONFIRMED`/`FLAGGED` 가 end-to-end 로 동작한다(Phase 2) |
 | AC-BD-11 | 분석 워커를 강제 종료해도 임대 만료 후 다른 실행이 이어받고 결과가 한 번만 반영된다 |
@@ -1397,7 +1398,7 @@ classDiagram
 | `api` | 대국 명령 라우트와 가드(`RequireParticipant`), 수신 시각 `receivedAt` 확정 미들웨어 추가 | §5.2, §5.9 |
 | `events` | `game.finished` 구독 레지스트리에 `ledger`·`chat` 소비자, `reward.pending_created` 에 `analysis` 소비자 등록. 전달 계층 전환(Streams)은 **P0 D4: Phase 3 에서 판정**하므로 Phase 2 의 분석 큐는 **Postgres inbox 선점**이다(§2.2·§9 는 이에 맞춰 조정 완료) | 분석 큐 |
 | `identity` | **변경 불필요**: 자격 판정은 `ledger` 의 `EligibilityPolicy` 가 `game.finished` 페이로드(로그인 여부 포함)로 한다 | §10.3 |
-| `database-schema.md` §1 예외 목록 | `game_event`(쓰기 스키마)를 `ws-gateway`·`SyncGame`·`events` 조회가 읽는 **예외 E1** 등재(P0 §2.4) | §5.6 |
+| `database-schema.md` §1 예외 목록 | `game_event`(쓰기 스키마)를 `ws-gateway`·`SyncGame`·`events` 조회가 읽는 **CQRS 예외 X1** 등재(P0 §2.4) | §5.6 |
 | `database-schema.md` §11 | 본 문서 §11 의 핵심 테이블 반영 | Phase 윤곽 동기 |
 | `architecture.md` §12 | Phase 1~2 행 갱신(`/ws/room`, `game_event` 로그, `analysis` 모듈) | |
 | `10-security` / `ADR-023` | `/ws/room` 속도 제한 값 추가. 분석 임대 연장은 **ADR-021 의 적용**이라 ADR-023 변경은 문구 명확화(10배 규칙은 연장 간격에 적용)뿐 | §8, §9.3 |

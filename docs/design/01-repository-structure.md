@@ -415,7 +415,7 @@ flowchart TD
 
 **web `proxy.ts` matcher**: `/healthz`, `/readyz`, `/metrics`, `/api` 와 정적 자원은 반드시 제외한다. 예: `'/((?!api|healthz|readyz|metrics|_next|_vercel|.*\\..*).*)'`. 제외하지 않으면 로케일 협상이 이 경로를 `/en/healthz` 로 307 리다이렉트하고 따라간 결과가 404 가 된다(G3 실측: `/healthz`·`/api/time` 모두 재현).
 
-**도구 버전(로컬 실측, 2026-11-04)**: gitleaks 8.30.1, age 1.3.2, Playwright 1.64.1(`@playwright/test`), testcontainers 12.2.1, cloudflared 2026.10.7, k3d v5.9.0(k3s v1.35.5), Envoy Gateway v1.9.3, Gateway API v1.7.0 — 구현 시작 시 재조회한다([tech-stack §11.1](../domains/tech-stack.md)).
+**도구 버전(로컬 실측, 2026-11-04)**: gitleaks 8.30.1, age 1.3.2, Playwright 1.64.1(`@playwright/test`), testcontainers 12.2.1, k3d v5.9.0(k3s v1.35.5), Envoy Gateway v1.9.3, Gateway API v1.7.0 — 구현 시작 시 재조회한다([tech-stack §11.1](../domains/tech-stack.md)).
 
 ### 8.6 코드 상수로 두는 것 (환경변수가 아님)
 

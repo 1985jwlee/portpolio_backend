@@ -28,7 +28,7 @@
 | 실시간 통신 | WebSocket, 재접속·세션 복구, 서버 권위 상태 | [ADR-004](docs/adr/ADR-004-tech-stack.md), [ADR-014](docs/adr/ADR-014-deployment-and-zero-downtime.md) |
 | 관측성 | Prometheus + Grafana 를 공개 임베드 | [ADR-007](docs/adr/ADR-007-observability.md) |
 | 인증·악용 방어 | 익명 세션 + GitHub 로그인, 속도 제한, 사후 신고·숨김 | [ADR-008](docs/adr/ADR-008-visitor-identity-and-abuse.md) |
-| 인프라 판단 | 무료 호스팅 조사, Compose 라이브 + K8s(k3d) 검증 | [ADR-002](docs/adr/ADR-002-runtime-compose-live-k3d-verified.md) |
+| 인프라 판단 | 무료 호스팅 조사(도메인 미구입, 집 PC + Tailscale Funnel), Compose 라이브 + K8s(k3d) 검증 | [ADR-003](docs/adr/ADR-003-free-hosting.md), [ADR-002](docs/adr/ADR-002-runtime-compose-live-k3d-verified.md) |
 
 ## 기술 스택
 
@@ -43,14 +43,14 @@ Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) +
 | 순서 | 단계 | 내용 | DoD | 결정 |
 |---|---|---|---|---|
 | 0 | Phase 0 | 모노레포, 모듈 경계, ADR 템플릿, CI, 로컬 k3d + Gateway API 최소 배포 | `git push` → CI 통과 → 로컬 K8s 에 hello 서비스 배포 | ADR-001·002 |
-| 1 | **M1** (Phase 0 직후) | 사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지표 대시보드 + 정적 폴백 | 명세의 인수 기준 AC-001~014 통과, 라이브 URL | [명세](specs/portfolio-site.spec.md), ADR-003~008·013 |
-| 2 | Phase 3 | 타임딜: Redis Lua 재고 선점(빠른 게이트) + Postgres CHECK(하드 게이트) → outbox → 멱등 소비, k6 부하 시험. **모의 포인트 원장(`ledger`) 도입 — 포인트 출처는 데모 지급(관리자 지급·시연용 받기), 포인트 결제만(카드·에스크로는 Phase 5)**. **Redis 도입과 Streams 채택 판정은 이 단계** | 초과 판매 0건 + 부하 결과표 | ADR-010·013, [설계 P2](docs/design/phases/02-commerce.md), ADR-031·038 |
+| 1 | **M1** (Phase 0 직후) | 사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지표 대시보드 + 정적 폴백 | 명세의 인수 기준 AC-001~039 통과(출시 층 C 는 M1.1), 집 PC 단일 호스트(Tailscale Funnel, `*.ts.net` 주소) + 별도 주소의 수동 전환 정적 대체 페이지, 라이브 URL | [명세](specs/portfolio-site.spec.md), ADR-003~008·013 |
+| 2 | Phase 3 | 타임딜: Redis Lua 재고 선점(빠른 게이트) + Postgres CHECK(하드 게이트) → outbox → 멱등 소비, k6 부하 시험. **모의 화폐 원장(`ledger`) 도입 — 첫 GitHub 로그인 시 POINT 100,000 지급(USDC 는 원장 고정액 지급 없이 환경별 공급 — U24), USDC→POINT 단방향 교환(POINT→외부 환전 없음), 혼합 결제(포인트 먼저 차감 후 USDC; 시세는 고정 환율 소스의 스냅샷), 최소 에스크로(hold / release / refund)와 환불; 카드 결제·분쟁·정산·실제 시세는 Phase 5**. **Redis 도입과 Streams 채택 판정은 이 단계** | 초과 판매 0건 + 부하 결과표 | ADR-010·013, [설계 P2](docs/design/phases/02-commerce.md), ADR-031·038·040·048 |
 | 3 | Phase 4 🎯 | 프로덕션화: 워크로드 분리, HPA·probe·PDB, 롤링 배포 시 소켓 재접속, 관측, CD, 에셋 캐시, 패키징 | README + 영상만으로 "무엇을·왜·얼마나 잘" 이해 가능 | ADR-002·007·014, [설계 P0](docs/design/phases/00-platform-evolution.md) §10, ADR-033 |
 | 4 | Phase 5 | 결제·정산(모의): PG 테스트 모드, 에스크로 흐름, 시세 피드. **착수 전 필드 암호화를 KEK/DEK 로 상향** | 결제 → 에스크로 → 정산 재현, 환율 고정 시점 기록 | ADR-011·016, [설계 P2](docs/design/phases/02-commerce.md), ADR-039~041 |
-| 5 | Phase 6 (6a~6d) | 확장(순서대로, 중단 가능): **6a CS 채팅**(범용 `chat` 코어 + `/ws/room` 도입) → **6b Passkey** → **6c WMS** → **6d Solana USDC 에스크로(devnet)** | 항목별 독립 DoD | ADR-016, [설계 P4](docs/design/phases/04-chat.md)·[P3](docs/design/phases/03-fulfillment.md), ADR-042~047 |
+| 5 | Phase 6 (6a~6d) | 확장(순서대로, 중단 가능): **6a CS 채팅**(범용 `chat` 코어 + `/ws/room` 도입) → **6b Passkey** → **6c WMS** → **6d Solana USDC 에스크로(devnet)** | 항목별 독립 DoD | ADR-016, [설계 P4](docs/design/phases/04-chat.md)·[P3](docs/design/phases/03-fulfillment.md), ADR-032·042~047 |
 | 6 | Phase 1 | 바둑 실시간 코어. 1-A 서버·프로토콜(룰 엔진, 룸·대국·관전, 재접속, 대국 채팅 룸 종류 추가(채팅 코어·`/ws/room` 은 6a 에서 먼저 도입), SGF) → 1-B three.js 3D 클라이언트. **대국 명령은 REST, WS 는 push 전용(`/ws/room`)** | 두 브라우저에서 3D 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **대국 채팅(끊김 후 순서대로 복구 · 중복 전송은 한 건 · 관전자 방은 대국 중 플레이어에게 비공개)**, 데모 영상 | ADR-004·012·014, [설계 P1](docs/design/phases/01-baduk.md)·[P4](docs/design/phases/04-chat.md)·[P0](docs/design/phases/00-platform-evolution.md), ADR-032·034·035·045 |
 | 7 | Phase 2 | KataGo 워커 + 바둑 보상 (보상 `PENDING → CONFIRMED/FLAGGED`; **모의 포인트 원장 `ledger` 는 Phase 3 에서 이미 도입**, 바둑 보상은 두 번째 포인트 출처). **분석 큐는 Postgres inbox 선점(Redis 없음)** | 대국 종료 → 비동기 분석 → 보상 확정 end-to-end, 실패·재시도 확인 | ADR-009, [설계 P1](docs/design/phases/01-baduk.md) §9~10, ADR-036·037 |
-| 8 | Phase 6e | **마작**(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) | 항목별 독립 DoD | ADR-016, [설계 P4](docs/design/phases/04-chat.md)·[P3](docs/design/phases/03-fulfillment.md), ADR-042~047 |
+| 8 | Phase 6e | **마작**(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) | 항목별 독립 DoD | ADR-016, [설계 P1](docs/design/phases/01-baduk.md), ADR-034·035 |
 
 ## 저장소 안내
 
@@ -58,10 +58,17 @@ Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) +
 |---|---|
 | `docs/adr/` | 결정 기록 (인덱스: `docs/adr/README.md`) |
 | `specs/portfolio-site.spec.md` | M1 요구사항(EARS)·인수 기준·가정·결정 로그 |
-| `docs/design/` | 구현 수준 설계 (출발점: [00 전체 시스템·공통 규약](docs/design/00-system-overview.md)). 저장소 골격 [01](docs/design/01-repository-structure.md) · 개발 환경 [02](docs/design/02-dev-environment.md) · API [03](docs/design/03-api-contract.md) · WebSocket [04](docs/design/04-ws-protocol.md) · 이벤트 [05](docs/design/05-event-catalog.md) · 인증 [06](docs/design/06-auth.md) · 프론트엔드 [07](docs/design/07-frontend.md) · 시험 [08](docs/design/08-test-strategy.md) · CI/CD [09](docs/design/09-ci-cd.md) · 보안 [10](docs/design/10-security.md) · 구현 계획 [11](docs/design/11-implementation-plan.md) · 콘텐츠 [12](docs/design/12-content.md) · 보안사고 대응 [13](docs/design/13-incident-response.md) · SEO·오류 화면 [14](docs/design/14-seo-and-error-pages.md) · 시각 디자인 [15](docs/design/15-visual-design.md) |
+| `docs/design/` | 구현 수준 설계 (출발점: [00 전체 시스템·공통 규약](docs/design/00-system-overview.md)). 저장소 골격 [01](docs/design/01-repository-structure.md) · 개발 환경 [02](docs/design/02-dev-environment.md) · API [03](docs/design/03-api-contract.md) · WebSocket [04](docs/design/04-ws-protocol.md) · 이벤트 [05](docs/design/05-event-catalog.md) · 인증 [06](docs/design/06-auth.md) · 프론트엔드 [07](docs/design/07-frontend.md) · 시험 [08](docs/design/08-test-strategy.md) · CI/CD [09](docs/design/09-ci-cd.md) · 보안 [10](docs/design/10-security.md) · 구현 계획 [11](docs/design/11-implementation-plan.md) · 콘텐츠 [12](docs/design/12-content.md) · 보안사고 대응 [13](docs/design/13-incident-response.md) · SEO·오류 화면 [14](docs/design/14-seo-and-error-pages.md) · 시각 디자인 [15](docs/design/15-visual-design.md) · 서버 중단 대체 페이지 [16](docs/design/16-outage-fallback-page.md) |
 | `docs/design/features/` | 기능 단위 상세 설계: [기능 카탈로그](docs/design/features/00-feature-catalog.md)와 모듈별 F10~F17(클래스·시퀀스·순서도) |
 | `docs/domains/` | 도메인 문서 정본: [기술 스택](docs/domains/tech-stack.md), [아키텍처](docs/domains/architecture.md), [데이터베이스 구조](docs/domains/database-schema.md) |
 | `.claude/`(일부), `CLAUDE.md` | 개발용 에이전트 시스템의 진입점·설정·검증 데이터만 추적한다. 에이전트·스킬 등 엔진 본체와 `.codex/`, `.agents/` 는 추적하지 않으며(`.gitignore`) 클론 후 다른 프로젝트에서 흡수한다 |
+
+## 주소 안내
+
+도메인은 구입하지 않고 Tailscale Funnel 의 `*.ts.net` 주소를 쓴다(주소 형식은 고를 수 없다). 라이브 공개 시 **앱 주소와 정적 대체 페이지 주소를 여기에 함께 적는다**(자동 절체가 없어 앱이 멈추면 연결 오류가 나므로 두 번째 주소가 안내 창구다. 설계: [design/16](docs/design/16-outage-fallback-page.md)).
+
+- 앱: `https://<호스트>.<tailnet 이름>.ts.net` (공개 시 기입)
+- 대체(안내) 페이지: `<별도 정적 호스트 주소>` (공개 시 기입)
 
 ## 라이선스
 

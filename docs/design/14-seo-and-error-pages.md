@@ -131,7 +131,7 @@ Disallow: /
 | 쓰기 잠금 중 | 화면 전체가 아니라 **방명록의 알림 배너** + 작성 폼 비활성 | 정상(200) | — | — |
 | API 429 / 503 / 네트워크 끊김 | 화면 전체가 아니라 **인라인 오류**(토스트/배너, 07 §7.5) | — | — | — |
 | web 다운(nginx 폴백) | 정적 `paused.html`(ko/en 병기) | **503** | `Retry-After: 300`, `X-Fallback: 1`, `X-Robots-Tag: noindex` | noindex |
-| 호스트·Tunnel 다운 | Cloudflare 오류 화면 또는 정적 미러(G11) | 5xx | — | 우리 통제 밖 |
+| 호스트·Funnel 다운 | 앱 주소는 **응답 없음**(연결 오류 — 자동 절체 없음, 수용). 별도 주소의 정적 대체 페이지가 수동 전환 안내를 담는다([16](16-outage-fallback-page.md)) | 앱 주소: 없음 / 대체 페이지: **200** | 대체 페이지: `<meta name="robots" content="noindex">`(Worker 절체의 503 + `Retry-After` 는 도메인 확보 시 후속) | noindex |
 | 오프라인(브라우저) | 인라인 `OfflineNotice`(서비스 워커 없음, 오프라인 페이지 없음) | — | — | — |
 
 - 오류 화면에는 **상태 코드를 그대로** 쓴다(404 를 200 으로 돌려주는 "soft 404" 금지).

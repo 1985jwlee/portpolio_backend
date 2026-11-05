@@ -2,7 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04
 - 근거: ADR-011(스냅샷 + 견적 TTL, 소스·허용 지연·괴리 한도 미결) / 2026-11-04 시세 소스 웹 검색(요약 수준, 재확인 필요)
-- 구현 순서(P0 D24): Phase 5. Phase 3 에도 **최소 `pricefeed`(고정 환율 소스 `FixedRateSource`)** 가 있어 모든 결제가 스냅샷을 갖는다(`legacy_demo` 폐기, P0 §1.4 G3·[ADR-048](ADR-048-mock-currency-and-mixed-payment.md)). Phase 5 가 실제 소스·교차 검증을 추가한다.
+- 구현 순서(P0 D24): Phase 5. Phase 3 에도 **최소 `pricefeed`(고정 환율 소스 `FixedRateSource`)** 가 있어 모든 결제가 스냅샷을 갖는다(P0 §1.4 G3·[ADR-048](ADR-048-mock-currency-and-mixed-payment.md)). Phase 5 가 실제 소스·교차 검증을 추가한다.
 - 관련 문서: [design/phases/02-commerce.md](../design/phases/02-commerce.md) §8
 
 ## 맥락

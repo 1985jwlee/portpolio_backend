@@ -24,17 +24,17 @@
 | **가명 식별자** | 세션 ID, `actor_key`, `author_session_id`, `user_id` | 7일 후 익명화(ADR-008), 로그·지표 레이블 금지 |
 | **개인 연결** | `user_account.github_id`·`login`·`display_name`, `report.reporter_key` | **평문 유지.** GitHub 공개 프로필 정보이고, `github_id` 는 유일 조회·관리자 허용목록 대조에 쓰인다. 최소 수집(스코프 없음, 이메일 없음)이 보호 |
 | **자유 텍스트** | `guestbook.report.note`(신고자 메모 ≤200자) | **필드 암호화(AES-256-GCM)** |
-| **비밀** | 세션 토큰, OAuth 서명 키, GitHub client secret, DB 비밀번호, 필드 키, 백업 키 | 아래 표 |
+| **비밀** | 세션 토큰, OAuth 서명 키, GitHub client secret, DB 비밀번호, 필드 키, 백업 키, **tUSDC 민트 권한 키·devnet 수수료 대납 키**(6d, devnet 전용 — ADR-048 U28; 메인넷 키는 어떤 설정에도 두지 않는다) | 아래 표 |
 
 ### 층별 보호
 | 층 | 방식 | 세부 |
 |---|---|---|
-| 전송 | TLS | 방문자↔Cloudflare TLS. 집 PC 경로의 cloudflared↔nginx 는 같은 호스트 내부, Oracle 경로는 nginx 가 TLS 종료(G7 ③ 미확인). 컨테이너 간 통신은 compose 내부 네트워크(비공개) |
+| 전송 | TLS | 방문자↔우리 PC(Funnel 은 TCP 프록시라 중계 서버가 복호화하지 못하고 TLS 는 PC 에서 종료, 공식 문서). Funnel→nginx 는 같은 호스트 로컬 평문, Oracle 경로(선택적 후속, 미추진)는 nginx 가 TLS 종료(G7 ③ 미확인). 컨테이너 간 통신은 compose 내부 네트워크(비공개) |
 | 세션 토큰 | **SHA-256 해시 저장** | 토큰이 256비트 난수이므로 솔트·느린 해시가 불필요하다(무차별 대입 불가). 비교는 길이 검사 + `timingSafeEqual`(길이가 다르면 예외 — 실측) |
 | 쿠키 서명 | HMAC-SHA256 | OAuth 임시 쿠키(`OAUTH_STATE_SECRET`) |
 | 비밀값 | `_FILE` 시크릿 파일 | 저장소·이미지에 없음, 로그 마스킹(`SecretString`) |
 | 백업 | **`age` 암호화** | `pg_dump` 를 수신자 공개키로 암호화 후 보관·외부 업로드. **개인키는 서버에 두지 않는다**(사용자 보관). 서버에는 공개키(`BACKUP_AGE_RECIPIENT`, 비밀 아님)만 |
-| 디스크 | 호스트 볼륨 암호화 | 집 PC: LUKS 등 호스트 설정(선택, 앱 범위 밖). Oracle: 블록 볼륨 기본 암호화 여부는 미확인 |
+| 디스크 | 호스트 볼륨 암호화 | 집 PC: LUKS 등 호스트 설정(선택, 앱 범위 밖). Oracle(미추진): 블록 볼륨 기본 암호화 여부는 미확인 |
 | 필드 | AES-256-GCM | 아래 |
 
 ### 필드 암호화 메커니즘
@@ -83,7 +83,7 @@ sequenceDiagram
 - **`pgcrypto` 로 DB 안에서 암호화**: 키가 SQL·로그·`pg_stat_statements` 에 노출될 수 있다. 앱 레벨이 키 경계를 분리한다.
 - **모든 개인 연결 필드 암호화**: `github_id` 조회를 위해 블라인드 인덱스(HMAC)가 필요하고, 공개 정보라 보호 이득이 작다(사용자 선택에서 제외).
 - **KEK/DEK 봉투를 처음부터**: 필드가 하나뿐인 지금은 과하다. 키링 + 키 ID 로 시작하고 올릴 경로를 남겼다.
-- **볼륨 암호화를 앱이 보장**: 호스트마다 수단이 다르다(집 PC·Oracle). 앱 범위 밖으로 문서화.
+- **볼륨 암호화를 앱이 보장**: 호스트마다 수단이 다르다(집 PC, 선택적 후속인 Oracle 포함). 앱 범위 밖으로 문서화.
 
 ## 결과
 - 얻는 것: 분류 기준이 문서화되고, DB 덤프·백업이 유출돼도 신고 메모와 백업 전체가 보호되며, 암호화 경로가 일반형이라 필드 추가가 쉽다.
@@ -107,10 +107,10 @@ sequenceDiagram
 KMS/HSM 으로 KEK 를 관리하고, DB 는 TDE/볼륨 암호화, 키 접근 감사와 자동 회전을 둔다.
 
 ## 재검토 조건
-암호화 필드가 3개 이상으로 늘 때(KEK/DEK 로 상향). 개인정보(이메일 등)를 수집하게 될 때. Oracle 볼륨 암호화가 기본 제공이 아님이 확인될 때.
+암호화 필드가 3개 이상으로 늘 때(KEK/DEK 로 상향). 개인정보(이메일 등)를 수집하게 될 때. (Oracle 을 쓰게 될 경우) Oracle 볼륨 암호화가 기본 제공이 아님이 확인될 때.
 
 ### 메모 (2026-11-04, Phase 설계 반영)
-Phase 1~6 영역 설계가 ENC 필드를 **M1 의 1개에서 7개 논리 필드(9개 컬럼)로** 늘린다 — `report.note_enc`(M1), `order.shipping_address_enc`(Phase 3), `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(Phase 5), `fulfillment_order.recipient_enc`·`chat.message.body_enc`(+읽기 사본)·`chat.report.snapshot_enc`(Phase 6). 위 재검토 조건("3개 이상")이 충족되므로 **KEK/DEK 상향은 Phase 5 착수 전**에 한다. 통합표·상향 작업 항목·PII 이벤트 지침은 [phases/00 §9.3~9.6](../design/phases/00-platform-evolution.md). 결정(U14)은 사용자 확정 대기.
+Phase 1~6 영역 설계가 ENC 필드를 **M1 의 1개에서 7개 논리 필드(8개 컬럼)로** 늘린다 — `report.note_enc`(M1), `order.shipping_address_enc`(Phase 3), `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(Phase 5), `fulfillment_order.recipient_enc`·`chat.message.body_enc`(+읽기 사본)·`chat.report.snapshot_enc`(Phase 6). 위 재검토 조건("3개 이상")이 충족되므로 **KEK/DEK 상향은 Phase 5 착수 전**에 한다. 통합표·상향 작업 항목·PII 이벤트 지침은 [phases/00 §9.3~9.6](../design/phases/00-platform-evolution.md). 결정(U14)은 사용자 확정 대기.
 
 ## 관련 ADR
 ADR-008, ADR-022, ADR-023, ADR-024, ADR-025

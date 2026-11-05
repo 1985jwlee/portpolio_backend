@@ -34,7 +34,7 @@ flowchart TB
     end
     subgraph fb["정적 폴백 대상 (ADR-023)"]
         FB1["nginx 정적 산출물<br/>home · about · architecture · privacy"]
-        FB2["Cloudflare 정적 미러"]
+        FB2["별도 주소 정적 대체 페이지<br>(수동 전환)"]
     end
     PRX --> LAY
     LAY --> SP

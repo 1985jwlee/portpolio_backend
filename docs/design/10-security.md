@@ -12,7 +12,7 @@
 
 ```mermaid
 flowchart TD
-    V["방문자"] --> CF["Cloudflare<br/>TLS 종료 · DDoS 기본 방어 · 터널"]
+    V["방문자"] --> CF["Tailscale Funnel<br/>TLS 는 우리 PC 에서 종료 · 중계 서버는 복호화 불가<br/>(DDoS 기본 방어 없음 · 대역폭 한도 비공개)"]
     CF --> PX["nginx<br/>주소 정규화 · limit_req · 정적 헤더<br/>내부 경로 차단 · 크기 제한"]
     PX --> Q{"경로"}
     Q -- "/healthz /readyz /metrics" --> BLK["외부 차단 (404)"]
@@ -37,7 +37,7 @@ flowchart TD
 | 헤더 | 값 | 설정 주체 | 비고 |
 |---|---|---|---|
 | `Content-Security-Policy` | 아래 표 | **web(Next `proxy.ts`)** | 요청마다 nonce 를 만들어야 해서 앱이 설정 (nginx 는 정적 값만) |
-| `Strict-Transport-Security` | `max-age=15552000; includeSubDomains` | nginx | 6개월. `preload` 는 쓰지 않는다(되돌리기 어려움). Oracle 경로는 TLS 종료가 nginx, 집 PC 경로는 Cloudflare 엣지 |
+| `Strict-Transport-Security` | `max-age=15552000; includeSubDomains` | nginx | 6개월. `preload` 는 쓰지 않는다(되돌리기 어려움). 집 PC 경로는 Funnel 이 PC 에서 TLS 종료하고 nginx 는 평문 로컬 포트로 받는다(Oracle 경로는 미추진) |
 | `X-Content-Type-Options` | `nosniff` | nginx | |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | nginx | |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` | nginx | 사이트가 쓰지 않는 기능 전부 차단 |
@@ -122,7 +122,7 @@ classDiagram
 4. `Idempotency-Key` 헤더 필수 ([03](03-api-contract.md)) — 단순 폼으로는 보낼 수 없는 사용자 지정 헤더라 추가 방어가 된다
 5. 로그아웃·로그인 시작은 GET 이 상태를 바꾸지 않도록 설계(로그인 시작 GET 은 상태 변경 없음, 로그아웃은 POST). **예외: `POST /api/auth/logout` 은 `Idempotency-Key` 면제**([03](03-api-contract.md) §1)라 4번 방어가 빠지고 1·2·3번 **3중**으로 막는다
 
-WebSocket 핸드셰이크는 브라우저가 CORS 를 적용하지 않으므로 **서버가 `Origin` 을 직접 검사**한다(교차 사이트 WebSocket 하이재킹 방지). 허용 출처는 `PUBLIC_ORIGIN` 하나.
+WebSocket 핸드셰이크는 브라우저가 CORS 를 적용하지 않으므로 **서버가 `Origin` 을 직접 검사**한다(교차 사이트 WebSocket 하이재킹 방지). 허용 출처는 `PUBLIC_ORIGIN` 하나다. 라이브에서 이 값은 Funnel 의 고정 주소 `https://<호스트>.<tailnet 이름>.ts.net` 이며(자리표시자 — 실제 이름은 사용자 tailnet 에 의존하는 설정값, 도메인 미구입 A-035), `__Host-`/`__Secure-` 쿠키와 `OriginGuard`·WS `Origin` 검사의 허용 오리진이 모두 이 호스트로 정해진다.
 
 ## 4. 가드와 권한
 
@@ -223,7 +223,7 @@ sequenceDiagram
 |---|---|---|---|
 | `GITHUB_CLIENT_SECRET` | 연 1회 또는 노출 의심 시 | GitHub 에서 새 secret 생성 → `secrets/` 교체 → api 재기동 → 구 secret 폐기 | 즉시 폐기·교체. 기존 세션은 영향 없음(세션은 우리 것) |
 | DB 비밀번호 | 연 1회 | 새 비밀번호 설정 → `secrets/database_url` 교체 → 앱 재기동 | 즉시 교체 |
-| Cloudflare Tunnel 토큰 | 노출 시 | 터널 재생성 후 토큰 교체 | 즉시 |
+| Tailscale 노드 인증(계정·인증 키를 쓴다면 키) | 노출 시 | 관리 콘솔에서 노드 제거·키 폐기 후 재등록 (구체 절차는 구현 시 확인, 13 §6.8) | 즉시 |
 | `FIELD_KEYS` (필드 암호화 키링, api·worker) | 연 1회 또는 노출 시 | 새 키 추가 → `active` 변경 → `worker rotate-field-keys` 로 재암호화 → 잔여 0 확인 후 옛 키 제거. **키링 백업은 백업 개인키와 별도로 보관**(분실 시 `note` 복구 불가, ADR-026) |
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, api 필수) | 연 1회 또는 노출 시 | 새 값 생성 → `secrets/oauth_state_secret` 교체(저장 위치는 [02](02-dev-environment.md) §5) → api 재기동. 진행 중인 로그인 시도(10분 쿠키)만 실패한다 | 즉시 교체 |
 | `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 노출 시 | Discord 에서 웹훅 **삭제 후 재생성** → `secrets/discord_webhook` 교체 → grafana 재기동. URL 자체가 자격이라 `SecretString`·로그 마스킹(`https://discord.com/api/webhooks/…` 패턴 → `[redacted]`) 대상 | 즉시(웹훅 삭제) |
@@ -232,7 +232,7 @@ sequenceDiagram
 | 세션 토큰 | 7일 만료(자동) | 만료·로그아웃 시 서버에서 폐기(ADR-008) | 사용자 단위 전체 폐기 가능: `worker admin revoke-sessions --all|--user|--session` ([13](13-incident-response.md) §5) |
 | 관리자 GitHub 계정 | — (계정 보안 2FA 유지) | `ADMIN_GITHUB_IDS` 로 권한을 설정값으로만 부여(DB 플래그 없음) | 허용목록에서 제거 후 재배포 + 세션 폐기 + GitHub 비밀번호·2FA·OAuth 앱·PAT 점검 ([13](13-incident-response.md) §6.9) |
 | 호스트 GHCR pull 토큰(읽기 전용 PAT) | 연 1회 | GitHub 에서 재발급 → 호스트 `docker login` 자격(`pf` 홈) 교체 | 즉시 폐기·재발급 ([13](13-incident-response.md) §6.13) |
-| SSH 키(Oracle 호스트 사용 시) | 연 1회 | 키 교체, `authorized_keys` 점검 | 호스트 침해로 취급, 전체 비밀 회전 고려 |
+| SSH 키(원격 호스트를 쓰는 경우에 한함 — 현재 집 PC 단일) | 연 1회 | 키 교체, `authorized_keys` 점검 | 호스트 침해로 취급, 전체 비밀 회전 고려 |
 
 - **노출됐을 때의 대응**(증거 보존, 비상 스위치, 자산별 런북, 영향 산정, 공지, 리허설)은 [13](13-incident-response.md) 이 정본이고, 위 표는 평상시 회전 정책이다.
 - 비밀은 `SecretString` 으로만 다루고(01 §7.1) 로그·오류 메시지·지표 레이블·`/metrics` 에 들어가지 않는다.
@@ -268,8 +268,8 @@ sequenceDiagram
 
 | 관심사 | nginx | 앱 | 비고 |
 |---|---|---|---|
-| TLS | Oracle 경로에서 종료 / 집 PC 경로는 Cloudflare 가 종료 | — | 인증서 자동화는 G7 |
-| 클라이언트 주소 | `CF-Connecting-IP` 를 **정규화해 단일 헤더로 전달**, 클라이언트가 보낸 같은 이름 헤더는 폐기 (G1·G7) | 정규화된 헤더만 신뢰, **저장·로깅하지 않음** | ADR-023 |
+| TLS | 집 PC 경로는 Funnel 이 PC 에서 종료(인증서는 Tailscale 이 발급·갱신, 갱신은 G14 ⑥ 에서 확인). Oracle 경로는 미추진 | — | 인증서 자동화는 Oracle 추진 시에만 필요(G7 ③ 보류) |
+| 클라이언트 주소 | **실제 클라이언트 IP 확보 방법 미확인 — 게이트(G14 ④)에서 실측.** 확인 전에는 클라이언트가 보낸 주소 헤더(`X-Forwarded-For`·`X-Real-IP`·`CF-Connecting-IP` 등)를 전부 폐기하고, 확인되면 Funnel 이 넣는 헤더만 정규화해 단일 헤더로 전달 (G7 ②). (`CF-Connecting-IP`/realip 가정은 Cloudflare Tunnel 전제였음, 폐기) | 정규화된 헤더만 신뢰, **저장·로깅하지 않음** | ADR-023 |
 | 속도 제한 | `limit_req`: 주소별 (메모리) | 세션별 (`RateLimitGuard`) | 이중. 둘 다 주소를 영속 저장하지 않는다 |
 | 본문 크기 제한 | `client_max_body_size` (작게, 글 500자 기준 여유) | 스키마 검증(길이) | |
 | 정적 보안 헤더 | 설정 (§2.1) | CSP 는 web | |
@@ -291,7 +291,8 @@ sequenceDiagram
 | WS | 연결·메시지 | 메시지 폭주(`4429`), 탭 폭증(`4409`), 전체 상한 | 해당 없음 |
 
 - 세션이 새로 발급되는 경로(`/api/me`)는 **세션 키로 막을 수 없어** 주소 기준 nginx 제한이 유일한 방어다. 세션을 계속 새로 받아 세션 제한을 우회하려는 시도도 같은 주소 제한에 걸린다.
-- 주소를 모르는 상태(주소 헤더 정규화 실패, G1)에서는 nginx 제한이 모든 요청을 한 주소로 묶을 수 있다 → 정규화 검증(G7 ②)이 선행 조건이다.
+- 주소를 모르는 상태(Funnel 에서 실제 IP 미확인 G14 ④, 또는 정규화 실패)에서는 nginx 제한이 모든 요청을 한 주소(Funnel 의 로컬 연결)로 묶어 **사실상 전역 한도**가 된다 → 정규화 검증(G7 ②)과 G14 ④ 가 선행 조건이다. **그 경우 `/api/me` 의 세션 발급 남용 방어가 약해지는 것이 위험이며**, 세션/계정 기준 제한을 우선하고 신규 세션 발급에 전역 상한을 두는 방안을 구현 시 검토한다(제안, 미검증).
+- **Funnel 에는 Cloudflare 의 기본 DDoS 방어가 없고** 대역폭 한도가 비공개이며 베타다. 한도 초과·정책 변경은 위험으로 수용하고 G14 ③ 에서 체감을 측정한다(ADR-003).
 - 제한 초과는 `pf_rate_limit_decisions_total{app,rule,decision}` 로 관측하고(레이블에 주소·세션 금지), 급증 시 쓰기 잠금 스위치(ADR-028 사다리 1단계)를 쓴다.
 - 도구 관련: 비밀 스캔(CI `secret-scan`, gitleaks 후보)은 **기본 규칙만으로는 Discord 웹훅 URL 을 못 잡고**(실측) 낮은 엔트로피·알려진 예제 키는 무시하므로 저장소 `.gitleaks.toml` 에 웹훅 규칙을 추가해야 한다(ADR-028, 13 §10).
 
@@ -318,7 +319,7 @@ sequenceDiagram
 | | 허용목록 우회(이름 변경으로 탈취) | 로그인 이름이 아니라 **GitHub 숫자 ID** 로 비교 | 01 §8.2 |
 | | XSS | 텍스트만 렌더, CSP, 입력 정규화 | ADR-008, §2 |
 
-잔여 위험(수용): 접속 주소를 저장하지 않으므로 **사후 주소 차단 불가**(ADR-023 에서 수용). 집 PC 단일 장애점은 정적 폴백으로 완화(ADR-023).
+잔여 위험(수용): 접속 주소를 저장하지 않으므로 **사후 주소 차단 불가**(ADR-023 에서 수용). 집 PC 단일 장애점은 정적 폴백(ADR-023)과 정적 대체 페이지(FR-122, [16](16-outage-fallback-page.md))로 완화하고 사용자가 수용한다(A-033). 대체 페이지는 별도 CSP 를 쓴다(16 §3.3).
 
 ## 9. 미결
 
@@ -326,7 +327,7 @@ sequenceDiagram
 |---|---|
 | ~~Next 의 nonce CSP 동작~~ | G3 로컬 확정(동적 렌더 + nonce). `style-src-attr` 만 좁게 여는 방식은 구현 시 시험 |
 | ~~Grafana 임베드 출처(`frame-src`)~~ | G6 로컬 확정. 실제 공개 출처 값은 배포 시. 공개 페이지 HTML 에 데이터 소스 내부 URL 이 노출되고 Grafana 포트 `/metrics` 가 무인증이므로 프록시에서 차단 |
-| ~~`CF-Connecting-IP` 부착, 헤더 정규화 설정~~ | G1·G7 로컬 통과(임시 터널). 에지가 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않아 nginx 덮어쓰기가 필수이고, 클라이언트가 보낸 `CF-Connecting-IP` 헤더는 에지가 403(error 1000)으로 거부한다. 정식 터널은 미확인 |
+| `CF-Connecting-IP` 부착, 헤더 정규화 설정 → **Funnel 의 클라이언트 IP 헤더 확인(G14 ④)으로 교체** | (이력) G1·G7 로컬 통과(Cloudflare 임시 터널, 폐기). 에지가 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않아 nginx 덮어쓰기가 필수이고, 클라이언트가 보낸 `CF-Connecting-IP` 헤더는 에지가 403(error 1000)으로 거부한다. 정식 터널은 미확인 |
 | 시크릿 스캔 도구, `bun audit` 가용성 | 구현 단계 0 |
 | 컨테이너 비루트·읽기 전용 FS 의 Bun 호환 | 이미지 작성 시 시험 |
 | 세션 슬라이딩 갱신 여부 | [06](06-auth.md) |

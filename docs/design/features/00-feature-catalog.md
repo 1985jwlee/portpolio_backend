@@ -159,14 +159,14 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | OB-04 | 구조화 로그·trace_id 전파·마스킹 | `observability` | ADR-008 | S1-11 |
 | OB-05 | Prometheus 수집 설정·규칙 | `infra/prometheus` | FR-060 | S7-2 |
 | OB-06 | Grafana 프로비저닝·대시보드·Public dashboards | `infra/grafana` | FR-061 | S7-2,3 |
-| OB-07 | nginx 프록시(라우팅·limit_req·realip·헤더·WS) | `infra/nginx` | AC-007,014 | S8-1 |
+| OB-07 | nginx 프록시(라우팅·limit_req·주소 헤더 정규화·헤더·WS, Funnel 뒤 평문 로컬 포트) | `infra/nginx` | AC-007,014 | S8-1 |
 | OB-08 | 정적 폴백 1단계 (`build:fallback`) | `infra/nginx` | FR-070 / AC-010 | S8-2 |
-| OB-09 | Cloudflare 정적 미러 2단계 | Cloudflare | FR-070 | S8-3 |
+| OB-09 | 별도 주소 정적 대체 페이지 2단계(수동 전환, Worker 절체는 도메인 확보 시 후속) | 정적 호스트 | FR-070, FR-122 / AC-039 | S8-3 |
 | OB-10 | 백업·복구 | `infra/scripts/backup.sh` | ADR-023 | S8-4 |
 | OB-11 | pull 배포 | `infra/scripts/pull-deploy.sh` | ADR-014 | S8-6 |
 | OB-12 | CI 워크플로(PR 검사·빌드·릴리스) | `.github/workflows` | — | S1-6,S8-6 |
 | OB-13 | 쓰기 잠금·긴급 스위치 운영 절차 (`worker admin write-lock` + `POST /api/admin/write-lock`) | 런북 | ADR-008 | S6-4 (도구), S8-1 (런북) |
-| OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | ADR-002 (AC-014 는 집 PC·Oracle) | S8-5 |
+| OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | ADR-002 (AC-014 는 집 PC 단일 호스트) | S8-5 |
 | OB-15 | 로그 아카이브·조회 | **systemd 타이머**(`pf-archive-logs`, 일 1회 03:10) / 운영자 | `archive-logs.sh`, `logq.sh`, `infra/systemd/*` | — (Docker 로그 → `$PF_LOG_DIR/archive`), 상태는 `status/archive_logs/last_run.json` | ADR-027 | S8-7 |
 | OB-16 | 운영 상태 파일 수집 | worker `/metrics` 스크레이프 | `StatusFileCollector`, `StatusFileReader` (`status/<job>/last_run.json` → `pf_ops_*` 지표) | `STATUS_DIR` 파일(읽기 전용) | ADR-027 | S7-5 |
 | OB-17 | 경보 라우팅(Discord) | Grafana 알림 평가 | Grafana 알림 규칙·연락처·정책 프로비저닝 (`infra/grafana/provisioning/alerting/**`, 식 정본 `infra/prometheus/rules/pf.yml`) | — | ADR-027 | S7-6 |

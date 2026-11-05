@@ -100,7 +100,7 @@ log_format pf_json escape=json
 | 6 | 알림 채널 | **Discord 웹훅**(Grafana 연락처). 시크릿 `DISCORD_WEBHOOK_URL` 은 grafana 컨테이너에만 주입. `repeat_interval` 4h, 해소 알림 켬, `info` 는 대시보드만 | 사용자 선택. 무료·카드 불필요. Alertmanager 는 두지 않음(컨테이너 절약) |
 | 7 | 감사 조회 웹 화면 | **M1 밖**(백로그 WB-22). API 와 CLI 만 | 관리자가 한 명 |
 
-**검증 상태**: 1·2 는 이 호스트(WSL2)의 init/Docker 구성을 확인했으나 실제 집 PC·Oracle 호스트는 S8-1 에서 재확인한다. 6 의 Discord 연락처·Grafana 프로비저닝의 `$__file{}` 시크릿 확장은 **미검증**(S7-6). 5 의 수치는 추정.
+**검증 상태**: 1·2 는 이 호스트(WSL2)의 init/Docker 구성을 확인했으나 실제 집 PC 호스트는 S8-1 에서 재확인한다. 6 의 Discord 연락처·Grafana 프로비저닝의 `$__file{}` 시크릿 확장은 **미검증**(S7-6). 5 의 수치는 추정.
 
 ### 실측 확인 (2026-11-04)
 

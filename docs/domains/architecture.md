@@ -22,7 +22,7 @@
 flowchart TB
     Visitor["방문자 브라우저"]
     subgraph Edge["진입 (호스트별로 다름)"]
-        Tunnel["cloudflared<br>집 PC 전용"]
+        Tunnel["Tailscale Funnel<br>집 PC 호스트 · TLS 종료"]
         Proxy["proxy<br>경로 라우팅 · 접속 주소 정규화"]
     end
     subgraph App["애플리케이션 (같은 이미지, 엔트리포인트만 다름)"]
@@ -40,9 +40,8 @@ flowchart TB
         Graf["grafana<br>공개 대시보드 · 읽기 전용"]
     end
 
-    Visitor -->|"HTTPS"| Tunnel
-    Visitor -.->|"HTTPS: 오라클 경로"| Proxy
-    Tunnel -->|"HTTP"| Proxy
+    Visitor -->|"HTTPS (*.ts.net)"| Tunnel
+    Tunnel -->|"HTTP (평문 로컬 포트)"| Proxy
     Proxy -->|"HTTP: /"| Web
     Proxy -->|"HTTP: /api"| Api
     Proxy -->|"WebSocket: /ws"| Ws
@@ -61,7 +60,7 @@ flowchart TB
 ```
 
 - 점선은 **비동기·조건부**다.
-- `cloudflared` 는 집 PC 경로에만 있다. Oracle 경로에서는 방문자가 `proxy` 로 직접 온다(TLS 종료를 `proxy` 가 맡는다).
+- 라이브는 **집 PC 단일 호스트**이고 백엔드와 web 이 모두 여기서 돈다. 방문자는 항상 Tailscale Funnel(`https://<호스트>.<tailnet 이름>.ts.net`, 도메인 미구입)을 거치고 TLS 는 PC 에서 종료되며 nginx 는 평문 로컬 포트로 받는다. 실제 클라이언트 IP 를 얻는지는 **미확인(G14)** 이다. Grafana 관리 화면은 Funnel 로 노출하지 않고 `tailscale serve` 로 tailnet 내부에서만 연다. Oracle 경로(방문자가 `proxy` 로 직접, TLS 종료를 `proxy` 가 맡음)는 선택적 후속이며 미추진이다.
 - `worker` 는 `change_log` 에 쓰며 `NOTIFY` 로 깨우고, `ws-gateway` 가 `change_log` 를 읽어 보낸다(1초 폴링 보완, ADR-023). **`ws-gateway` 는 읽기 모델을 읽어 복구**할 수 있다.
 - 읽기 모델과 쓰기 모델은 **같은 Postgres 인스턴스의 다른 스키마**다(논리 분리, ADR-018).
 
@@ -69,7 +68,7 @@ flowchart TB
 
 | 구성 | 책임 | 상태 | 비고 |
 |---|---|---|---|
-| `proxy` | 경로 라우팅, TLS 종료(Oracle), **원 접속 주소를 한 헤더로 정규화**, 접속 주소별 속도 제한 | 무상태 | **nginx**(ADR-022, 관문 G7) |
+| `proxy` | 경로 라우팅, TLS 종료(Oracle 경로 — 선택적 후속, 미추진; 집 PC 경로는 Funnel 이 종료), **원 접속 주소를 한 헤더로 정규화**(Funnel 의 IP 헤더는 미확인, G14 ④ — 확인 전에는 클라이언트 값을 전부 버린다), 접속 주소별 속도 제한(IP 가 안 보이면 세션/계정 기준 우선) | 무상태 | **nginx**(ADR-022, 관문 G7) |
 | `web` | 화면 렌더링(소개·아키텍처는 서버 렌더링, 데모는 클라이언트) | 무상태 | ko/en. Bun 실행(관문 G3, 실패 시 Node 22) |
 | `api` | 인증, **명령 usecase**(쓰기)와 **조회 usecase**(읽기) 실행 | 무상태 | 명령은 outbox 기록까지 |
 | `ws-gateway` | 연결 유지, 구독, 브로드캐스트, 재접속 복구 | **연결을 쥔다** | 재시작 시 클라이언트 재접속(ADR-014) |
@@ -219,39 +218,39 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph Home["집 PC (1차)"]
-        HCF["cloudflared"] --> HStack["Compose 한 벌"]
-    end
-    subgraph Oracle["Oracle Always Free (이전 대비)"]
-        OStack["Compose 한 벌<br>proxy 가 TLS 종료"]
+    subgraph Home["집 PC (단일 호스트: 백엔드 + web)"]
+        HCF["Tailscale Funnel"] --> HStack["Compose 한 벌"]
     end
     subgraph K3d["로컬 k3d (검증 전용)"]
         KStack["같은 이미지<br>Gateway API · probe · PDB"]
     end
     CI["GitHub Actions"] -->|"이미지 푸시: GHCR"| Registry["GHCR"]
     Registry -->|"pull"| HStack
-    Registry -->|"pull"| OStack
     Registry -->|"pull"| KStack
-    Fallback["정적 폴백<br>소개 · 아키텍처"]
-    Visitor["방문자"] -->|"도메인"| HCF
-    Visitor -.->|"원본 응답 없음"| Fallback
+    Fallback["정적 대체 페이지<br>별도 주소 · 수동 전환"]
+    Visitor["방문자"] -->|"*.ts.net 앱 주소"| HCF
+    Visitor -.->|"README·프로필의 대체 페이지 주소 (자동 절체 없음)"| Fallback
 ```
 
-- 세 환경 모두 **같은 이미지**를 쓴다. 차이는 설정과 오버라이드 파일뿐이다(ADR-002).
-- 정적 폴백은 데모 영역을 제외한다(ADR-003, FR-070). 폴백은 2단계다: nginx 정적 페이지(앱 다운), Cloudflare 정적 미러(호스트 다운, 관문 G11) — ADR-023.
+- 환경(집 PC 라이브, k3d 검증)은 **같은 이미지**를 쓴다. 차이는 설정과 오버라이드 파일뿐이다(ADR-002). Oracle 은 선택적 후속이라 그림에서 뺐다(카드 없음).
+- 정적 폴백은 데모 영역을 제외한다(ADR-003, FR-070). 폴백은 2단계다: nginx 정적 페이지(앱 다운), 별도 주소의 정적 대체 페이지(호스트·Funnel 다운; 호스팅 G11, 사람이 안내를 갱신하는 수동 전환, Worker 절체 G13 은 도메인 확보 시 후속 보류, [design/16](../design/16-outage-fallback-page.md)) — ADR-023. **집 PC 중단은 사이트 전체 중단(단일 장애점)이며 사용자가 수용한다.**
 
 ## 10. 장애 모드
 
 | 무엇이 죽으면 | 방문자가 보는 것 | 시스템이 하는 일 |
 |---|---|---|
-| 집 PC·회선 | 소개·아키텍처(정적 폴백), 데모는 '점검 중' | 복구 후 자동 재개. Oracle 이전은 수동 |
+| 집 PC·전원·회선·Funnel | **사이트 전체 중단(단일 장애점)**. 앱 주소는 연결 오류(자동 절체 없음, 수용), 별도 주소의 정적 대체 페이지만 응답 | 복구 후 자동 재개(systemd/compose 재시작 정책). 외부 가용성 점검으로 감지(서비스 검증 필요). Oracle 이전은 하지 않음 |
 | `api` | 쓰기 실패 메시지, 읽기는 일시 불가 | 재시작. 명령은 트랜잭션이라 반쪽 저장 없음 |
 | `ws-gateway` | 연결 끊김 표시 → 자동 재접속 | 순번 기반으로 놓친 변경 복구 또는 스냅샷(ADR-014) |
 | `worker` | 글은 저장되나 읽기 모델 반영·시각화가 늦어짐 | outbox·inbox 가 쌓임. 재시작·임대 만료 후 이어서 처리. 적체·지연 지표가 오름 |
 | 프로젝터 버그로 읽기 모델 오염 | 목록이 잘못 보임 | 읽기 모델을 비우고 정본·이벤트로 **재구성** |
 | `postgres` | 전체 쓰기·읽기 불가 | 볼륨 복구 또는 백업 복원(일별 7·주별 4, 외부 보관, ADR-023) |
 | `prometheus`/`grafana` | 대시보드만 비어 있음 | 사이트 기능에는 영향 없음 |
-| 터널의 WebSocket 미통과(🔴 미확인) | 실시간 갱신 안 됨 | 구현 초기 실측 후 대체 방식 결정(ADR-003) |
+| Funnel 의 WebSocket 미통과(🔴 미검증, G14) | 실시간 갱신 안 됨 | 구현 초기 실측 후 대체 방식 결정(ADR-003) |
+| Funnel 대역폭 한도 초과(수치 비공개, 베타) | 응답 지연·끊김 | G14 체감 측정, 자산·페이로드 축소 |
+| 클라이언트 IP 미확인 | IP 기반 속도 제한이 약해짐(전역 한도화) | 세션/계정 기준 제한 우선(ADR-008), G14 ④ |
+| Funnel 베타 정책 변경 | 노출 경로 상실 가능 | 재검토 조건(ADR-003), 도메인 확보 시 다른 노출 경로로 복귀 |
+| 자동 절체 없음 | 중단 중 앱 주소는 연결 오류, 대체 페이지는 사람이 갱신 | README·프로필에 두 주소 병기, 외부 업타임 알림, 런북(design/16 §4.1). 수용 |
 
 ## 11. 측정할 것 (지표 지도)
 
@@ -268,16 +267,17 @@ flowchart LR
 
 **구현 순서는 Phase 번호와 다르다(P0 D24): M1 → 3 → 4 → 5 → 6a(CS 채팅) → 6b → 6c → 6d → 1(바둑) → 2 → 6e.** 아래 표는 번호순이며 순서가 아니라 식별자다. 이력서 제출 가능 시점은 M1 + Phase 3 + Phase 4. 각 단계 착수 전 설계 재검토(P0 §12.5).
 
-Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evolution.md) 가 정본이다(공통 진화 P0 + 바둑·상거래·풀필먼트·채팅). 여기는 요약과 포인터만 둔다. ADR-030~047 은 **Proposed**(사용자 확정 대기).
+Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evolution.md) 가 정본이다(공통 진화 P0 + 바둑·상거래·풀필먼트·채팅). 여기는 요약과 포인터만 둔다. ADR-030~048 은 **Proposed**(사용자 확정 대기).
 
 | 단계 | 추가되는 것 | 이 구조에서 바뀌는 곳 | 상세 |
 |---|---|---|---|
-| Phase 1 | `game`, `chat` 모듈, `/ws/room` 연결 | 대국 명령은 **REST**(WS 는 push 전용), `game_event` 로그 + NOTIFY fast lane, `realtime` 이 룸 포트·presence 소유 | [P1](../design/phases/01-baduk.md), [P4](../design/phases/04-chat.md), ADR-032·034·035·045 |
-| Phase 2 | `analysis`(KataGo 별도 프로세스), `ledger` | 분석 큐는 **Postgres inbox 선점**(Redis 없음), 보상 전이는 B12 `InTx` | [P1](../design/phases/01-baduk.md) §9~10, ADR-036·037 |
-| Phase 3 | `catalog`, `deal`, `order`, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정은 B12 `InTx` 쌍, Streams 판정 | [P2](../design/phases/02-commerce.md), ADR-031·038 |
+| Phase 1 | `game` 모듈(`chat`·`/ws/room` 은 6a 에서 먼저 도입, 여기서는 대국 채팅 룸 종류 추가) | 대국 명령은 **REST**(WS 는 push 전용), `game_event` 로그 + NOTIFY fast lane, `realtime` 이 룸 포트·presence 소유 | [P1](../design/phases/01-baduk.md), [P4](../design/phases/04-chat.md), ADR-032·034·035·045 |
+| Phase 2 | `analysis`(KataGo 별도 프로세스; `ledger` 는 Phase 3 에서 이미 도입) | 분석 큐는 **Postgres inbox 선점**(Redis 없음), 보상 전이는 B12 `InTx` | [P1](../design/phases/01-baduk.md) §9~10, ADR-036·037 |
+| Phase 3 | `catalog`, `deal`, `order`, `ledger`(모의 USDC·POINT 지급·교환), 최소 `pricefeed`(고정 환율 소스), `payment`(원장 결제·혼합 결제), 최소 `escrow`(hold / release / refund)와 환불, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정은 B12 `InTx` 쌍, Streams 판정 | [P2](../design/phases/02-commerce.md), ADR-031·038·040·048 |
 | Phase 4 | 워크로드 분리 | `ws-gateway` 사이트/룸 분화, HPA·PDB, M1 G8 롤링 패턴 | [P0](../design/phases/00-platform-evolution.md) §10, ADR-033 |
-| Phase 5 | `payment`, `escrow`, `settlement`, `pricefeed` | 웹훅 inbox, 모의 결제 어댑터, 복식 원장, KEK/DEK 상향 | [P2](../design/phases/02-commerce.md), ADR-039~041 |
-| Phase 6 | `inventory`, `fulfillment`, `support` | 이중 재고 원장, 출고 사가, CS 티켓, 허용목록 역할(`agent`·`operator`) | [P3](../design/phases/03-fulfillment.md), [P4](../design/phases/04-chat.md), ADR-042~047 |
+| Phase 5 | `settlement` + `payment`·`escrow`·`pricefeed` 확장(카드 결제, 분쟁·동결·자동 확정, 실제 시세) | 웹훅 inbox, 모의 결제 어댑터, KEK/DEK 상향 | [P2](../design/phases/02-commerce.md), ADR-039~041 |
+| Phase 6 (6a~6d) | `chat`·`support`(6a, `/ws/room` 도입), `inventory`·`fulfillment`(6c), 지갑 연결(6d) | 이중 재고 원장, 출고 사가, CS 티켓, 허용목록 역할(`agent`·`operator`) | [P3](../design/phases/03-fulfillment.md), [P4](../design/phases/04-chat.md), ADR-032·042~047 |
+| Phase 6e | 마작(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) | 마지막 구현 | [P1](../design/phases/01-baduk.md), ADR-034·035 |
 
 **바뀌지 않는 것**: 모듈 경계 규칙(+ **B12**: 층 규칙과 `InTx` 허용 쌍, P0 §2.4), domain·service·usecase 의존 방향, CQRS(조회는 읽기 모델만), outbox/inbox 규약, 선점 규약, 프록시 + 경로 라우팅, 같은 이미지 원칙, 모든 쓰기는 트랜잭션.
 
@@ -285,8 +285,9 @@ Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evol
 
 | 항목 | 결정 시점 |
 |---|---|
-| nginx 이미지의 `realip` 포함 여부, Oracle 경로 TLS 자동화 방식 | 관문 G7 (구현 단계 0) |
+| nginx 이미지의 `realip` 포함 여부 (Oracle 경로 TLS 자동화는 미추진) | 관문 G7 (구현 단계 0) |
 | 임대·백오프 초기값 조정 | 처리 시간 측정 후(규칙·초기값은 ADR-023) |
 | 복구 시험 수행 | M1 후반(방식은 ADR-023, 외부 저장소는 G12) |
-| Cloudflare 정적 미러 수단 | 관문 G11 |
+| 별도 주소 정적 호스팅 수단(Cloudflare Pages vs GitHub Pages) | 관문 G11 |
+| Funnel 의 WebSocket·대역폭·클라이언트 IP·재시작·인증서 | 관문 G14 |
 | 경계 검사 규칙 파일 작성(dependency-cruiser, 계층·CQRS 규칙) | 구현 단계 0 |

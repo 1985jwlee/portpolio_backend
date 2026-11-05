@@ -4,10 +4,10 @@
 - 근거: 원 계획안 모순 #6·#7, Phase 0·4 / 명세 NFR Scalability, AC-014 / 인터뷰 R9-Q2
 
 ## 맥락
-원 계획안은 K8s(Gateway API·HPA·PDB)로 프로덕션화를 증명하려 했다. 명세는 **완전 무료로 상시 공개**(집 PC 또는 Oracle Always Free)를 제약으로 둔다. 무료 자원에서 K8s 컨트롤 플레인 오버헤드까지 상시 감당하는 것은 부담이 크다(실측은 아직 없음). 또한 커뮤니티 ingress-nginx 는 2026-03 에 retire 되어 더는 패치가 없다고 원 계획안이 기록했다.
+원 계획안은 K8s(Gateway API·HPA·PDB)로 프로덕션화를 증명하려 했다. 명세는 **완전 무료로 상시 공개**(집 PC 단일 호스트, Oracle 미추진)를 제약으로 둔다. 무료 자원에서 K8s 컨트롤 플레인 오버헤드까지 상시 감당하는 것은 부담이 크다(실측은 아직 없음). 또한 커뮤니티 ingress-nginx 는 2026-03 에 retire 되어 더는 패치가 없다고 원 계획안이 기록했다.
 
 ## 결정
-- **라이브**: Docker Compose 한 벌. 집 PC 와 Oracle 양쪽에서 같은 파일로 뜬다. 차이는 오버라이드 파일로만 둔다.
+- **라이브**: Docker Compose 한 벌. 집 PC 에서 뜬다(백엔드와 web 모두). 다른 호스트(선택적 후속, 현재 미추진)로 옮길 때의 차이는 오버라이드 파일로만 둔다.
 - **K8s**: 같은 컨테이너 이미지를 **로컬 k3d** 에 배포·검증하는 매니페스트를 유지한다. 외부 진입은 **Gateway API(HTTPRoute)** 로 하고 ingress-nginx 는 쓰지 않는다.
 - 라이브와 k3d 는 **같은 이미지**를 쓴다. 환경 차이는 설정으로만 흡수한다.
 
@@ -16,15 +16,15 @@
 ### Compose 구성(라이브)
 | 서비스 | M1 | 비고 |
 |---|---|---|
-| `proxy` | O | **경로 라우팅(`/`, `/api`, `/ws`, `/grafana`), TLS 종료(Oracle 경로), 원 접속 주소 정규화.** 제품은 **nginx**(ADR-022, 관문 G7: `realip` 포함 이미지 확인·헤더 정규화·Oracle 경로 TLS 방식). 집 PC 경로에서는 `cloudflared` 가 이 컨테이너를 가리킨다. K8s 검증본에서는 Gateway API 가 이 역할을 대신한다 |
+| `proxy` | O | **경로 라우팅(`/`, `/api`, `/ws`, `/grafana`), TLS 종료(Oracle 경로 — 선택적 후속, 미추진), 원 접속 주소 정규화.** 제품은 **nginx**(ADR-022, 관문 G7: `realip` 포함 이미지 확인·헤더 정규화·Oracle 경로 TLS 방식). 집 PC 경로에서는 호스트의 `tailscale funnel` 이 이 컨테이너의 평문 로컬 포트(예: 127.0.0.1:8080)로 프록시한다(TLS 는 Funnel 이 PC 에서 종료하므로 nginx 는 TLS 없이 받는다). 클라이언트 IP 처리는 Funnel 의 전달 헤더가 미확인이라 **미확인 — G14 에서 실측**(CF-Connecting-IP/realip 가정은 Cloudflare Tunnel 전제였음, 폐기). K8s 검증본에서는 Gateway API 가 이 역할을 대신한다 |
 | `web` | O | Next.js |
 | `api`, `ws-gateway`, `worker` | O | ADR-001, 같은 이미지 |
 | `postgres` | O | 볼륨 필수 |
 | `prometheus`, `grafana` | O | ADR-007, 컨테이너 2개 추가 |
-| `cloudflared` | 집 PC | Cloudflare Tunnel (ADR-003) |
+| ~~`cloudflared`~~ | — | ~~Cloudflare Tunnel~~ — **폐기(도메인 미구입, 2026-11-05)**. 노출은 호스트의 Tailscale Funnel(ADR-003)이며 compose 서비스가 아니다 |
 | `redis` | 후속(compose 프로필 `redis` 로 정의만, ADR-024) | 재고 선점·전달 계층 후보 (ADR-006·010) |
 
-파일 구성(제안): `compose.yml`(공통) + `compose.home.yml` + `compose.oracle.yml`(Arm 플랫폼·리소스 차이).
+파일 구성(제안): `compose.yml`(공통) + `compose.home.yml`. `compose.oracle.yml`(Arm 플랫폼·리소스 차이)은 선택적 후속이라 현재 만들지 않는다.
 
 ### K8s 검증본(k3d)
 - 매니페스트 디렉토리를 별도로 두고 `Deployment` 를 엔트리포인트별로 분리한다.
@@ -48,7 +48,7 @@
 | 위험 | 완화 |
 |---|---|
 | 두 벌이 어긋나 k3d 에서 되는 것이 라이브에서 안 됨 | 같은 이미지, 환경 변수 계약을 하나의 문서로 관리, AC-014 로 양쪽 시험 |
-| Oracle ARM 과 x86 이미지 차이 | 멀티 아키텍처 이미지 빌드(CI) |
+| (선택적 후속) Oracle ARM 과 x86 이미지 차이 | Oracle 미추진이라 현재 해당 없음. 추진 시 멀티 아키텍처 이미지 빌드(CI) |
 
 ## 검증 방법
 AC-014(두 호스팅에서 핵심 시나리오 통과) + k3d 에서 probe·PDB·롤링 중 재접속 시험.

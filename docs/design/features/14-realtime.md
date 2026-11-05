@@ -747,7 +747,7 @@ sequenceDiagram
     participant S as ResumeService
     participant U as PublicHub
     C->>X: GET /ws/public Upgrade Origin
-    X->>R: 전달 (realip 정규화 후)
+    X->>R: 전달 (주소 헤더 정규화 후)
     R->>H: onUpgrade(req)
     H->>H: Origin 검사, draining 검사, ConnectionLimiter.admit
     alt 거절

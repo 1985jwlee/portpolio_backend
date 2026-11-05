@@ -1,7 +1,7 @@
 # ADR-006: 이벤트 전달 계층 — Postgres 폴링에서 Redis Streams 또는 Kafka 로
 - 상태: **Proposed** (사용자 지시: "Kafka 의 메모리 부족을 Redis 와 함께 Redis Streams 로 푸는 방안을 검토" — 결정 아님)
 - 날짜: 2026-11-03
-- 근거: 원 계획안 모순 #6, Phase 2·3 / 명세 Out of Scope, FR-030 / 인터뷰 R6-Q1, R9-Q1
+- 근거: 원 계획안 모순 #6, Phase 3 / 명세 Out of Scope, FR-030 / 인터뷰 R6-Q1, R9-Q1
 
 > 도입 이음새·기준·장애 거동은 [ADR-024](ADR-024-redis-seam.md). 이 ADR 의 전달 인터페이스가 그곳의 `EventTransport` 포트다.
 
@@ -13,7 +13,7 @@
 
 ## 결정 (잠정)
 1. **M1**: Postgres outbox + 폴링/NOTIFY. 발행·소비는 **전달 인터페이스 뒤**에 둔다. ADR-005 규약(at-least-once + 멱등)은 유지한다.
-2. **Phase 2 착수 전**에 아래 비교를 측정으로 마치고 이 ADR 을 Accepted 로 확정하거나 후속 ADR 로 대체한다.
+2. **타임딜(Phase 3) 시점**에 아래 비교를 `deal` 버스트 부하 시험으로 측정해 판정하고([ADR-031](ADR-031-event-transport-streams.md)) 이 ADR 을 Accepted 로 확정하거나 후속 ADR 로 대체한다.
 3. 비교 전 기본 방향은 **Redis Streams 우선 검토**다(추가 컨테이너가 없다).
 
 ## 설계 상세
@@ -65,7 +65,7 @@
 이벤트 규모가 작으면 Redis Streams 또는 DB outbox 로 충분하고, 팀 간 재사용·장기 보존이 필요해질 때 Kafka 를 도입한다.
 
 ## 재검토 조건
-위 측정 완료 시점(Phase 2 착수 전). 순서·내구성 요구가 Redis 로 충족되지 않으면 Kafka.
+위 측정 완료 시점(타임딜 Phase 3, ADR-031). 순서·내구성 요구가 Redis 로 충족되지 않으면 Kafka.
 
 ## 관련 ADR
 ADR-005, ADR-009, ADR-010, ADR-002(메모리 예산)

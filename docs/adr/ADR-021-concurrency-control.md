@@ -75,7 +75,7 @@ sequenceDiagram
 | `<m>.inbox_message` | `received` → `processing` → `processed` / `dead` | PK 중복 차단, 읽기 모델 순번 검사 |
 | `ledger.reward` (Phase 2) | `PENDING` → (분석 선점 `processing`) → `CONFIRMED`/`FLAGGED` | 분석은 트랜잭션 밖, 토큰 완료 |
 | `deal.reservation` (Phase 3) | `active` → `confirming` → `confirmed` / `expired` | Redis Lua 선점(ADR-010), 만료 복원도 선점 후 멱등 |
-| `payment.payment` / `escrow` (Phase 5) | 상태 전이마다 기대 상태 조건 | PG 호출은 트랜잭션 밖, 웹훅은 inbox |
+| `payment.payment` / `escrow` (Phase 3 최소형, Phase 5 확장) | 상태 전이마다 기대 상태 조건 | PG 호출은 트랜잭션 밖, 웹훅은 inbox |
 | `guestbook.entry` 수정·숨김 | `version` 비교 | 409 + 최신 상태 반환 |
 | `guestbook.report` 처리 | `open` → `resolved` 조건부 갱신 | 관리자 동시 처리 시 한 명만 성공 |
 

@@ -11,7 +11,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 범위 | 비밀 유출, DB 덤프·백업 유출, 계정 탈취(GitHub·Cloudflare·관리자), 공급망 변조, 저장소 비밀 커밋 |
+| 범위 | 비밀 유출, DB 덤프·백업 유출, 계정 탈취(GitHub·Tailscale·관리자), 공급망 변조, 저장소 비밀 커밋 |
 | 범위 밖 | 가용성 장애(→ F17 경보), 일반 버그, 서비스 거부 공격 대응(M1 비목표) |
 | 역할 | **운영자 1인**(탐지·판단·조치·기록을 모두 한다). 온콜 없음 → 목표 시간은 "깨어 있을 때 즉시, 늦어도 24시간"을 기준으로 한다 |
 | 탐지 채널 | Discord 경보(F17 §17: `LoginFailedSpike`, `pf_log_redactions_total` 급증 등), 감사 로그(`worker audit:list`), 비밀 스캐너 알림, 제3자 신고 |
@@ -116,7 +116,7 @@ worker retention:pause --reason "$(basename "$INC")"
 | 2 | **세션 전체 폐기** | `worker admin revoke-sessions --all` | 로그인 사용자는 재로그인, 익명은 새 익명 세션(본인 글 표시 상실, 익명 글은 원래 수정 불가). private 연결 `4401` | **되돌릴 수 없음**(폐기된 세션은 복원 안 함) | 감사 `admin.sessions_revoked`(대상 수) |
 | 3 | **관리자 권한 회수** | `ADMIN_GITHUB_IDS` 에서 해당 id 제거 → 재배포 | 해당 계정의 숨김·신고 처리·메모 열람·쓰기 잠금 불가(전원 제거 시 관리 기능 전체 중단) | id 복구 후 재배포 | 설정 변경이라 앱 감사 아님 → **타임라인에 수동 기록**(커밋 id) |
 | 4 | **정적 폴백 전환** | `docker compose stop web api ws-gateway` | 데모·로그인 중단, 소개·아키텍처는 nginx 정적 페이지로 유지(FR-070) | `docker compose start ...` | 앱 중단이라 기록 없음 → 타임라인 |
-| 5 | **Tunnel 중지** | `docker compose stop cloudflared` | **사이트 전체 오프라인**(Cloudflare 정적 미러가 구성돼 있으면 정적 페이지만 응답할 수 있음 — G11 미확인) | `start cloudflared` | 타임라인 |
+| 5 | **Funnel 중지** | 호스트에서 `tailscale funnel` 설정 해제(예: `tailscale funnel reset` — 명령 형식은 구현 시 확인, 미검증) | **사이트 전체 오프라인**(앱 주소는 연결 오류. 별도 주소의 대체 페이지는 사람이 갱신해야 한다 — [16](16-outage-fallback-page.md) §4.1) | Funnel 재설정(포트·로컬 대상 기록을 런북에 둔다) | 타임라인 |
 
 ```mermaid
 sequenceDiagram
@@ -230,15 +230,15 @@ flowchart TD
 | 검증 | 구 URL 에 `curl` 시 404, 새 URL 로 시험 알림 도착 |
 | 후속 | 위조 메시지가 실제 경보로 오인되지 않았는지 타임라인 대조. 심각도 S3 |
 
-### 6.8 Cloudflare Tunnel 토큰
+### 6.8 Tailscale 노드·계정 (Funnel)
 
 | 항목 | 내용 |
 |---|---|
-| 영향 | 공격자가 같은 터널에 커넥터를 붙여 **트래픽을 가로채거나 응답을 위조**할 가능성 |
-| 즉시 | 격리 5단계(cloudflared 중지) 고려 |
-| 회전 | Cloudflare 대시보드에서 토큰 갱신(또는 터널 삭제 후 재생성 — 토큰 갱신 방식은 **미확인**) → `secrets/tunnel_token` 교체 → cloudflared 재시작 |
-| 검증 | 구 토큰 커넥터 연결 거부(대시보드의 커넥터 목록에 구 커넥터가 없음), 사이트 정상 |
-| 후속 | Cloudflare 계정 2FA·세션·API 토큰 점검. 변조된 응답이 나갔을 가능성이 있으면 §8 공지 |
+| 영향 | 계정·노드 키가 탈취되면 공격자가 같은 tailnet 에 노드를 붙이거나 노출 설정(`serve`/`funnel`)을 바꿔 **tailnet 내부 전용이어야 할 화면(Grafana 관리 등)을 노출**할 가능성. 중계 서버는 TLS 를 복호화하지 못하지만 계정 권한이 있으면 설정을 바꿀 수 있다(공식 문서에 근거한 범위 밖은 미확인) |
+| 즉시 | 격리 5단계(Funnel 중지) 고려 |
+| 회전 | Tailscale 관리 콘솔에서 해당 노드 제거·키 폐기 → 호스트 재로그인(인증 키를 쓴다면 새 키를 `secrets/` 에 교체) → Funnel 재설정. 재설정 뒤 `*.ts.net` 주소가 유지되는지는 **미확인**(G14 ⑤) — 바뀌면 OAuth 앱 콜백과 `PUBLIC_ORIGIN` 을 같이 고친다 |
+| 검증 | 관리 콘솔의 노드 목록에 구 노드가 없음, 공개 경로는 정상이고 `/grafana/` 관리 경로는 외부에서 404, 로그인 성공 |
+| 후속 | Tailscale 계정 2FA·세션·승인된 기기 점검. 변조된 응답이 나갔을 가능성이 있으면 §8 공지 |
 
 ### 6.9 관리자 GitHub 계정 탈취
 
@@ -310,7 +310,7 @@ flowchart TD
 | 호스트의 GHCR pull 토큰(읽기 전용 PAT) | 비공개 이미지 가져오기(공개 이미지면 영향 거의 없음) | GitHub 에서 토큰 폐기·재발급 → 호스트 `docker login` 자격 교체(`pf` 사용자 홈) |
 | CI 의 `GITHUB_TOKEN` | 실행 단위로 자동 만료 | 해당 없음(워크플로 권한 `contents: read` 최소화 점검) |
 | Grafana 관리자 비밀번호 | 대시보드·경보 규칙·연락처(웹훅 URL) 변경 | 환경 파일 교체 후 재기동. 변조 시 §6.7 도 점검 |
-| SSH 키(Oracle 호스트 사용 시) | 호스트 접근 | 키 교체, `authorized_keys` 점검, 전체 비밀 회전 고려(호스트 침해 취급) |
+| SSH 키(원격 호스트를 쓰는 경우에 한함 — 현재 집 PC 단일) | 호스트 접근 | 키 교체, `authorized_keys` 점검, 전체 비밀 회전 고려(호스트 침해 취급) |
 
 ## 7. 피해 범위 산정
 
@@ -397,7 +397,7 @@ Contact: {contact}
 | `FIELD_KEYS` | ☐ | 옛 키 제거 후 복호화 불가 | 신규 암호문 정상, 재암호화 0건 잔여 | | |
 | 백업 age 키쌍 | ☐ | 옛 개인키로 새 백업 안 열림 | 새 백업 복원 성공 | | |
 | Discord 웹훅 | ☐ | 구 URL 404 | 시험 알림 도착 | | |
-| Tunnel 토큰 | ☐ | 구 커넥터 거부 | 사이트 정상 | | |
+| Tailscale 노드 | ☐ | 구 노드 제거 | 사이트 정상 | | |
 | `revoke-sessions` | ☐ | 구 쿠키가 새 익명 세션 | private `4401` | | |
 | `retention:pause` | ☐ | 정지 중 삭제 안 함 | 24시간 자동 해제 | | |
 
@@ -408,7 +408,7 @@ Contact: {contact}
 | 항목 | 결정 시점 |
 |---|---|
 | 비밀 스캔 도구(gitleaks 등)와 GitHub 비밀 스캔·푸시 보호의 무료 범위 | S1-15 |
-| Cloudflare Tunnel 토큰 갱신 방식(갱신 vs 재생성) | S0-1 / S8-1 |
+| Tailscale 노드 제거·재등록 절차와 재등록 후 주소 유지 | S0-1 / S8-1 (G14 ⑤) |
 | Bun 의 의존성 설치 스크립트 기본 정책 | 구현 초기 |
 | 읽기 전용 조사 역할(`pf_readonly`)을 둘지 | S8-1 |
 | 법적 통지 의무의 적용 여부·기한 | **법무 검토** |

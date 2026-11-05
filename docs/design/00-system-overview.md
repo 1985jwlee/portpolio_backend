@@ -21,6 +21,7 @@
 | [13](13-incident-response.md) | 보안사고 대응: 심각도, 증거 보존, 비상 스위치, 자산별 런북, 리허설 |
 | [14](14-seo-and-error-pages.md) | SEO·공유 미리보기·robots/sitemap·JSON-LD·오류 화면(404/403/500/점검) |
 | [15](15-visual-design.md) | 시각 디자인: 토큰·타이포·컴포넌트 모양·핵심 화면 목업(모던 미니멀) |
+| [16](16-outage-fallback-page.md) | 서버 중단 시 정적 대체 페이지: 별도 주소 + 수동 전환(도메인 없음), G13 보류, 집 PC 단일 장애점 |
 | [features/](features/00-feature-catalog.md) | **기능 114개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
 | [phases/](phases/00-platform-evolution.md) | **Phase 1~6 영역 설계**: 공통 진화(P0: 서비스 경계·B12 트랜잭션 참여 규칙·이벤트 계약 정본·ENC 통합표·사용자 결정 목록), 바둑(P1), 상거래(P2), 풀필먼트(P3), 채팅(P4). ADR-030~047(Proposed) |
 
@@ -35,24 +36,26 @@ flowchart LR
     V["방문자<br/>(채용 담당자 · 익명)"]
     M["관리자<br/>(허용목록 GitHub ID 1명)"]
     GH["GitHub OAuth"]
-    CF["Cloudflare<br/>(DNS · Tunnel · 정적 미러)"]
+    CF["Tailscale Funnel<br/>(*.ts.net 주소 · TLS 는 PC 에서 종료)"]
+    FB["정적 대체 페이지<br/>(별도 주소 · 수동 전환)"]
     SYS["포트폴리오 사이트<br/>web · api · ws-gateway · worker<br/>postgres · 관측"]
     V -->|"HTTPS / WSS"| CF
     M -->|"HTTPS"| CF
     CF --> SYS
     SYS -->|"인가 코드 교환"| GH
     V -.->|"로그인 리다이렉트"| GH
+    V -.->|"중단 시 README·프로필의 두 번째 주소"| FB
 ```
 
-외부 시스템은 **GitHub(로그인)** 과 **Cloudflare(진입·폴백)** 둘뿐이다. 그 밖의 외부 의존은 두지 않는다(무료·무카드 원칙).
+외부 시스템은 **GitHub(로그인)**, **Tailscale(Funnel 진입, 도메인 미구입 — `<호스트>.<tailnet 이름>.ts.net`)**, **별도 주소의 정적 호스팅(대체 페이지)** 셋뿐이다. 그 밖의 외부 의존은 두지 않는다(무료·무카드 원칙, 카드·약관은 가입 화면에서 확인 필요).
 
 ## 2. 컨테이너와 데이터 경로
 
 ```mermaid
 flowchart TB
     subgraph edge["진입"]
-        CFD["cloudflared<br/>(집 PC 경로)"]
-        PX["proxy (nginx)<br/>limit_req · realip · 폴백"]
+        CFD["Tailscale Funnel<br/>(집 PC 호스트 · 평문 로컬 포트로 프록시)"]
+        PX["proxy (nginx)<br/>limit_req · 주소 헤더 정규화 · 폴백"]
     end
     subgraph app["애플리케이션 (같은 모노레포·같은 이미지)"]
         WEB["web<br/>Next.js on Bun"]
@@ -441,7 +444,7 @@ flowchart LR
         D1["bun run (프로세스 직접)<br/>+ compose: postgres · 관측"]
     end
     subgraph live["라이브 (Compose)"]
-        L1["proxy · web · api · ws-gateway · worker<br/>postgres · prometheus · grafana · cloudflared"]
+        L1["proxy · web · api · ws-gateway · worker<br/>postgres · prometheus · grafana · 호스트의 tailscale funnel"]
     end
     subgraph k8s["검증 (k3d)"]
         K1["Gateway API + Envoy Gateway<br/>Deployment × 4 · StatefulSet(postgres)"]

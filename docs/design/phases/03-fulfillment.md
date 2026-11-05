@@ -42,9 +42,9 @@ Phase 6 의 "WMS 풀필먼트" 항목(ADR-016)을 **아키텍처 수준**으로 
 | D5 | **대사(reconciliation)** 가 주입된 불일치를 한 번의 실행에서 찾고, 정상 데이터에서는 오탐 0 이다 | 카오스 + 대사 시험 |
 | D6 | 수취인 개인정보가 이벤트·로그·읽기 모델·DB 덤프에 평문으로 없다 | 센티널 시험(ADR-026 방식) |
 
-선행 조건: Phase 3 의 `deal`·주문·`ledger`(P2), Phase 5 의 결제·에스크로(`order.paid` 의 카드 결제, `shipment.delivered` → 에스크로 해제), 6a 의 `RolePolicy` 일반화·`chat`/`support`·`agent` 역할(P0). **착수하지 않는 조건**: P2 의 `order.paid` 이벤트 계약이 확정되지 않았을 때.
+선행 조건: Phase 3 의 `deal`·주문·`ledger`(P2), Phase 3 의 `payment`·최소 `escrow`(hold/release/refund; `shipment.delivered` → 에스크로 해제 경로, Phase 5 가 분쟁·반품 동결·정산·자동 확정 타이머를 확장), Phase 5 의 KEK/DEK v2, **6a** 의 `RolePolicy` 일반화·`chat`/`support`·`agent` 역할(P0). **착수하지 않는 조건**: P2 의 `order.paid` 이벤트 계약이 확정되지 않았을 때.
 
-> **구현 순서 (P0 D24)**: 이 문서는 **6c(구현 순서 5-c)** 이고 Phase 3·5·6a·6b 다음, 바둑(Phase 1~2)보다 앞이다. 이 단계에서 처음 일어나는 일 — ① `operator` 역할 도입 ② **약정 활성화**: `INVENTORY_EARMARK=on`, `deal-earmark-reactor` 활성화, 진행 중(open/scheduled) 딜의 **초기 약정 동기화 잡**(닫힘·정산 딜 제외; P0 §1.4 G5) ③ `order.paid` 소비 시작 — Phase 3~5 에서 이미 `paid` 인 주문은 정상 주문이므로 같은 경로로 소비한다(`legacy_demo` 는 폐기, P0 G3). **환불은 `payment.refunded` 의 다리(`legs`)별 원래 자산 환불**이며 이 문서는 금액 계산을 하지 않고 이벤트만 소비한다(P2 §6.6.1) ④ 6a 의 CS 채팅 `OrderContextReader` 의 `shipment` 가 이때부터 채워진다(G10). 착수 전 설계 재검토(P0 §12.5)를 거친다.
+> **구현 순서 (P0 D24)**: 이 문서는 **6c(구현 순서 5-c)** 이고 Phase 3·5·6a·6b 다음, 바둑(Phase 1~2)보다 앞이다. 이 단계에서 처음 일어나는 일 — ① `operator` 역할 도입 ② **약정 활성화**: `INVENTORY_EARMARK=on`, `deal-earmark-reactor` 활성화, 진행 중(open/scheduled) 딜의 **초기 약정 동기화 잡**(닫힘·정산 딜 제외; P0 §1.4 G5) ③ `order.paid` 소비 시작 — **`fulfillment_mode=physical` 인 주문만 소비한다**(주문은 ConfirmPurchase 시점에 6c 가 꺼져 있으면 `demo`, 켜져 있으면 `physical`; `demo` 주문은 풀필먼트가 소비하지 않고 관리자 `MarkDelivered` 또는 구매자 `confirm-receipt` 로 종결되며 에스크로 자동 해제는 `ESCROW_TIME_SCALE` 시간 압축으로 재현한다. `legacy_demo` 는 폐기, P0 G3). **6c 착수 점검에 물리 재고 시드와 초기 약정 동기화가 포함된다**. **환불은 `payment.refunded` 의 다리(`legs`)별 원래 자산 환불**이며 이 문서는 금액 계산을 하지 않고 이벤트만 소비한다(P2 §6.6.1) ④ 6a 의 CS 채팅 `OrderContextReader` 의 `shipment` 가 이때부터 채워진다(G10). 착수 전 설계 재검토(P0 §12.5)를 거친다.
 
 ---
 
@@ -363,7 +363,7 @@ earmark 소비는 `earmarked_total = earmarked_total - :q, allocated_total = all
 
 판매 가능 총량 ≤ 약정 상한 규칙은 상거래(`deal`)가 받는다(P2). 약정의 증감은 아래 이벤트로만 일어난다.
 
-**활성화 시점 (D24)**: 약정은 6c 에서 켜진다. 그 전의 딜은 약정 없이 게시되었으므로, 켤 때 **진행 중 딜(open/scheduled)** 마다 `earmark(sku, "deal:<id>", 남은 판매 가능 수량)` 를 초기 동기화 잡이 만들고(재고가 모자라면 해당 딜을 `publish_rejected` 사유로 관리자 큐에 올린다), 이미 닫히거나 정산된 딜은 대상이 아니다.
+**활성화 시점 (D24)**: 약정은 6c 에서 켜진다(착수 점검: 물리 재고 시드 → 초기 약정 동기화 순). 그 전의 딜은 약정 없이 게시되었으므로, 켤 때 **진행 중 딜(open/scheduled)** 마다 `earmark(sku, "deal:<id>", 남은 판매 가능 수량)` 를 초기 동기화 잡이 만들고(재고가 모자라면 해당 딜을 `publish_rejected` 사유로 관리자 큐에 올린다), 이미 닫히거나 정산된 딜은 대상이 아니다.
 
 | 시점 | 이벤트 | 약정 변화 | 비고 |
 |---|---|---|---|
@@ -388,7 +388,7 @@ earmark 소비는 `earmarked_total = earmarked_total - :q, allocated_total = all
 | 오케스트레이션(중앙 조정자) | 흐름 명시, 보상 한곳 | 조정자가 상태를 소유해 크기가 커진다 |
 | **하이브리드 (채택)** | 모듈 간은 코레오그래피, 모듈 안은 오케스트레이션 | 두 방식을 구분해야 한다 |
 
-- **모듈 간**(commerce ↔ fulfillment): 이벤트로만 만난다. `order.paid` → (`fulfillment.accepted`(할당 성공 후, 할당 결과 포함) | `fulfillment.rejected`) → `shipment.dispatched` → `shipment.delivered`. `fulfillment.accepted` 는 `AcceptOrder` 단일 트랜잭션에서 **할당이 성공한 뒤에만** 발행되므로 상거래가 "수락됨"을 본 뒤 같은 주문의 `rejected` 를 받는 일이 없다(사후 중단은 `fulfillment.cancelled`).
+- **모듈 간**(commerce ↔ fulfillment): 이벤트로만 만난다. `order.paid` → (`fulfillment.accepted`(할당 성공 후, 할당 결과 포함) | `fulfillment.rejected`) → `shipment.dispatched` → `shipment.delivered`. `order.paid` 는 `fulfillment_mode=physical` 주문에만 이 흐름을 탄다(`demo` 주문은 소비하지 않는다). `fulfillment.accepted` 는 `AcceptOrder` 단일 트랜잭션에서 **할당이 성공한 뒤에만** 발행되므로 상거래가 "수락됨"을 본 뒤 같은 주문의 `rejected` 를 받는 일이 없다(사후 중단은 `fulfillment.cancelled`).
 - **모듈 안**(fulfillment): `FulfillmentOrder` 애그리거트가 **프로세스 매니저**다. 상태와 다음 단계를 한 행(`version` 조건 갱신)이 갖고, 각 단계의 실행은 작업(PickTask, Package, Shipment)과 이벤트가 구동한다. 단계는 멱등이고 재시작에 안전하다.
 
 ### 5.2 FulfillmentOrder 상태 머신
@@ -503,7 +503,7 @@ stateDiagram-v2
     RESTOCKED --> CLOSED
     DISPOSED --> CLOSED
     REFUND_ONLY --> CLOSED
-    REJECTED_RETURN --> CLOSED
+    REJECTED_RETURN --> CLOSED : return.inspected REJECTED 발행 · 환불 없음
     CLOSED --> [*]
 ```
 
@@ -867,7 +867,7 @@ flowchart TD
 
 | `type` | 시점(같은 트랜잭션) | 페이로드 | 소비자 |
 |---|---|---|---|
-| `fulfillment.accepted` | `AcceptOrder` 단일 tx 안, **할당 성공 후**(`allocation` = `FULL`·`PARTIAL`·`PENDING`(백오더 대기)) | `orderId`, `foId`, `allocation`, `lines[{lineId, qtyAllocated}]` | commerce(주문 상태 "출고 준비") |
+| `fulfillment.accepted` (**페이로드 정본 = 이 판본**, P0 §8.3 반영) | `AcceptOrder` 단일 tx 안, **할당 성공 후**(`allocation` = `FULL`·`PARTIAL`·`PENDING`(백오더 대기)) | `orderId`, `foId`, `allocation`, `lines[{lineId, qtyAllocated}]` | commerce(주문 상태 "출고 준비") |
 | `fulfillment.rejected` | 할당 불가 | `orderId`, `reason`(`OUT_OF_STOCK`·`ADDRESS_UNSHIPPABLE`) | **order(환불 사가의 근거, 상거래가 소비하는 유일한 거절 신호)** — `inventory.allocation_failed` 는 inventory→fulfillment **내부 신호**이고 fulfillment 가 이를 `fulfillment.rejected` 로 변환 |
 | `fulfillment.allocation_completed` | 백오더 입고로 부분/대기 할당이 완료 | `orderId`, `foId`, `lines` | `fulfillment-projector` (상거래는 소비하지 않음 — accepted 가 이미 출고 준비를 알림). P0 §8.3 은 `.allocated`/`.partially_allocated` 를 `accepted` 로 병합하고 이 이벤트로 대체했다(정합 완료) |
 | `fulfillment.cancelled` | 취소 완료 | `orderId`, `stage`, `reason`(`REQUESTED`·`EXTERNAL`·`ADDRESS_NOT_CORRECTED`·`OUT_OF_STOCK_AFTER_ACCEPT` 등) | commerce(환불 진행, `payment-fulfillment-refunder`) — `reason=EXTERNAL` 은 환불 중복 방지용 구분 |
@@ -878,7 +878,7 @@ flowchart TD
 | `shipment.delivered` | 배송 완료 | `orderId`, `deliveredAt` | commerce(에스크로 자동 확정 타이머 시작 등 P2 소관) |
 | `shipment.delivery_failed` | 시도 소진 | `orderId`, `attempts` | commerce |
 | `return.received` | 반품 입고 | `returnId`, `orderId` | commerce |
-| `return.inspected` | 검수 완료 | `returnId`, **`orderId`**, `origin`(`CUSTOMER`·`RTS`), `disposition`(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`) | **commerce(환불 판단, `payment-fulfillment-refunder`)** |
+| `return.inspected` | 검수 완료 | `returnId`, **`orderId`**, `origin`(`CUSTOMER`·`RTS`), `disposition`(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`·`REJECTED`) — `REJECTED` 는 `REJECTED_RETURN` 종결 시 발행(환불 없음) | **commerce(환불 판단, `payment-fulfillment-refunder`)**, **escrow**(`REJECTED` 면 `frozen→held` 해제 재개, 그 외는 환불 경로) |
 | `inventory.allocation_failed` | 할당 조건부 UPDATE 0행(inventory 내부) | `skuId`, `foLineId`, `qty` | **fulfillment 만**(상거래는 소비하지 않음) |
 | `inventory.earmark_changed` · `inventory.earmark_rejected` | 약정 변경 / 거절(`allocated + earmarked > available`) | `skuId`, `channelRef`, `qty`, (`reason`) | **deal**(`deal_read.sku_capacity` 갱신·딜 게시 거절 근거) |
 | `inventory.stock_received` | 입고 확정 | `skuId`, `qty` | `backorder-retry`, commerce |
@@ -959,7 +959,7 @@ flowchart TD
 
 | 데이터 | 등급 | 보호 | 보관 |
 |---|---|---|---|
-| 수취인 이름·전화·주소·우편번호·배송 메모 (`recipient_enc`) | **ENC** | 필드 암호화 AES-256-GCM 봉투, AAD `fulfillment.fulfillment_order.recipient_enc:<id>`, 단일 JSON 봉투 | **익명화 시점 = `recipient_anonymize_at`** (봉투 NULL, 암호학적 삭제). 정의: 배송 완료(`shipment.delivered.deliveredAt`) + **반품 기한(5일)** 경과 후 **30일** → 완료 후 35일. 반품 케이스가 열려 있으면 `max(완료+5일, 반품 CLOSED)` + 30일. 취소·거절·반송 종결 주문은 종결 시점 + 30일. P0 §9.5·§9.6 정본, 사용자 확정 대기(U4) |
+| 수취인 이름·전화·주소·우편번호·배송 메모 (`recipient_enc`) | **ENC** | 필드 암호화 AES-256-GCM 봉투, AAD `fulfillment.fulfillment_order.recipient_enc:<id>`, 단일 JSON 봉투 | **익명화 시점 = `recipient_anonymize_at`** (봉투 NULL, 암호학적 삭제). 정의: 배송 완료(`shipment.delivered.deliveredAt`) + **반품 기한(5일)** 경과 후 **30일** → 완료 후 35일. 반품 케이스가 열려 있으면 `max(완료+5일, 반품 CLOSED)` + 30일. 취소·거절·반송 종결 주문은 종결 시점 + 30일. `demo` 주문(풀필먼트가 소비하지 않음)의 배송지 암호문은 종결(수령 확인/`MarkDelivered`) 후 N일(N 은 U4 와 함께 확정). P0 §9.5·§9.6 정본, 사용자 확정 대기(U4) |
 | `region_code` (시·도) | PII | 평문(통계·택배 구역 판단) | **익명화 대상이 아님** — 시·도 단위는 단독으로 개인을 식별하지 못하고 통계 목적이다. 주문 보관과 함께(필요 시 U4 에서 삭제로 변경) |
 | 작업자 ID (`claimed_by`, `approved_by`) | PSD | 평문, 로그 레이블 금지 | 이력 보관 |
 | 재고 수량·위치·로트 | SYS | 평문 | 원장 영구(추가 전용), 읽기 모델은 재구성 가능 |
@@ -1167,6 +1167,7 @@ sequenceDiagram
         RC->>INV: tx: 원장 DISPOSE
         RC->>P2: return.inspected (DISPOSE)
     end
+    Note over RC,P2: 반품 거절(REJECTED_RETURN)도 return.inspected (REJECTED) 를 발행 · 환불 없음, escrow 는 frozen→held
 ```
 
 ### 12.7 배송 실패 → 반송 → 재입고
@@ -1367,7 +1368,7 @@ M1 08 의 계층·등급 체계를 따른다. 이 영역의 AC 후보:
 
 | 단계 | 내용 | 완료 기준 | 선행 |
 |---|---|---|---|
-| W0 | 계약 확정(P2 `order.paid`), 역할 설계(P0), **`operator` 도입·약정 활성화 계획**(초기 동기화 잡) | 계약 문서 합의 | P2·P0, 6a |
+| W0 | 계약 확정(P2 `order.paid`), 역할 설계(P0), **`operator` 도입·약정 활성화 계획**(물리 재고 시드 → 초기 동기화 잡) | 계약 문서 합의 | P2·P0, 6a |
 | W1 | `inventory`: 마스터, 원장·잔고·포지션, 입고·검수·적치, 재고 조회 | 원장 합 = 잔고 속성 시험, 입고 E2E | W0 |
 | W2 | 출고 수신·할당·상태 머신 골격, 저재고 알림 | AC-WM-02·04 | W1 |
 | W3 | 웨이브·로케이션 계획·피킹 작업(임대·스캔)·패킹·취소·약정 | AC-WM-03·05·06 | W2 |

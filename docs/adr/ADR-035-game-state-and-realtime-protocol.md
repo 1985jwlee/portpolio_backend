@@ -23,7 +23,7 @@
 ## 설계 상세
 상태 머신, REST 계약, WS 메시지, 시퀀스, 시계 공정성, 지연 예산은 [phases/01-baduk.md](../design/phases/01-baduk.md) §4~5 가 정본이다. 이 ADR 은 선택의 이유만 남긴다.
 
-**지연 예산**: 착수자 클릭 → 상대 화면 push 도착 p95 ≤ 250ms(P0 D10, 제안·미측정). 구간 추정은 터널 편도 5–15ms(G1 측정의 절반), api 처리 10–25ms(추정), NOTIFY 도착 p50 0.31/p99 8–17ms(G4 측정), 팬아웃 p50 2.6–3.7/p99 7–65ms(G2 소크 측정)로 합 40–140ms(추정). 표준 경로(outbox→inbox→broadcaster→room_log)를 타면 +30–100ms(추정)라 예산 근처이므로 대국 룸은 fast lane 을 기본으로 한다. Phase 1 부하 시험에서 표준 경로가 p95 150ms 이하로 측정되면 제거할 수 있다.
+**지연 예산**: 착수자 클릭 → 상대 화면 push 도착 p95 ≤ 250ms(P0 D10, 제안·미측정). 구간 추정은 터널 편도 5–15ms(폐기된 Cloudflare 임시 터널 G1 측정의 절반 — **Funnel 에는 적용되지 않으므로 G14 에서 재측정**), api 처리 10–25ms(추정), NOTIFY 도착 p50 0.31/p99 8–17ms(G4 측정), 팬아웃 p50 2.6–3.7/p99 7–65ms(G2 소크 측정)로 합 40–140ms(추정). 표준 경로(outbox→inbox→broadcaster→room_log)를 타면 +30–100ms(추정)라 예산 근처이므로 대국 룸은 fast lane 을 기본으로 한다. Phase 1 부하 시험에서 표준 경로가 p95 150ms 이하로 측정되면 제거할 수 있다.
 
 ## 대안과 기각 이유
 - **착수를 WS 인바운드로 받기(이전 안)**: 왕복은 약간 짧지만 `ws-gateway` 에 DB 쓰기와 명령 usecase 를 들여 M1 의 읽기 전용 모델을 깨고, 쓰기 경로가 둘이 되어 가드 체인(Origin·속도 제한·멱등)·감사·배포 격리를 중복 구현해야 한다. 착수 빈도가 낮아 이득이 없다. → 기각, 지연 예산 초과가 측정되면 재검토(재검토 조건).
@@ -35,14 +35,14 @@
 
 ## 결과
 - 얻는 것: 쓰기 경로가 `api` 하나로 통일(가드·멱등·감사 재사용), `ws-gateway` 는 M1 과 같이 읽기·push 전용이라 격리와 배포가 단순, 재시작·재접속에 강한 상태, 낮은 push 지연.
-- 치르는 것: 착수가 REST 왕복이라 WS 인바운드보다 요청 헤더 비용이 있고, 시계 공정성을 위해 `receivedAt`·`lagGrace` 규칙이 필요하며, `RoomEventSource` 포트와 `room_changed` NOTIFY 채널이 추가된다. `game_event` 보관·정리 규칙이 필요하다. 쓰기 스키마 `game_event` 를 `ws-gateway`·`SyncGame`·`GET …/events` 가 읽는 것은 CQRS 의 **문서화된 예외 E1** 이다(방 로그이므로 복제하지 않음, P0 §2.4 등재).
+- 치르는 것: 착수가 REST 왕복이라 WS 인바운드보다 요청 헤더 비용이 있고, 시계 공정성을 위해 `receivedAt`·`lagGrace` 규칙이 필요하며, `RoomEventSource` 포트와 `room_changed` NOTIFY 채널이 추가된다. `game_event` 보관·정리 규칙이 필요하다. 쓰기 스키마 `game_event` 를 `ws-gateway`·`SyncGame`·`GET …/events` 가 읽는 것은 CQRS 의 **문서화된 예외 X1** 이다(방 로그이므로 복제하지 않음, P0 §2.4 등재).
 
 ## 위험과 완화
 | 위험 | 완화 |
 |---|---|
 | 핫 행(`game`) 경합 | 대국당 두 명뿐이라 경합은 착수·시간초과·기권 간뿐, CAS 로 해결 |
 | 시계 조작·지연 | 서버 시계 정본, 클라이언트 시각 불신, `receivedAt` 기준, `lagGrace` 고정 상한(착수당 0.3초) |
-| REST 지연으로 체감 불량 | `T_click→peer`·`T_commit→push` 측정, 초과 시 원인 분리(터널/api/게이트웨이), 그래도 부족하면 WS 인바운드 재검토 |
+| REST 지연으로 체감 불량 | `T_click→peer`·`T_commit→push` 측정, 초과 시 원인 분리(Funnel/api/게이트웨이), 그래도 부족하면 WS 인바운드 재검토 |
 | 요청 폭주 | 세션 속도 제한 `write.game`(초당 5건), 가드 체인 재사용 |
 | 이중 접속(두 탭) | 같은 참가자의 여러 탭 허용, 착수는 CAS/멱등으로 한 번만 |
 | NOTIFY 유실 | 구독 방 1초 폴링, 순번으로 정확성 보장 |

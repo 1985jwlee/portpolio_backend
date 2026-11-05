@@ -1,9 +1,9 @@
 # 02. 개발 환경
 
-로컬에서 **처음 클론한 뒤 사이트가 뜨기까지**와, 로컬에서 **터널·OAuth·K8s** 를 시험하는 방법을 고정한다.
+로컬에서 **처음 클론한 뒤 사이트가 뜨기까지**와, 로컬에서 **Funnel·OAuth·K8s** 를 시험하는 방법을 고정한다.
 근거: ADR-002(Compose 라이브 · k3d 검증) · ADR-003(진입) · ADR-022(관문) · ADR-023(백업) · [01](01-repository-structure.md)(스크립트·환경변수).
 
-> 다이어그램 해당 여부 — 순서도: 개발 모드 선택(§1) / 시퀀스: 로컬 기동(§2.2), OAuth 로그인 시험(§6), 터널 시험(§7) / 클래스·상속: 시드 실행기(§4)만 해당. compose·k3d 는 선언형 구성이라 클래스가 없다.
+> 다이어그램 해당 여부 — 순서도: 개발 모드 선택(§1) / 시퀀스: 로컬 기동(§2.2), OAuth 로그인 시험(§6), Funnel 시험(§7) / 클래스·상속: 시드 실행기(§4)만 해당. compose·k3d 는 선언형 구성이라 클래스가 없다.
 
 ---
 
@@ -38,17 +38,16 @@ flowchart TD
 |---|---|
 | `infra/compose/compose.yaml` | 공통 정의: 모든 서비스(이미지·헬스체크·네트워크·볼륨) |
 | `infra/compose/compose.dev.yaml` | 개발 오버라이드: 앱 서비스 비활성(`profiles: ["apps"]`), 포트 공개, proxy 가 호스트 앱으로 |
-| `infra/compose/compose.live.yaml` | 라이브 오버라이드: GHCR 이미지, `restart`, `cloudflared`, 포트 비공개, 비밀 파일 마운트 |
+| `infra/compose/compose.live.yaml` | 라이브 오버라이드: GHCR 이미지, `restart`, 포트 비공개(`proxy` 는 127.0.0.1 로만 바인딩), 비밀 파일 마운트 (Funnel 은 호스트의 `tailscaled` 가 맡아 compose 서비스가 아니다) |
 
 | 서비스 | 이미지(고정 방침) | 컨테이너 포트 → 호스트(개발) | 볼륨 | 헬스체크 |
 |---|---|---|---|---|
 | `postgres` | `postgres:18-alpine` | 5432 → **55432** | `pgdata` | `pg_isready` |
-| `proxy` | nginx (realip 포함 여부 G7) | 8080 → **8080** | `infra/nginx` 읽기 전용 마운트 | `GET /nginx-health` |
+| `proxy` | nginx (realip 포함 여부 G7, Funnel IP 헤더 G14 ④) | 8080 → **8080** | `infra/nginx` 읽기 전용 마운트 | `GET /nginx-health` |
 | `redis` (프로필 `redis`, **기본 기동 제외**) | 도입 시 결정(Redis/Valkey, ADR-024) | — | — | — |
 | `prometheus` | `prom/prometheus` 3.15.x | 9090 → 9090 | `prometheus-data` | `/-/ready` |
 | `grafana` | `grafana/grafana` 13.3.x | 3000 → **3030** (web 과 충돌 회피) | `grafana-data`, 프로비저닝 마운트 | `/api/health` |
 | `web` · `api` · `ws-gateway` · `worker` | `ghcr.io/<owner>/pf-web` · `pf-server` | 3000 · 3001 · 3002 · 3003 | — | `/readyz` (worker 는 `/healthz`) |
-| `cloudflared` | `cloudflare/cloudflared` | — | — | (라이브 전용) |
 | `backup` | 호스트 cron 또는 컨테이너 (ADR-023) | — | `backups` (DB 볼륨과 **다른 경로**) | 마지막 성공 시각 지표 |
 
 - 호스트 포트 `55432`·`3030` 은 충돌 회피용 **기본 제안값**이다(로컬에 이미 PostgreSQL/다른 3000 서비스가 있을 수 있다). 바꾸면 `.env` 의 `DATABASE_URL` 도 같이 바꾼다.
@@ -89,7 +88,7 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 컨테이너 로깅 | 모든 서비스 `logging: { driver: json-file, options: { max-size: "20m", max-file: "10" } }` (컨테이너당 최대 약 200MB). 개발 오버라이드는 기본값 사용 |
-| 호스트 아카이브 | `$PF_LOG_DIR/archive/YYYY-MM-DD/<service>.jsonl.gz` — `PF_LOG_DIR` 기본 `/var/log/pf`(`pf:pf` 0750, 파일 0640). rootless Docker 면 `~/.local/state/pf/logs`. **실제 호스트(집 PC·Oracle) 권한은 S8-1 에서 재확인** |
+| 호스트 아카이브 | `$PF_LOG_DIR/archive/YYYY-MM-DD/<service>.jsonl.gz` — `PF_LOG_DIR` 기본 `/var/log/pf`(`pf:pf` 0750, 파일 0640). rootless Docker 면 `~/.local/state/pf/logs`. **실제 호스트(집 PC) 권한은 S8-1 에서 재확인** |
 | 실행 | **systemd 타이머로 확정**(2026-11-04): `pf-archive-logs.timer` 일 1회 03:10 → `infra/scripts/archive-logs.sh`. 백업(03:30)·pull 배포(5분)도 같은 방식. 유닛은 `infra/systemd/`, 설치는 `infra/scripts/install-systemd.sh`(제안): 유닛 복사 → `systemctl daemon-reload` → `enable --now *.timer` → `list-timers` 확인. `Persistent=true` 로 꺼져 있던 동안의 실행을 보충. cron 은 systemd 가 없는 호스트의 대체 수단 (F17 §16.1.1) |
 | 상태 파일 | 각 작업이 `$STATUS_DIR/<job>/last_run.json` 을 매 실행마다 갱신 → worker 가 읽기 전용으로 마운트해 지표로 노출(F17 §16.2) |
 | 조회 | `infra/scripts/logq.sh --app api --level error --since 1h` (jq 필요) |
@@ -164,7 +163,7 @@ classDiagram
 | `FIELD_KEYS` (필드 암호화 키링 JSON, ADR-026) | `.env` (개발용 임의 키링) | `secrets/field_keys.json` → `FIELD_KEYS_FILE` | 없음 |
 | `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 개발에서는 미설정(경보 비활성, alerting 프로비저닝 미마운트) — **운영에서 파일이 없거나 비면 Grafana 연락처가 0개가 된다** | `secrets/discord_webhook` → `DISCORD_WEBHOOK_URL_FILE` | 없음 |
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, 32바이트 이상) | `.env` (개발용 임의 값) | `secrets/oauth_state_secret` → `OAUTH_STATE_SECRET_FILE` | 없음 |
-| Cloudflare Tunnel 토큰 | (로컬 시험 시 일회용) | `secrets/tunnel_token` | 없음 |
+| Tailscale 계정·인증 키(키 방식을 쓴다면) | 호스트 `tailscaled` 로그인 | 호스트 쪽 보관(compose secrets 아님, 구현 시 확정) | 없음 |
 | Grafana 관리자 비밀번호 | `.env` | `secrets/grafana_admin_password` | 없음 |
 | 백업 암호화 **공개키**(`BACKUP_AGE_RECIPIENT`, 비밀 아님) | 개발에서는 미사용 | 환경변수/설정(서버에는 공개키만, ADR-026). **개인키는 서버에 두지 않고** 사용자가 오프라인 보관(복구 시험 때만 사용) | 없음 |
 
@@ -199,6 +198,7 @@ COOKIE_SECURE=false
 | 요청 권한(scope) | **없음(공개 프로필만)** — ADR-008 최소 권한. 이메일 scope 요청 금지 |
 | 저장할 값 | Client ID → `.env`, Client Secret → `.env` (개발) |
 | `ADMIN_GITHUB_IDS` | 본인 **숫자 ID** (`https://api.github.com/users/<이름>` 의 `id`) |
+| (운영 앱은 별도) | 운영 OAuth 앱의 Homepage·callback 은 Funnel 의 고정 주소 `https://<호스트>.<tailnet 이름>.ts.net`(자리표시자)로 등록하고 `PUBLIC_ORIGIN` 도 같은 값으로 둔다(06 §3) |
 
 ```mermaid
 sequenceDiagram
@@ -225,38 +225,41 @@ sequenceDiagram
 
 시험 체크리스트(08 에서 자동화): state 불일치 → 거부 / verifier 없음 → 거부 / 허용목록 밖 ID → 일반 사용자 / 허용목록 ID → 관리자 가능 / 로그아웃 후 세션 폐기. 상세 흐름과 쿠키 규칙은 [06](06-auth.md) 가 정본이다.
 
-## 7. Cloudflare Tunnel 로컬 시험 (관문 G1)
+## 7. Tailscale Funnel 시험 (관문 G14, Proposed)
 
-G1 의 두 가지를 확인한다: ① WebSocket 이 터널을 통과하는가 ② `CF-Connecting-IP` 가 붙어 nginx 에서 읽히는가.
+G14 의 여섯 가지를 확인한다: ① `/ws/public`·`/ws/private` 형 WebSocket 이 Funnel 을 통과하는가 ② 유휴 타임아웃과 하트비트 주기 ③ 대역폭 한도 체감 ④ **실제 클라이언트 IP 가 어떤 헤더로든 전달되는가** ⑤ 재시작 후 주소 유지 ⑥ 인증서 갱신.
 
-**로컬 실측 결과(2026-11-04, trycloudflare 임시 터널·cloudflared 2026.10.7): 두 가지 모두 통과.** wss 업그레이드·64KB/512KB 에코·서버 close 1001/4408 이 사유까지 그대로 도달하고 `CF-Connecting-IP` 가 붙었다. 유휴 ping 이 없으면 약 126초에 1006 으로 끊기고 25초 `hb` 가 있으면 252초(관찰 상한)까지 유지된다. 에지는 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않고 `CF-Connecting-IP` 요청 헤더는 403(error 1000)으로 거부하므로 nginx 정규화 덮어쓰기가 필수다. **미확인**: 정식 Named Tunnel·Access·다중 커넥터(계정 필요).
+**전체가 미검증이다.** 이전 G1(Cloudflare 임시 터널, 2026-11-04 통과)은 Funnel 에 적용되지 않으므로 근거로 쓰지 않는다. Tailscale 계정과 실제 Funnel 이 필요해 로컬에서 먼저 확인할 수 없다.
+
+**공식 문서에 근거한 전제**(tailscale.com/kb/1223/funnel, 2026-01-20 검증): 모든 플랜(무료 포함)에서 가능, 베타. 요건은 Tailscale v1.38.3+, MagicDNS, HTTPS 인증서, tailnet 정책의 funnel 노드 속성(CLI 로 켜면 자동). 주소는 `<호스트>.<tailnet 이름>.ts.net` 하위만, 포트는 443·8443·10000 만, TLS 연결만, 대역폭 제한이 있고 설정 불가(수치 비공개), TCP 프록시라 중계 서버는 복호화하지 못하고 TLS 는 우리 PC 에서 종료되며 집 IP 는 드러나지 않는다. 같은 포트에 serve 와 funnel 을 동시에 쓸 수 없고, DNS 전파는 최대 10분 걸린다. WebSocket 통과는 문서에 언급이 없다.
 
 | 방식 | 용도 | 비고 |
 |---|---|---|
-| 임시 터널(`cloudflared tunnel --url http://localhost:8080`) | 빠른 확인 (임시 공개 주소 발급) | 공식 한도·제약(동시 요청 수, SSE 등)을 G1 때 문서로 재확인. **WebSocket 통과 여부는 이 방식으로 먼저 본다** |
-| 이름 있는 터널 + 소유 도메인 | 최종 확인: 실제 호스트명·헤더 | 계정·DNS 필요(무료, A-006). 라이브와 같은 구성 |
+| 에코 서버를 `tailscale funnel` 로 노출 | ①②③④ 먼저 확인 | `proxy` 의 평문 로컬 포트(8080)를 대상으로 한다. 명령 형식은 설치한 버전의 `tailscale funnel --help` 로 확인(버전에 따라 다름, 미검증) |
+| 실제 `compose.live.yaml` 구성 | 최종 확인: 실제 호스트명·헤더·재시작·인증서 | 라이브와 같은 구성. ⑤⑥ 은 관찰 기간이 필요하다 |
 
 ```mermaid
 sequenceDiagram
     actor T as 시험자
-    participant CF as Cloudflare 엣지
-    participant CD as cloudflared (로컬)
-    participant PX as proxy (nginx)
+    participant FN as Tailscale Funnel (중계, 복호화 불가)
+    participant TS as tailscaled (로컬, TLS 종료)
+    participant PX as proxy (nginx, 평문 8080)
     participant WS as ws-gateway
-    T->>CD: 터널 기동 (대상 localhost:8080)
-    T->>CF: wss://<터널 호스트>/ws/public 연결
-    CF->>CD: 전달
-    CD->>PX: 업그레이드 요청 유지
+    T->>TS: tailscale funnel 로 로컬 8080 노출
+    T->>FN: wss://<호스트>.<tailnet 이름>.ts.net/ws/public 연결
+    FN->>TS: TCP 전달 (TLS 는 PC 에서 종료)
+    TS->>PX: 업그레이드 요청 유지 (HTTP)
     PX->>WS: 프록시 (Upgrade·Connection 헤더 전달)
     WS-->>T: 연결 성립 · 메시지 수신 ①
     T->>PX: GET /debug/headers (개발 전용 확인 라우트)
-    PX-->>T: 정규화된 클라이언트 주소 헤더 값 ②
-    Note over T,PX: ② CF-Connecting-IP 가 없으면 속도 제한 기준을 세션으로만 (tech-stack G1 실패 시)
+    PX-->>T: 수신 헤더 전체와 소켓 주소 ④
+    Note over T,PX: ④ 실제 IP 를 담은 헤더가 없으면 속도 제한 기준을 세션/계정으로만 (tech-stack G14 실패 시)
 ```
 
-- 확인용 라우트는 **개발 모드에서만** 존재하고 클라이언트 주소 헤더를 응답에 비춘다. 확인 후 제거한다.
-- 클라이언트가 같은 이름의 헤더를 위조해 보내도 proxy 가 버리는지(G7)를 같은 시험에서 본다.
+- 확인용 라우트는 **개발 모드에서만** 존재하고 수신 헤더와 소켓 주소를 응답에 비춘다. 확인 후 제거한다.
+- 클라이언트가 주소 헤더(`X-Forwarded-For` 등)를 위조해 보내도 proxy 가 버리는지(G7)를 같은 시험에서 본다.
 - 결과를 ADR-022 의 관문 결과 절에 기록한다.
+- OAuth 로그인은 Funnel 의 고정 주소로 등록한 콜백으로 확인한다(06 §3).
 
 ## 8. k3d 시험 절차 (개요, 관문 G8)
 
@@ -289,7 +292,7 @@ Postgres 는 클러스터 안 StatefulSet 이고, 마이그레이션은 Job 이�
 | 항목 | 결정 시점 |
 |---|---|
 | 호스트 포트 기본값(`55432`, `3030`, `8080`, `8081`) 확정 | 구현 시작 시 충돌 확인 |
-| ~~임시 터널의 WebSocket·제약~~ | G1 로컬 통과. 정식 터널은 계정이 있어야 확인 |
+| Funnel 의 WebSocket·대역폭·클라이언트 IP·재시작·인증서 | 관문 G14 (계정 필요) |
 | nginx 이미지의 realip 포함 여부 | 관문 G7 |
 | `backup` 실행 형태(호스트 cron vs 컨테이너) | M1 후반 (ADR-023) |
 | ~~k3d 클러스터 옵션 상세~~ | G8 로컬 통과(F17 §16). 설치는 CRD 충돌 우회 필요(`--server-side` + `crds.enabled=false`) |

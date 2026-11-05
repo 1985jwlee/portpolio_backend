@@ -41,6 +41,8 @@
 
 GitHub **OAuth App**을 쓴다(웹 서버 흐름). **PKCE(S256)는 GitHub OAuth App 의 지원을 확인한 뒤 쓴다(미확인); 미지원이면 `state` 만으로 로그인 CSRF·코드 가로채기를 막는다**(client_secret 이 서버에만 있어 코드 교환은 보호된다). 아래 시퀀스의 `code_challenge`/`code_verifier` 는 지원 확인 시에만 포함한다. 콜백 URL 은 환경별로 다른 앱(운영/개발)을 만든다([02](02-dev-environment.md)).
 
+**콜백 주소(라이브)**: GitHub OAuth 앱의 Authorization callback URL 은 Funnel 의 고정 주소로 등록한다 — `https://<호스트>.<tailnet 이름>.ts.net/api/auth/github/callback`(자리표시자, 실제 값은 사용자 tailnet 이름에 의존). 이 주소는 설정값 `PUBLIC_ORIGIN` 에서 만들고 쿠키 `__Secure-`/`__Host-`·Origin 검증의 허용 오리진도 같은 호스트다([10 §3](10-security.md)). 주소가 바뀌면(tailnet·호스트 이름 변경) OAuth 앱 설정을 함께 고친다. 개발은 `http://localhost:8080/...`(02 §6).
+
 ### 3.1 시퀀스
 
 ```mermaid

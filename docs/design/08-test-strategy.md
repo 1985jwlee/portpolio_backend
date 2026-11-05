@@ -47,7 +47,7 @@ flowchart TB
 | 재접속 | ws-gateway + 실제 Postgres + 가짜 클라이언트 | **L3** | main 병합 후·야간(PR 게이트 아님, 09 §2) | `apps/ws-gateway/test/` |
 | E2E | 브라우저(작성→시각화, 실시간 복구, 정적 폴백) | **L3** | main 병합 후 | `test/e2e/` (도구 미결, §11) |
 | 부하·소크 | k6 (API p95, WS 다수 연결, 느린 소비자) | **L3** | 수동·야간 | `test/load/` |
-| 실환경 | Tunnel 경유 성능, Oracle·집 PC 양쪽, 실제 GitHub OAuth | **L4** | 릴리스 전 수동 | 체크리스트 |
+| 실환경 | Tunnel 경유 성능, 집 PC 단일 호스트(Oracle 미추진), 실제 GitHub OAuth | **L4** | 릴리스 전 수동 | 체크리스트 |
 
 ### 2.1 무엇이 L2 를 넘는가
 
@@ -60,7 +60,7 @@ flowchart TB
 | 임대 만료·백오프 **계산 로직** | 가짜 시계로 순수 | **L2** |
 | 읽기 모델 프로젝터 **규칙**(`last_seq` 비교, `count` 덮어쓰기) | 인메모리 저장소 대역으로 순수 | **L2** (SQL 반영은 L3) |
 | 브라우저 구동, k6 | 서브프로세스·네트워크 | L3 |
-| 터널 경유 측정 | 실환경 | L4 |
+| Funnel 경유 측정 | 실환경 | L4 |
 
 ### 2.0e 보안사고 대응 (ADR-028, design/13)
 
@@ -287,6 +287,8 @@ classDiagram
 | AC-037 | 검색·공유·오류 화면 | `/robots.txt`·`/sitemap.xml`(hreflang) 응답 검사, 공개 페이지 `<head>`(canonical·로케일별 메타·OG 1200×630) 검사, 방명록·흐름·지표 `noindex, follow`, 404·403·500 상태 코드+`noindex`, web 중지 시 503+`Retry-After`+`X-Fallback: 1`, `SEO_INDEXING=off` 의 전체 금지 | L2·L3 | design/14 §9, `apps/web/test/seo.test.ts`(제안), `test/compose/fallback.test.ts` |
 | AC-038 | 개인정보·쿠키 안내 | 변수를 비운 빌드에서 `/ko/privacy`·`/en/privacy` 렌더(자리표시), `CONTENT_STRICT=1` 빌드 실패, 쿠키 동의 배너 기본 비표시, 쿠키 목록이 실제 `Set-Cookie` 와 일치 | L2·L3 | design/12 §4, `scripts/content-check.ts`(제안), `apps/web/test/privacy.test.ts`(제안) |
 
+| AC-039 | 수동 전환 대체 페이지(별도 주소) | 빌드 산출물이 앱 주소 링크·복구 안내·GitHub 링크를 포함, 대체 페이지 axe 0·쿠키 0·외부 요청 0 | L2~L3 (실제 정적 호스트 배포는 L4) | design/16 §7, `infra/outage-page/test`(제안) |
+
 ## 5. 동시성 시험 설계
 
 모든 시험은 **N 회 반복**(기본 50, 야간 500)하고 한 번이라도 어긋나면 실패한다. 순서는 `Gate` 로 강제하고, 경쟁이 필요한 곳(5.1)만 실제 병렬로 돌린다.
@@ -484,7 +486,7 @@ sequenceDiagram
 |---|---|
 | `postgres` 중단·재기동 | api 는 `readyz` 실패·503(`Retry-After`), 복구 후 자동 재연결. worker·gateway 는 재연결 후 이어서 |
 | 앱 컨테이너 중단 | nginx 가 정적 폴백(1단계)으로 응답(AC-010) |
-| 터널 중단 | 2단계 미러는 관문 G11 후 L4 로 확인 |
+| Funnel 중단 | 별도 주소 대체 페이지는 관문 G11 후 L4 로 확인(앱 주소는 연결 오류, 수용) |
 
 ## 8. 프라이버시 시험 (AC-009)
 
@@ -505,7 +507,7 @@ sequenceDiagram
 
 | 항목 | 값 |
 |---|---|
-| 합격선 | 동시 50 에서 **API p95 ≤ 300ms**, 첫 화면 **LCP ≤ 2.5s** (명세 A-012: 터널 경유 판정) |
+| 합격선 | 동시 50 에서 **API p95 ≤ 300ms**, 첫 화면 **LCP ≤ 2.5s** (명세 A-012: Funnel 경유 판정) |
 | 도구 | API·WS: **k6**(시나리오 스크립트 저장소 보관) / LCP: **Lighthouse CI** 또는 브라우저 Performance API 를 쓰는 E2E |
 | 시나리오 | 방문자 50 가상 사용자: 목록 조회 70% · 반응 20% · 글 작성 5% · WS 접속 유지 100%(전원). 램프업 30s, 유지 5분, 램프다운 30s |
 | 반복 | 최소 **3회**, 회마다 새로 기동한 스택. 판정은 **3회 모두** 합격선 이내(중앙값이 아니라 최악 값) |
@@ -516,7 +518,7 @@ sequenceDiagram
 
 한계(반드시 결과에 병기):
 
-- 개발 머신은 **WSL2 loopback** 이다: 네트워크 지연·TLS·nginx 경유·Cloudflare 터널이 없고, 부하 생성기와 서버가 같은 CPU 를 쓴다(ADR-022 벤치에서도 부하 생성기 CPU 가 서버와 비슷했다). 이 환경의 수치는 **상대 비교·회귀 감지용**이며 AC-013 합격 판정은 **터널 경유 L4 측정**으로 한다.
+- 개발 머신은 **WSL2 loopback** 이다: 네트워크 지연·TLS·nginx 경유·Funnel 이 없고, 부하 생성기와 서버가 같은 CPU 를 쓴다(ADR-022 벤치에서도 부하 생성기 CPU 가 서버와 비슷했다). 이 환경의 수치는 **상대 비교·회귀 감지용**이며 AC-013 합격 판정은 **터널 경유 L4 측정**으로 한다.
 - 소크(수 시간)는 별도: 메모리 증가 추세와 연결 수 유지를 본다(G2). 단시간 측정으로 대체하지 않는다.
 - 팬아웃 지연은 반복 간 편차가 커서 순위가 아니라 **범위**로 기록한다.
 
@@ -531,7 +533,7 @@ flowchart TD
     F -- "아니오" --> H["원인 분석: 병목 지점 확인"]
     H --> I["수정 → 회귀 시험 추가 → 처음부터 재측정"]
     I --> B
-    G --> J{"환경이 터널 경유 L4 인가?"}
+    G --> J{"환경이 Funnel 경유 L4 인가?"}
     J -- "예" --> K["AC-013 합격 판정"]
     J -- "아니오 (WSL2 loopback)" --> L["참고 수치로만 기록"]
 ```
@@ -580,7 +582,7 @@ test/
 | PR | L1 전부 + `test:unit` + 계약 + `test:integration` + 빠른 `test:chaos` (재접속은 PR 에서 돌리지 않는다 — 09 §2 정본) |
 | main 병합 후 | 위 전부 + 전체 `test:chaos` + **재접속 시험(`apps/ws-gateway/test/`)** + `test:e2e`(compose 위) |
 | 야간 | `[slow]` + 반복 500 회 동시성 + k6 소크 |
-| 릴리스 전(수동) | 터널 경유 k6·Lighthouse, 두 호스트 E2E(AC-014), 실제 GitHub 로그인 |
+| 릴리스 전(수동) | Funnel 경유 k6·Lighthouse, 두 호스트 E2E(AC-014), 실제 GitHub 로그인 |
 
 ## 12. 회귀 가드
 

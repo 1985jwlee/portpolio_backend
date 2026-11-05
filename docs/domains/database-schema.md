@@ -529,13 +529,13 @@ flowchart LR
 
 | Phase | 스키마(쓰기 / 읽기) | 핵심 제약 | 상세 |
 |---|---|---|---|
-| 1 | `game` / `game_read`, `chat` / `chat_read` | `game_event` 대국별 `seq` 추가 전용, `UNIQUE (game_id, move_id)`, `chat.room.last_seq` 조건부 UPDATE 로 방별 순번, `UNIQUE (room, sender, client_msg_id)` | [P1](../design/phases/01-baduk.md) §11, [P4](../design/phases/04-chat.md) §11 |
-| 2 | `analysis`, `ledger` / `ledger_read` | `analysis_job` `UNIQUE (game_id)` + 선점/임대, 원장 `journal`/`posting` 추가 전용·자산별 차변=대변(지연 제약 트리거), `reward` `UNIQUE (game_id, user_id)` | [P1](../design/phases/01-baduk.md) §10~11, ADR-037·040 |
-| 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC), 같은 Phase 에 `ledger`(`ledger.grant` `UNIQUE (user_id, kind)`)·`payment`(`payment_leg` `UNIQUE (payment_id, asset)`)·최소 `pricefeed` 스냅샷 도입(ADR-048) | [P2](../design/phases/02-commerce.md) §10 |
-| 5 | `pricefeed`(실제 소스), `payment`(카드·환불 확장), `escrow`(`escrow_leg`), `settlement`(`funded_*`, `point_redemption_micro`) (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
-| 6 | `inventory`, `fulfillment`, `support` (+`_read`) | `sku_position` CHECK `allocated + earmarked ≤ available`, 물리 재고 이동 원장 추가 전용, `recipient_enc`·CS `body_enc`(ENC) | [P3](../design/phases/03-fulfillment.md) §10, [P4](../design/phases/04-chat.md) §11 |
+| 1 | `game` / `game_read`, (`chat` / `chat_read` 는 6a 에서 먼저 도입, 대국 채팅 룸 종류 추가) | `game_event` 대국별 `seq` 추가 전용, `UNIQUE (game_id, move_id)`, `chat.room.last_seq` 조건부 UPDATE 로 방별 순번, `UNIQUE (room, sender, client_msg_id)` | [P1](../design/phases/01-baduk.md) §11, [P4](../design/phases/04-chat.md) §11 |
+| 2 | `analysis` (`ledger` 는 Phase 3 에서 이미 도입; 여기서는 `reward` 추가) | `analysis_job` `UNIQUE (game_id)` + 선점/임대, `reward` `UNIQUE (game_id, user_id)` | [P1](../design/phases/01-baduk.md) §10~11, ADR-037·040 |
+| 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC), 같은 Phase 에 `ledger`(원장 `journal`/`posting` 추가 전용·자산별 차변=대변 지연 제약 트리거, `ledger.grant` `UNIQUE (github_id, kind)`, `ledger.supply_cap`)·`payment`(`payment_leg` `UNIQUE (payment_id, asset)`)·최소 `pricefeed` 스냅샷·최소 `escrow`(`escrow_leg`; hold / release / refund) 도입(ADR-040·048) | [P2](../design/phases/02-commerce.md) §10 |
+| 5 | `pricefeed`(실제 소스), `payment`(카드·환불 확장), `escrow`(분쟁·동결·자동 확정 확장), `settlement`(`funded_*`, `point_redemption_micro`) (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded/frozen` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
+| 6 (6a `support`·`chat`, 6c `inventory`·`fulfillment`) | `inventory`, `fulfillment`, `support` (+`_read`) | `sku_position` CHECK `allocated + earmarked ≤ available`, 물리 재고 이동 원장 추가 전용, `recipient_enc`·CS `body_enc`(ENC) | [P3](../design/phases/03-fulfillment.md) §10, [P4](../design/phases/04-chat.md) §11 |
 | 6d | `identity.wallet_link`(공개키 `UNIQUE`), `identity.wallet_challenge`(1회용) | 서명 챌린지 소진 조건부 UPDATE, 공개키는 PSD | [P0](../design/phases/00-platform-evolution.md) §7.3 |
-| 공통 | `security.data_key`(Phase 5 KEK/DEK 상향), `realtime_read.room_log`·`room_seq` | 봉투 `v2.<dekId>.…` | [P0](../design/phases/00-platform-evolution.md) §9.3·§6 |
+| 공통 | `security.data_key`(Phase 5 KEK/DEK 상향), `realtime_read.room_log`·`room_seq`(**예약 — 현재 미사용**, 쓸 경우 허용 쌍 추가와 함께) | 봉투 `v2.<dekId>.…` | [P0](../design/phases/00-platform-evolution.md) §9.3·§6 |
 
 ENC 필드 통합표와 보관 기간은 [phases/00 §9.5](../design/phases/00-platform-evolution.md).
 

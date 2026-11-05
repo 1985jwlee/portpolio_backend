@@ -16,7 +16,7 @@
 |---|---|---|
 | 코드 | OB-01 지표 레지스트리 · OB-02 도메인 지표 · OB-03 헬스 · OB-04 로그 | `modules/observability` + 각 앱의 조립 |
 | 설정 | OB-05 Prometheus · OB-06 Grafana · OB-07 nginx · OB-08 폴백 1단계 | `infra/**` 선언형 파일 |
-| 외부 | OB-09 Cloudflare 정적 미러 | Cloudflare 쪽 구성(G11) |
+| 외부 | OB-09 별도 주소 정적 대체 페이지(수동 전환) | 정적 호스트 쪽 구성(G11) |
 | 스크립트 | OB-10 백업 · OB-11 pull 배포 | `infra/scripts/*.sh` |
 | 파이프라인 | OB-12 CI | `.github/workflows` (09 와 연결) |
 | 절차 | OB-13 쓰기 잠금 런북 | 문서 + 관리 CLI |
@@ -70,12 +70,14 @@ flowchart LR
 ```mermaid
 flowchart TB
     V["방문자"]
-    subgraph cf["Cloudflare"]
-        DNS["DNS · 터널 종단"]
-        MIR["정적 미러<br/>(2단계 폴백, G11 미확인)"]
+    subgraph ts["Tailscale"]
+        DNS["Funnel 중계 (*.ts.net)<br/>복호화 불가 · 집 IP 비노출"]
+    end
+    subgraph stat["별도 주소 정적 호스트"]
+        MIR["정적 대체 페이지<br/>(2단계 폴백 · 수동 전환, G11 미확인)"]
     end
     subgraph host["호스트 (집 PC · Compose)"]
-        CFD["cloudflared"]
+        CFD["tailscaled<br/>(TLS 종료 · 평문 로컬 포트로 프록시)"]
         subgraph px["proxy (nginx)"]
             RT["라우팅 /api/ /ws/ /"]
             LM["limit_req · limit_conn"]
@@ -98,8 +100,8 @@ flowchart TB
     EXT["무료 외부 저장소<br/>(G12 미확인)"]
 
     V -->|"HTTPS · WSS"| DNS
-    DNS -->|"원본 정상"| CFD
-    DNS -.->|"원본 5xx · 연결 불가"| MIR
+    DNS --> CFD
+    V -.->|"README·프로필의 두 번째 주소 (자동 절체 없음)"| MIR
     CFD --> RT
     RT --> LM
     LM --> WEB
@@ -125,7 +127,7 @@ flowchart TB
 
 - 실선은 요청·데이터 경로, 점선은 비동기·조건부 경로다.
 - **`worker` 가 상태 파일(백업·배포)을 읽어 지표로 바꾼다**(§OB-02). 백업·배포 스크립트는 지표 서버를 따로 띄우지 않는다(Pushgateway 컨테이너 불필요).
-- Oracle 경로에서는 `cloudflared` 가 없고 방문자가 `proxy` 로 직접 온다(TLS 를 `proxy` 가 종료, G7).
+- 라이브는 집 PC 단일 호스트라 방문자는 항상 Tailscale Funnel(호스트의 `tailscaled`)을 거친다. Grafana 관리 화면은 Funnel 로 노출하지 않고 `tailscale serve` 로 tailnet 내부 전용으로 연다(공개 대시보드 허용 경로만 `proxy` 경유). Oracle 경로(`proxy` 직접, TLS 종료 G7)는 선택적 후속이며 미추진이다.
 
 ---
 
@@ -975,7 +977,7 @@ flowchart TD
 
 **목적.** 단일 진입점: 라우팅, 속도 제한, 클라이언트 주소 정규화, 보안 헤더, WebSocket 업그레이드, 폴백, 내부 경로 차단(10 §7 책임 분담).
 
-**트리거.** 모든 외부 요청(집 PC 경로는 `cloudflared` 경유, Oracle 경로는 직접).
+**트리거.** 모든 외부 요청(Funnel → 평문 로컬 포트 경유. Oracle 직접 경로는 미추진).
 
 | 구분 | 내용 |
 |---|---|
@@ -992,7 +994,7 @@ infra/nginx/
 │  ├─ 10-limits.conf           # limit_req_zone, limit_conn_zone
 │  ├─ 20-upstreams.conf        # upstream web/api/ws/grafana (keepalive)
 │  ├─ 30-security-headers.conf # add_header ... always (정적 값)
-│  ├─ 40-realip-cf.conf        # 집 PC 경로 전용 (Oracle 경로는 realip-none)
+│  ├─ 40-realip-funnel.conf    # 집 PC 경로: Funnel 의 IP 헤더 확인(G14 ④) 후에만 채운다. 확인 전에는 realip 를 쓰지 않는다 (Oracle 경로는 미추진 — realip-none)
 │  ├─ 50-server.conf           # server { location ... }
 │  └─ 90-write-block.conf      # 평소 비어 있음 (비상 쓰기 차단, OB-13)
 └─ fallback/                   # 정적 폴백 산출물 (OB-08)
@@ -1019,13 +1021,12 @@ limit_req_zone  $binary_remote_addr zone=pf_me:1m   rate=30r/m;   # GET /api/me 
 limit_req_zone  $binary_remote_addr zone=pf_auth:1m rate=10r/m;   # /api/auth/ 로그인 시작·콜백
 limit_req_zone  $binary_remote_addr zone=pf_wsup:1m  rate=30r/m;  # /ws/ 업그레이드 재접속 폭주
 
-# 40-realip-cf.conf  (집 PC 경로; G1·G7 로컬 실측 통과 — 임시 터널, 정식 터널은 미확인)
-# G1 실측: 에지는 클라이언트의 X-Forwarded-For·True-Client-IP 를 지우지 않고(위조 값이 그대로 도달),
-#   클라이언트가 보낸 CF-Connecting-IP 요청 헤더는 403(error 1000)으로 거부한다.
-#   → 아래 realip 로 치환한 뒤 proxy_set_header 로 덮어쓰는 정규화가 필수다. cloudflared 가 같은 호스트면 set_real_ip_from 127.0.0.1 로 동작 확인.
-set_real_ip_from  <cloudflared 컨테이너 네트워크 대역>;
-real_ip_header    CF-Connecting-IP;
-real_ip_recursive off;
+# 40-realip-funnel.conf  (집 PC 경로; 미검증)
+# Funnel 이 클라이언트 IP 를 어떤 헤더로 전달하는지 공식 문서에서 확인하지 못했다 → 실제 클라이언트 IP 확보 방법 미확인, 게이트 G14 ④ 에서 실측.
+#   확인 전: realip 를 쓰지 않는다. $remote_addr 는 Funnel 프록시의 로컬 연결 주소(예: 127.0.0.1)이므로 위의 $binary_remote_addr 기반 limit_req_zone 은
+#            사실상 전역 한도가 된다 → 속도 제한은 세션/계정 기준(앱 RateLimitGuard)을 우선하고 /api/me 세션 발급에는 전역 상한을 둔다(제안).
+#   확인 후: Funnel 이 넣는 헤더 하나만 set_real_ip_from <Funnel 로컬 연결 주소> + real_ip_header <확인된 헤더> 로 받는다.
+#   (이전 설계의 set_real_ip_from <cloudflared 대역> + real_ip_header CF-Connecting-IP 는 Cloudflare Tunnel 전제였음, 폐기)
 
 # 50-server.conf (요지)
 server {
@@ -1059,7 +1060,7 @@ server {
     add_header X-Robots-Tag "noindex" always;    # 14 SEO: API 는 색인 제외
     limit_req zone=pf_write burst=10 nodelay;   # 메서드별 분기는 map 으로 (아래 참고)
     proxy_pass http://api;
-    proxy_set_header X-Real-IP $remote_addr;    # realip 이후의 단일 정규화 값. 클라이언트 값은 덮어쓴다
+    proxy_set_header X-Real-IP $remote_addr;    # 단일 정규화 값. 클라이언트 값은 덮어쓴다 (Funnel 뒤에서는 로컬 연결 주소일 수 있다 — G14 ④)
     proxy_set_header X-Forwarded-For "";        # 클라이언트가 보낸 체인 폐기
     proxy_read_timeout 30s;                      # 핸들러 제한 10초 + 여유
     error_page 502 503 504 = @api_unavailable;
@@ -1072,7 +1073,7 @@ server {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
-    proxy_read_timeout 150s;                     # 서버 idle 120초 · hb 25초보다 길게. G1 실측: Cloudflare 임시 터널은 ping 없는 유휴 WS 를 약 126초에 1006 으로 끊는다 → hb 25초 필수
+    proxy_read_timeout 150s;                     # 서버 idle 120초 · hb 25초보다 길게. 폐기된 G1 실측(Cloudflare 임시 터널)은 ping 없는 유휴 WS 를 약 126초에 끊었다. Funnel 의 유휴 한도는 미검증(G14 ②) → hb 25초는 잠정값
     proxy_send_timeout 150s;
     proxy_buffering off;
   }
@@ -1101,8 +1102,8 @@ server {
 
 | 경로 | 설정 | 결과 |
 |---|---|---|
-| 집 PC (cloudflared) | `40-realip-cf.conf` 포함. 신뢰 대역은 cloudflared 컨테이너만 | `$remote_addr` = `CF-Connecting-IP`(G1·G7 확인) |
-| Oracle 직접 | `realip-none`(포함 안 함) | `$remote_addr` = 실제 접속 주소 |
+| 집 PC (Funnel) | 확인 전: realip 미사용. 확인 후(G14 ④): `40-realip-funnel.conf` 로 Funnel 이 넣는 헤더 하나만 신뢰 | 확인 전 `$remote_addr` = Funnel 의 로컬 연결 주소(→ 주소별 `limit_req` 는 전역 한도화, 세션/계정 기준 우선). 확인 후 실제 클라이언트 IP |
+| Oracle 직접 (미추진, 선택적 후속) | `realip-none`(포함 안 함) | `$remote_addr` = 실제 접속 주소 |
 | 공통 | `proxy_set_header X-Real-IP $remote_addr` 로 덮어쓰고 `X-Forwarded-For` 비움 | 앱은 `X-Real-IP` **하나만** 신뢰 (앱은 이 값을 저장하지 않는다 — 속도 제한은 세션 기준) |
 
 환경 선택은 compose 오버라이드가 `conf.d` 에 올바른 파일을 마운트하는 방식(제안).
@@ -1123,12 +1124,12 @@ location /grafana/ { return 404; }                                      # 그 �
 ```mermaid
 sequenceDiagram
     participant C as 클라이언트
-    participant CF as cloudflared
+    participant CF as Funnel (tailscaled)
     participant N as nginx
     participant A as api
     C->>CF: HTTPS 요청 (위조된 X-Forwarded-For 포함)
-    CF->>N: 요청 + CF-Connecting-IP
-    N->>N: realip 로 remote_addr 확정, 클라이언트 XFF 폐기
+    CF->>N: 평문 요청 (IP 헤더 유무는 G14 ④ 에서 확인)
+    N->>N: 클라이언트가 보낸 주소 헤더 폐기 (확인된 Funnel 헤더만 신뢰)
     N->>N: limit_req 판정
     alt 한도 초과
         N-->>C: 429 + Retry-After
@@ -1281,78 +1282,59 @@ flowchart TD
 
 ---
 
-## 11. OB-09 Cloudflare 정적 미러 (2단계 폴백)
+## 11. OB-09 별도 주소 정적 대체 페이지 (2단계 폴백, 수동 전환)
 
-**목적.** 집 PC 전원·회선·Tunnel 이 끊겨도 정적 소개 페이지를 응답한다(1단계가 못 덮는 장애, ADR-023 7).
+**목적.** 집 PC 전원·회선·Funnel 이 끊겨도 정적 소개·안내 페이지를 **별도 주소에서** 응답한다(1단계가 못 덮는 장애, ADR-023 7). 도메인이 없어(2026-11-05) 같은 주소 자동 절체는 불가이고 사람이 안내를 갱신하는 수동 전환이다.
 
-> **전체가 미확인(G11)이다.** 아래는 후보 구조와 통과 기준이며 어느 것도 확정이 아니다.
+> **전체가 미확인(G11)이다.** 구체 설계는 **[design/16](../16-outage-fallback-page.md)** (FR-122, AC-039, 호스팅 후보 Cloudflare Pages `*.pages.dev` 또는 GitHub Pages — 확정 아님). Worker 절체(구 권고 A안, 관문 G13)는 **도메인 확보 시 후속으로 보류**한다.
 
-**트리거.** 원본(터널)이 5xx/연결 불가를 반환.
+**트리거.** 운영자가 중단을 인지(업타임 알림)하고 대체 페이지의 상태 문구를 갱신한다. 자동 감지·자동 전환은 없다.
 
 | 구분 | 내용 |
 |---|---|
-| 사전 조건 | Cloudflare 계정에 도메인 연결(이미 있음), 무료 한도 안의 구성 |
-| 사후 조건 | 원본 정상 시에는 개입하지 않고(기본 경로 그대로), 원본 장애 시에만 정적 응답 |
+| 사전 조건 | 별도 주소의 무료 정적 호스트 계정(카드 요건·약관 확인 필요), 다른 기기에서 `git push` 로 배포 가능 |
+| 사후 조건 | 앱 주소가 연결 오류여도 별도 주소가 응답하고, 앱 주소 링크·복구 안내를 보인다. 앱 주소 접속자는 연결 오류를 볼 수 있다(수용) |
 
-### 11.1 후보 구조 (G11 비교 대상)
+### 11.1 후보 구조 (이력 포함)
 
-| 안 | 개요 | 장점 | 미확인·위험 |
-|---|---|---|---|
-| **A. Workers 폴백** | 사이트 라우트에 Worker 를 붙여 `fetch(origin)` 이 5xx/52x 면 Workers 정적 자산(폴백 산출물)을 응답 | 장애 시에만 개입, 같은 도메인 | 무료 한도(요청 수)와 터널 다운 시 오류 응답 형태(52x/1033 등)를 Worker 가 받는지 **미확인** |
-| **B. Pages 미러 + 수동 전환** | 같은 산출물을 정적 호스팅에 올려 두고 장애 시 DNS/라우트를 수동 전환 | 구성 단순 | 자동 전환 아님(무료 플랜에서 자동 장애 조치는 미확인) |
-| **C. 커스텀 오류 페이지** | 플랫폼의 오류 페이지를 정적 페이지로 교체 | 가장 가벼움 | 터널 다운 시 적용 대상 오류인지 **미확인**, 무료 플랜 제공 여부 미확인 |
+| 안 | 개요 | 상태 |
+|---|---|---|
+| **A. Workers 폴백** | 같은 도메인 앞에 Worker 를 붙여 `fetch(origin)` 실패 시 정적 자산 응답 | **불가(도메인 없음) — 도메인 확보 시 후속**, G13 보류 |
+| **B. 별도 주소 + 수동 전환** | 같은 산출물을 별도 주소 정적 호스팅에 두고 README·프로필에 두 주소를 병기, 장애 시 사람이 안내를 갱신 | **채택** |
+| **C. 커스텀 오류 페이지** | 플랫폼의 오류 페이지를 정적 페이지로 교체 | 해당 없음(Funnel 에서 가능한 설정이 문서에 없음, 미확인) |
 
-- 산출물은 OB-08 의 `fallback/` 과 **동일한 파일**을 쓴다(소스 하나, 빌드 한 번).
-- G11 통과 기준(ADR-023): "원본(Tunnel)을 내렸을 때 무료 한도 안에서 정적 페이지가 응답한다."
+- 산출물은 OB-08 의 `fallback/` 과 **같은 문구 소스**를 쓴다(소스 하나, 빌드 둘: `build:fallback`, `build:outage`).
+- G11 통과 기준(ADR-023, 수정): "원본(Funnel)을 내렸을 때 무료 한도 안에서 별도 주소의 정적 페이지가 응답한다."
 
-### 11.2 시퀀스 (A안 기준, 미검증)
+### 11.2 시퀀스 (B안)
 
-```mermaid
-sequenceDiagram
-    participant V as 방문자
-    participant E as Cloudflare 엣지 (Worker)
-    participant T as 터널 → 원본
-    participant S as Workers 정적 자산
-    V->>E: GET /ko/about
-    E->>T: fetch(원본)
-    alt 원본 정상
-        T-->>E: 200
-        E-->>V: 200 (그대로)
-    else 원본 5xx · 연결 불가 · 타임아웃
-        T--xE: 실패 응답
-        E->>S: 폴백 자산 조회
-        S-->>E: 정적 HTML
-        E-->>V: 200 또는 503 안내 (데모 경로)
-    end
-```
+[design/16 §3](../16-outage-fallback-page.md) 의 시퀀스를 정본으로 한다. 요지: 방문자는 README·프로필의 두 주소 중 앱 주소가 연결 오류이면 대체 페이지 주소를 열고, 운영자는 `git push` 로 중단 사유·예상 복구를 갱신한다.
 
 ### 11.3 순서도 — 채택 결정
 
 ```mermaid
 flowchart TD
-    A["G11 시작"] --> B["A안: Worker 가 터널 다운 응답을 받아 분기할 수 있는가"]
-    B -- "예" --> C{"무료 한도 안인가 (요청 수 · 자산 크기)"}
-    C -- "예" --> OK["A안 채택"]
-    C -- "아니오" --> D["B안 검토: 수동 전환 런북"]
-    B -- "아니오" --> D
-    D --> E{"수동 전환으로 충분한가"}
-    E -- "예" --> OK2["B안 채택 + 런북"]
-    E -- "아니오" --> F["1단계(nginx)만 유지, ADR-023 갱신"]
+    A["G11 시작"] --> B{"별도 주소 정적 호스트가 무료·무카드로 가입되는가"}
+    B -- "예" --> C{"무료 한도 안인가 (빌드 횟수 · 자산 크기)"}
+    C -- "예" --> OK["B안 채택 + 런북 (design/16 4.1)"]
+    C -- "아니오" --> F["1단계(nginx)만 유지, ADR-023 갱신"]
+    B -- "아니오" --> D["다른 호스트 후보 검토"]
+    D --> F
 ```
 
 ### 11.4 오류·경보
 
 | 상황 | 동작 |
 |---|---|
-| 한도 초과 | 폴백이 막힘 → 1단계만 남음(ADR-023 실패 시 대안과 동일) |
-| 미러가 오래됨 | 릴리스 시 함께 갱신(OB-11 배포 단계에 포함하거나 CI 가 배포) |
+| 한도 초과 | 갱신 배포가 막힘 → 이전 문구가 남는다(1단계만 유효) |
+| 안내가 오래됨 | 복구 후 원복을 잊으면 "중단" 문구가 남는다 → 런북 5번에 원복 확인을 둔다 |
 
 ### 11.5 시험
 
 | 시험 | 등급 |
 |---|---|
-| 터널(`cloudflared`)을 내린 상태에서 `/ko/about` 이 정적 응답(G11) | L4 (실환경) |
-| 원본 정상 시 Worker 가 응답을 변형하지 않음(헤더·본문 동일) | L4 |
+| 별도 주소에 배포한 대체 페이지가 앱 주소 링크·복구 안내를 포함해 응답(G11) | L4 (실환경) |
+| 빌드 산출물의 쿠키·외부 요청 0, axe 위반 0 | L2~L3 |
 
 ---
 
@@ -1739,7 +1721,7 @@ flowchart TD
     C -- "예" --> D["관리자 API 로 write-lock on"]
     C -- "아니오" --> E{"호스트 접근 가능?"}
     E -- "예" --> F["worker admin write-lock on 또는 90-write-block.conf + reload"]
-    E -- "아니오" --> G["Cloudflare 측 임시 차단 (WAF 규칙, 무료 범위 미확인)"]
+    E -- "아니오" --> G["Tailscale 관리 콘솔에서 노드 접근 차단 (절차 미확인)"]
     D --> H["스팸 정리 후 off"]
     F --> H
     G --> H
@@ -2007,7 +1989,7 @@ infra/systemd/
 | `STATUS_DIR` (기본 `/var/lib/pf/status`) | `pf:pf` 0750 | 작업 상태 파일. worker 컨테이너에 **읽기 전용** 마운트 |
 | rootless Docker 대체 | `PF_LOG_DIR=~/.local/state/pf/logs`, `STATUS_DIR=~/.local/state/pf/status`, `systemctl --user` 타이머 + `loginctl enable-linger` | 호스트가 rootless 일 때(미확인) |
 
-> **주의**: `docker` 그룹 구성원은 사실상 root 와 동급이다. `pf` 사용자의 쉘 로그인을 막고(`nologin`) 유닛으로만 실행한다([10 §5](../10-security.md)). 이 호스트(WSL2)는 rootful Docker 이고 systemd 가 PID 1 이다(확인). Oracle 호스트·집 PC 실제 환경은 S8-1 에서 재확인한다.
+> **주의**: `docker` 그룹 구성원은 사실상 root 와 동급이다. `pf` 사용자의 쉘 로그인을 막고(`nologin`) 유닛으로만 실행한다([10 §5](../10-security.md)). 이 호스트(WSL2)는 rootful Docker 이고 systemd 가 PID 1 이다(확인). 집 PC 실제 환경은 S8-1 에서 재확인한다.
 
 ## 16.2 OB-16 운영 상태 파일 수집 (`StatusFileCollector`)
 
@@ -2223,12 +2205,13 @@ flowchart TD
 |---|---|
 | 지표 라이브러리(Bun 호환), `AsyncLocalStorage` 호환 | G5 |
 | Public dashboards 프로비저닝 가능 여부, 임베드 허용 설정, 프록시 허용목록 정확한 경로 | G6 |
-| nginx 이미지의 `realip` 포함, Oracle 경로 TLS 자동화 | G7 |
+| nginx 이미지의 `realip` 포함 (Oracle 경로 TLS 자동화는 미추진) | G7 |
 | ~~Envoy Gateway 의 WebSocket 타임아웃 정책 리소스~~ | G8 로컬 통과(`streamIdleTimeout`). 실 클라이언트 IP·업그레이드 경로 헤더 정규화·`sectionName` 정책은 실서버/S8-5 |
-| Cloudflare 정적 미러 수단과 무료 한도 | G11 |
+| 별도 주소 정적 호스트 수단(Cloudflare Pages vs GitHub Pages)과 무료 한도 | G11 |
+| Funnel 의 WebSocket·유휴 타임아웃·대역폭·클라이언트 IP·재시작·인증서 | G14 |
 | 무료 외부 백업 저장소, 암호화 도구(`age` 가용성) | G12 |
 | Grafana 프로비저닝의 `$__file{}` 시크릿 확장·Discord 연락처 동작, `gen-grafana-alerts.ts` 생성 방식 | S7-6 (미검증) |
-| Oracle 호스트·집 PC 에서 `pf` 사용자·`docker` 그룹·rootless 여부, `PF_LOG_DIR` 권한 | S8-1 |
+| 집 PC 에서 `pf` 사용자·`docker` 그룹·rootless 여부, `PF_LOG_DIR` 권한 | S8-1 |
 | 경보 임계값(로그인 실패 10/10m, GitHub 3/5m, 26h 등) | 운영 데이터 확보 후 조정 |
 | 스크레이프 주기(15초) · 보존(7일/1GB) 조정 | 구현 중 측정 |
 | 통지 채널 | **Discord 웹훅 확정**(§16.3). 연락처 프로비저닝 동작은 S7-6 에서 확인 |

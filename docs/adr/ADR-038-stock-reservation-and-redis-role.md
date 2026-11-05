@@ -20,8 +20,8 @@ ADR-010 은 Redis Lua 로 선점하고 확정은 outbox 소비자가 **비동기
 
 ## 설계 상세
 - 불변식: (I1) `confirmed ≤ total`(DB), (I2) `confirmed + Σ활성 예약 ≤ total`(빠른 게이트, 대조 점검), (I3) 예약은 확정과 만료/해제 중 하나로만 끝나고 되돌아오지 않음(CAS), (I4) 복원은 예약당 최대 1회.
-- 확정 결과는 `Confirmed` / `AlreadyConfirmed`(같은 예약·주문의 중복 확정 → NOOP, **결제 취소 금지**) / `Exhausted`(재고 소진 → 롤백, 카드는 `refund_pending` 후 PG 취소) 셋이다. 웹훅·대사 경로는 inbox `claim_token` + payment `version` CAS 로 직렬화한다.
-- 확정 tx 의 행 잠금 순서는 `reservation → stock → user_purchase → payment → escrow → ledger 계정 id 오름차순 → order`, 환불 tx 도 같은 전역 순서를 따른다.
+- 확정 결과는 `Confirmed` / `AlreadyConfirmed`(같은 예약·주문의 중복 확정 → NOOP, **결제 취소 금지**) / `Exhausted`(재고 소진 → 롤백, 카드는 `refund_pending` 후 PG 취소) 셋이다. **결제 환불 상태**는 `approving → refund_pending → refunding`, `refunding` 의 일시 실패는 `refund_pending` 으로 돌아가 재시도(횟수 상한), 영구 실패는 `refund_failed`(수동 처리 큐·경보)이며 `refunding → approved` 전이는 없다(활성 결제 유일 인덱스에 `refund_pending`·`refunding`·`refund_failed` 포함). 웹훅·대사 경로는 inbox `claim_token` + payment `version` CAS 로 직렬화한다.
+- 확정 tx 의 행 잠금 순서는 전역 규약 `reservation → deal.stock → user_purchase → payment → escrow → ledger 계정(id 오름차순) → order` 이고(ADR-040 결정 5), 환불·정산 tx 도 같은 순서를 따른다.
 - 예약은 응답 전에 PG 에 영속 기록한다. Redis 에만 있는 예약은 누구에게도 약속되지 않은 것이라 회수해도 안전하다.
 - 재구성: 구매 차단 → PG 의 `total`, `confirmed`, 활성 예약으로 `avail`·`res`·`exp`·`user` 재작성 → 차단 해제. 유실 시점에 PG 영속 전이던 예약은 사라진다(응답을 받지 못한 구매자에게만 영향).
 - 로컬 사전 시험 결과(합격선 아님, 참고): 재고 100·동시 5,000명 → OK 100/SOLD_OUT 4,900. 같은 멱등 키 500회 → 예약 1. 개인 한도·복원 20회 동시·확정 대 해제 경합 모두 의도대로. PG 하드 게이트 재고 100·동시 3,000건 → 확정 100, 조건 없는 UPDATE 는 CHECK 가 차단. 핫 로우 확정 처리량 약 590 tps(성공 연속, WSL2·도커 볼륨)이다. **이 값은 `stock` 행 하나만 갱신한 것이고 전체 확정 경로(결제·에스크로·원장·주문 포함)는 측정하지 않았다.** 모든 구매 확정이 같은 시스템 계정(`liab:escrow:*` 등) 잔액 행을 갱신하는 전역 핫 로우도 있어, 필요하면 샤드 계정으로 분할한다(L1 전체 경로 결과 후 판정).

@@ -1,7 +1,7 @@
 # P4. 채팅 영역 아키텍처 설계 (Phase 6a CS 채팅 · Phase 1 대국 채팅)
 
 로드맵의 채팅 두 갈래를 M1 의 기반 위에 얹는 설계다. **대국 채팅**(Phase 1, 바둑 룸에 종속)과 **CS 채팅**(Phase 6, 상담원과 고객, 주문 연동)을 하나의 범용 채팅 엔진(`chat` 모듈)과 그 위의 티켓 모듈(`support`)로 나눈다.
-> **구현 순서 (P0 D24).** `chat` 코어(방·참가자·메시지·방 카운터)와 **`/ws/room` 은 6a(CS 채팅)에서 먼저 도입**된다 — 구현 순서 5-a, Phase 3~5 다음. 대국 채팅은 바둑(Phase 1, 구현 순서 6)에서 **방 종류(`game_players`·`game_spectators`)만 추가**한다. 따라서 이 문서의 구현 순서는 ① 범용 `chat` 코어 → ② CS(`support`) → ③ 나중에 대국 채팅 룸 종류이고, 대국 채팅 DoD 는 바둑과 함께 닫는다(§1.1). CS 채팅의 배송 정보 노출은 6c(WMS)까지 `shipment: null` 이다(P0 §1.4 G10). 착수 전 설계 재검토(P0 §12.5)를 거친다.
+> **구현 순서 (P0 D24).** `chat` 코어(방·참가자·메시지·방 카운터)와 **`/ws/room` 은 6a(CS 채팅)에서 먼저 도입**된다 — 구현 순서 5-a, Phase 3~5 다음. 대국 채팅은 바둑(Phase 1, 구현 순서 6)에서 **방 종류(`game_players`·`game_spectators`)만 추가**한다. 따라서 이 문서의 구현 순서는 ① 범용 `chat` 코어 → ② CS(`support`) → ③ 나중에 대국 채팅 룸 종류이고, 대국 채팅 DoD 는 바둑과 함께 닫는다(§1.1). 6a 의 선행 요구는 Phase 3~5 에 더해 **Phase 5 의 KEK/DEK v2**(CS 본문 암호화가 v2 봉투를 쓴다)이고, 6c 는 6a 의 `RolePolicy`(G12)를 선행으로 한다. CS 채팅의 배송 정보 노출은 6c(WMS)까지 `shipment: null` 이다(P0 §1.4 G10). 착수 전 설계 재검토(P0 §12.5)를 거친다.
 
 M1 규약(모듈러 모놀리스 · CQRS · domain/service/usecase · outbox/inbox · CAS+임대+version · 쓰기는 트랜잭션 · 데이터 등급 · 감사 · `pf_` 지표)을 그대로 따른다. 결정은 ADR-045~047(**Proposed**, 사용자 확정 전)에 있다.
 
@@ -47,13 +47,13 @@ M1 규약(모듈러 모놀리스 · CQRS · domain/service/usecase · outbox/inb
 
 ## 1. 범위와 DoD
 
-### 1.1 Phase 1 — 대국 채팅 (P1 바둑과 함께 완료 · 구현 순서 6, 채팅 코어는 6a 에서 이미 존재)
+### 1.1 Phase 1 — 대국 채팅 (P1 바둑과 함께 완료 · 구현 순서 6 — 6a 는 CS 룸(본문 없는 알림 push + REST)만 실행했으므로 **평문 본문 push·관전자 비공개·`ChatRoomPolicy` 는 Phase 1 에서 처음 실행**된다)
 - **포함**: 대국 방의 플레이어 채팅(`game_players`), 관전자 채팅(`game_spectators`), 입장·퇴장 시스템 메시지, 재접속 복구, 신고·숨김·뮤트, 속도 제한, 보관.
-- **DoD 후보**: ① 두 브라우저가 한 대국에서 채팅하고 관전자 채팅은 대국 중 플레이어에게 보이지 않는다 ② 연결을 끊었다 다시 붙이면 놓친 메시지가 순서대로 복구된다 ③ 같은 메시지를 두 번 보내도 한 건만 남는다 ④ 신고 → 관리자 숨김이 구독자에게 반영된다 ⑤ 대국 종료 후 방이 읽기 전용이 되고 관전자 방이 공개된다. (이 DoD 는 README 로드맵 Phase 1 DoD 에 반영했다: 복구·중복 전송·관전자 비공개.)
+- **DoD 후보**: ① 두 브라우저가 한 대국에서 채팅하고 관전자 채팅은 대국 중 플레이어에게 보이지 않는다 ② 연결을 끊었다 다시 붙이면 놓친 메시지가 순서대로 복구된다 ③ 같은 메시지를 두 번 보내도 한 건만 남는다 ④ 신고 → 관리자 숨김이 구독자에게 반영된다 ⑤ 대국 종료 후 방이 읽기 전용이 되고 관전자 방이 공개된다 ⑥ **서버 롤링 재시작 중에도 룸 재구독이 재개(replay/snapshot)로 복구된다**(룸 재구독 시험). (이 DoD 는 README 로드맵 Phase 1 DoD 에 반영했다: 복구·중복 전송·관전자 비공개.)
 
 ### 1.2 Phase 6a — CS 채팅 (독립 DoD, 중단 가능 · **구현 순서 5-a, 채팅 코어와 `/ws/room` 을 처음 도입**)
 - **포함**: 로그인 고객의 티켓 접수, 상담원 선점·응대·해결·종료, 주문 연동, 재오픈, 응대 지표, 대화 본문 암호화와 열람 감사.
-- **DoD 후보**: ① 고객이 주문을 연결해 티켓을 열고 상담원이 선점해 대화한 뒤 해결·종료한다 ② 두 상담원이 동시에 같은 티켓을 집어도 한 명만 성공한다 ③ DB 덤프·로그·이벤트에 대화 본문 평문이 없다 ④ 상담원이 대화를 열면(열람 세션당 1회) 감사 기록이 남는다 ⑤ 무응답 상담원의 티켓이 임대 만료로 대기열에 돌아온다.
+- **DoD 후보**: ① 고객이 주문을 연결해 티켓을 열고 상담원이 선점해 대화한 뒤 해결·종료한다 ② 두 상담원이 동시에 같은 티켓을 집어도 한 명만 성공한다 ③ DB 덤프·로그·이벤트에 대화 본문 평문이 없다 ④ 상담원이 대화를 열면(열람 세션당 1회) 감사 기록이 남는다 ⑤ 무응답 상담원의 티켓이 임대 만료로 대기열에 돌아온다 ⑥ **서버 롤링 재시작 중 룸 재구독이 알림 전용 재개로 복구된다**(룸 재구독 시험). 6a 는 CS 룸만 실행한다 — 평문 본문 push·관전자 비공개·`ChatRoomPolicy` 는 Phase 1 에서 처음 실행된다.
 
 ---
 
@@ -234,7 +234,7 @@ classDiagram
 ### 3.3 역할과 신원
 | 역할 | 판정 | 비고 |
 |---|---|---|
-| 플레이어·관전자 | P1 의 대국 참가·관전 상태 | **P1 §10 정본**: 익명 세션도 비레이팅 대국과 관전이 가능하다. 따라서 뮤트가 **새 세션으로 우회**될 수 있는 것이 알려진 위험이다(§22). 로그인 사용자 우선 정책은 만들지 않는다 |
+| 플레이어·관전자 | P1 의 대국 참가·관전 상태 | **익명 허용의 정본은 P1 §5**: 익명 세션도 비레이팅 대국과 관전이 가능하다. 따라서 뮤트가 **새 세션으로 우회**될 수 있는 것이 알려진 위험이다(§22). 로그인 사용자 우선 정책은 만들지 않는다 |
 | 고객 | **로그인 사용자** | 티켓은 로그인 필요(주문 연동) |
 | 상담원 | `AGENT_GITHUB_IDS` 허용목록(숫자 GitHub ID) | M1 `ADMIN_GITHUB_IDS` 와 같은 방식, DB 플래그 없음 |
 | 관리자 | `ADMIN_GITHUB_IDS` | M1 과 동일 |
@@ -378,8 +378,8 @@ sequenceDiagram
     W->>R: chat-projector: message_view, room_view 갱신
     W-->>G: NOTIFY chat_room_changed
     G->>G: chat-broadcaster 입력(이벤트) → 방 구독자 목록
-    G-->>S: chat.message {roomId, seq, …} (자기 메시지 — 응답과 병합)
-    G-->>V: chat.message {roomId, seq, …}
+    G-->>S: chat.message {room, seq, …} (자기 메시지 — 응답과 병합)
+    G-->>V: chat.message {room, seq, …}
 ```
 `chat-broadcaster` 는 worker 의 inbox 소비자이고 gateway 는 `NOTIFY` 로 깨어나 푸시용 메시지를 가져간다(M1 F14 구조 재사용). 푸시 본문은 **방 순번을 이벤트에서 그대로** 쓴다. **CS 방은 `chat.notice {room, seq}` 알림만** 보내고 본문은 REST 로 가져온다(§7.3).
 
@@ -448,7 +448,7 @@ sequenceDiagram
 - **CS(encrypted) 방은 알림 전용**이다: gateway 는 본문을 읽지도 보내지도 않는다(키가 없다). 재개에서도 `room.joined{head}` 와 `chat.notice` 만 보낸다.
 - 클라이언트는 방별로 `seq` 연속성을 검사하고(건너뛰면 `room.join { resume }` 재요청) 중복 `seq` 는 무시한다(M1 `SeqTracker` 방별 확장).
 - 재생 상한은 한 번에 200건(제안). 더 놓쳤으면 스냅샷으로 대체하고 위쪽 이력은 REST `GET …?before=` 로 가져온다.
-- 재생·스냅샷 원천은 `RoomEventSource.after`·`RoomSnapshotProvider` 구현이다. 도메인이 자체 순번 로그를 가진 룸이므로 `room_log`/`room_seq` 를 쓰지 않는다(P0 §6.4). `head` 를 쓰기 모델에서 읽는 것은 카운터 한 값만이며 P0 §2.4 에 등재할 문서화된 예외 E1 의 채팅 몫이다(대국의 `game_event` 읽기와 같은 성격, §21 C10).
+- 재생·스냅샷 원천은 `RoomEventSource.after`·`RoomSnapshotProvider` 구현이다. 도메인이 자체 순번 로그를 가진 룸이므로 `room_log`/`room_seq` 를 쓰지 않는다(P0 §6.4). `head` 를 쓰기 모델에서 읽는 것은 카운터 한 값만이며 P0 §2.4 에 등재할 문서화된 CQRS 예외 **X2** 다(대국의 `game_event` 읽기와 같은 성격, §21 C10).
 
 ### 4.7 권한 없는 구독 시도와 강제 퇴출
 ```mermaid
@@ -540,7 +540,7 @@ sequenceDiagram
     AD->>A: GET /admin/chat/reports
     AD->>A: POST /admin/chat/messages/{roomId}/{seq}/hide
     A->>DB: tx: message.status=hidden, moderation_action, outbox chat.message_hidden, audit admin.chat_message_hidden
-    W-->>구독자: chat.hidden {roomId, seq} → 클라이언트가 묘비로 교체
+    W-->>구독자: chat.hidden {room, seq} → 클라이언트가 묘비로 교체
 ```
 - 신고 시 **앞뒤 5건 스냅샷**을 보존하고 방에 `hold` 를 걸어 보관 정리(§7.4)가 증거를 지우지 않게 한다.
 - **`hold` 해제**: `ResolveChatReport` 가 그 방의 **미처리 신고가 0건**이 되는 순간 `hold=false` 로 되돌리고 `purge_after` 를 `max(기존, 처리 시각 + 보관 기간)` 으로 다시 계산한다(처리 후에도 스냅샷은 `ReportSnapshotRule` 이 90일 뒤 정리).
@@ -575,8 +575,8 @@ sequenceDiagram
 - 쓰기: api 가 `FieldCipher.encrypt(body, "chat.message.body_enc:<messageId>")` 로 암호화해 저장한다. 이벤트·outbox·푸시·`request_key` 응답에 본문은 없다.
 - 읽기: REST 조회 usecase(api)가 복호화한다. **KEK/DEK 키 재료는 api·worker 에만** 있고 ws-gateway 에는 없다(설정 스키마 시험으로 강제, P0 §9.3 체크리스트 ⑦).
 - 읽기 모델 `message_view.body_enc` 는 암호문 그대로 복사한다(투영기는 복호화하지 않는다).
-- **키 방식**: Phase 6 시점에는 P0 D13 의 KEK/DEK 상향이 이미 끝났다(Phase 5 착수 전). 봉투는 `v2.<dekId>.<base64url(iv ‖ ct ‖ tag)>` 이고 키는 `KEK_KEYS_FILE` 유래 DEK 다(M1 의 `FIELD_KEYS`/v1 봉투 서술은 상향 전 설명). AAD 는 그대로 `chat.message.body_enc:<messageId>`.
-- **ENC 필드**: `chat.message.body_enc`(+ 읽기 사본 `chat_read.message_view.body_enc`)와 `chat.report.snapshot_enc` 둘 — P0 §9.5 통합표 #6·#7. 둘 다 **키 회전 대상**이며(`rotate-field-keys --field` 레지스트리에 `chat.message.body_enc`·`chat.report.snapshot_enc`), 통합표 기준으로 KEK/DEK 상향 조건은 **이미 충족**이다(채팅이 필드를 늘린 것이 근접이 아니라 충족에 기여).
+- **키 방식**: Phase 6 시점에는 P0 D13 의 KEK/DEK 상향이 이미 끝났다(ENC 가 3개 이상이 될 예정이므로 Phase 5 착수 직전 선제 상향). 봉투는 `v2.<dekId>.<base64url(iv ‖ ct ‖ tag)>` 이고 키는 `KEK_KEYS_FILE` 유래 DEK 다(M1 의 `FIELD_KEYS`/v1 봉투 서술은 상향 전 설명). AAD 는 그대로 `chat.message.body_enc:<messageId>`.
+- **ENC 필드**: `chat.message.body_enc`(+ 읽기 사본 `chat_read.message_view.body_enc`)와 `chat.report.snapshot_enc` 둘 — P0 §9.5 통합표 #6·#7(ENC 이름은 3단 `<schema>.<table>.<column>`). 둘 다 **키 회전 대상**이며(`rotate-field-keys --field` 레지스트리에 `chat.message.body_enc`·`chat.report.snapshot_enc`), 통합표 기준으로 KEK/DEK 상향 조건은 **이미 충족**이다(채팅이 필드를 늘린 것이 근접이 아니라 충족에 기여).
 
 ### 7.3 푸시 방식 (방 종류별)
 | 방 | `chat.message` 푸시 | 이유 |
@@ -610,7 +610,7 @@ sequenceDiagram
 ---
 
 ## 9. presence 와 typing
-- 방 접속자 수(`room.presence {roomId, count}`)와 `room.typing {roomId, ref}` 는 **휘발성 메시지**다: 순번 없음, DB 에 쓰지 않음, 재개 시 최신값만(M1 `VolatileMessage` 규칙).
+- 방 접속자 수(`room.presence {room, spectators, players}`, P0 §6.3 과 같은 모양)와 `room.typing {room, ref}` 는 **휘발성 메시지**다: 순번 없음, DB 에 쓰지 않음, 재개 시 최신값만(M1 `VolatileMessage` 규칙).
 - `typing {room}` 은 클라이언트→서버 인바운드(M1 "WS 읽기 전용"의 예외, ADR-045). 서버는 방당 3초에 1건만 수용하고 같은 방 구독자에게 전달한다. 권한이 없는 방의 `typing` 은 무시한다.
 - **`typing` 은 임대를 연장하지 않는다**(DB 쓰기가 없는 휘발성 신호이고 gateway 에는 쓰기 경로가 없다). 임대 연장은 REST 메시지 전송 또는 상담원 하트비트(`POST /api/agent/tickets/{id}/heartbeat`)로만 하며 총 상한이 있다(§16, ADR-046).
 - **presence 는 `realtime` 모듈이 소유**한다(P0 D19·§6.9, `PresenceCounter` 포트). 채팅은 방 접속자 수를 `GetRoomPresence` 로 **읽어 표시만** 하고 증감하지 않는다. 대국 방의 관전자 수·플레이어 접속 상태도 같은 값이다(중복 구현 없음).
@@ -735,7 +735,7 @@ database-schema.md 형식을 따른다. 컬럼 전수가 아니라 **핵심 테�
 | `chat-broadcaster` | realtime | `chat.message_posted/hidden/room_*/participant_*` | 푸시 입력, 구독 정리 신호 |
 | `chat-game-sync` | chat | `game.started`·`game.finished`·`game.abandoned`(P1) | 방·플레이어 참가자 수명 |
 | `support-projector` | support | `support.*` | `ticket_view`, `agent_queue_view` |
-| `support-notifier` | support | `support.ticket_opened` | Discord 운영 알림(개인정보 없음) |
+| `support-notifier` | support | `support.ticket_opened` (P0 §8.3 소비자 열에도 `support-notifier` 가 `support.ticket_opened` 에 한해 있어야 한다) | Discord 운영 알림(개인정보 없음) |
 
 **`chat` 은 `support.*` 이벤트를 구독하지 않는다**(`chat → support` 의존 금지). 티켓 해결·종료에 따른 방 상태는 `support` 조율자가 `CloseRoomInTx` 로 같은 트랜잭션에서 바꾼다(B12 쌍 #1). P0 §8.3 의 `support.ticket_*` 소비자 표기에서 `chat` 을 빼도록 P0 소유자에게 요청한다(§21 C3).
 
@@ -1014,7 +1014,7 @@ flowchart TD
 | C7 | 환경변수: gateway 에는 키 재료(`KEK_KEYS_FILE`/DEK, 상향 전 `FIELD_KEYS`) 없음 시험, `CHAT_*` 한도(방당 관전자 상한 등) | design/01 |
 | C8 | 기능 카탈로그 접두사 CH-/SP- 와 `chat`·`support` 모듈 등록 | F00, P0 |
 | C9 | P2 `GetOrderSummaryForSupport(orderId, ownerUserId)` — 소유자 검증 인자 추가 | P2 §주문 |
-| C10 | CQRS 예외 등재: 채팅 룸의 `head` 를 gateway(`RoomEventSource.head`)가 쓰기 모델 `chat.room.last_seq` 에서 읽는 것(대국 `game_event` 읽기 E1 과 같은 성격) | P0 §2.4, database-schema §1 |
+| C10 | CQRS 예외 등재: 채팅 룸의 `head` 를 gateway(`RoomEventSource.head`)가 쓰기 모델 `chat.room.last_seq` 에서 읽는 것(대국 `game_event` 읽기 X1 과 같은 성격 — 이 예외를 **X2** 로 부른다; ADR-048 의 결정 E1…E8 과 별개) | P0 §2.4, database-schema §1 |
 
 **다른 영역과의 접점**
 | 영역 | 계약 |
@@ -1057,7 +1057,7 @@ flowchart TD
 | 항목 | 결정 시점 |
 |---|---|
 | **[사용자 판단]** 금칙어 정책(마스킹 vs 거절)과 초기 목록 | P1 구현 시 |
-| ~~관전자 익명 허용, 플레이어 로그인 필수 여부~~ | **닫힘(2026-11-04)**: P1 §10 — 익명 세션도 비레이팅 대국·관전 가능(뮤트 우회는 알려진 위험, §22) |
+| ~~관전자 익명 허용, 플레이어 로그인 필수 여부~~ | **닫힘(2026-11-04)**: P1 §5 — 익명 세션도 비레이팅 대국·관전 가능(뮤트 우회는 알려진 위험, §22) |
 | ~~`*InTx` 공개 usecase 규칙(C3)~~ | **닫힘(2026-11-04)**: P0 §2.4 B12 정본 |
 | **[사용자 판단]** Web Push 채택 여부와 구독 토큰 등급 | Phase 6 후반 |
 | **[사용자 판단·법무 검토 필요·미확인]** CS 보관 기간(1년 제안)과 삭제 요청 처리 정책(법적 보존 충돌 시) | 법무 검토 |
