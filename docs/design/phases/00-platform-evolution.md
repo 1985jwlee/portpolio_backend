@@ -5,7 +5,7 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 
 > **구현 순서 ≠ Phase 번호 (D24).** Phase 번호는 로드맵 식별자로 유지하고, 구현 순서는 **M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e** 이다(바둑 계열(Phase 1·2)이 마지막이고, 마작은 그 뒤 6e). 모든 영역 설계는 동결하지 않고 끝까지 완성하며, 각 Phase 착수 전에 설계 재검토 단계(§12.5)를 거친다. 아래 표·절은 Phase 번호로 쓰되 '순서' 열이나 §1.4 로 구현 순서를 읽는다.
 
-- 상태: 이 문서와 ADR-030~048(이 문서는 030~033, 영역 설계는 034~048) 은 **Proposed(사용자 확정 대기)** 이다. 확정 전까지 영역 설계는 D 번호를 "잠정 전제"로 쓴다.
+- 상태: 이 문서와 ADR-030~048(이 문서는 030~033, 영역 설계는 034~048) 은 **Accepted(2026-11-05, 사용자 일괄 확정, U1)** 이다. 이후 변경은 개정 ADR 로 한다. 단 U11·U17·U21·U23(사용자 변경)에 따른 본문 반영은 별도 작업 중이다.
 - 근거: README 로드맵, ADR-001·002·005·006·009~016·017~028, [architecture.md §12](../../domains/architecture.md), [database-schema.md §11](../../domains/database-schema.md).
 - 모든 금전 요소는 **모의·테스트 환경**이다(ADR-015). 이 저장소 밖 다른 프로젝트의 코드는 참고하지 않았다.
 - 값은 **측정(M1 실측·이번 유휴 측정)**, **추정**, **미확인**을 구분해 적었다.
@@ -258,6 +258,8 @@ flowchart BT
 (모든 모듈은 `events` 의 outbox/inbox 포트와 `kernel` 도 쓰지만 그림에서는 생략했다. 실선은 직접 임포트(층 규칙 R3), 이벤트 관계는 §8.2, `order → payment/escrow` 는 포트 역전이라 코드 의존 화살표가 반대(`PM → OR`, `ES → OR`)로 나타난다. 모듈 간 한 트랜잭션은 §2.4 허용 쌍만.)
 
 ### 2.4 모듈 간 한 트랜잭션 — 트랜잭션 참여 규칙 (B12, **정본**, D21)
+
+> **허용 쌍 10쌍 승인(2026-11-05, U2, 사용자 확정 [권장수용]).**
 
 M1 규약(F16 §8.2)은 "command usecase 만 `uow.run` 을 부르고 중첩을 금지"한다. 그런데 몇몇 흐름은 **여러 모듈의 쓰기를 한 트랜잭션**에 묶어야 불변식을 지킨다(구매 확정의 재고·결제·원장, CS 티켓 전이와 메시지, 분석 결과와 보상 전이). M1 의 `OutboxWriter`·`AuditWriter` 가 이미 "호출자의 tx 에 참여하는 포트"라는 선례다. 이를 일반화하되 **허용 쌍을 표로 한정**한다.
 
@@ -557,9 +559,9 @@ classDiagram
 
 **분리 트리거(Phase 4 재평가)**: Streams 메모리가 재고 키 공간을 압박하거나, 재시작 정책(휘발 허용 vs 내구성)이 충돌하거나, 한 용도의 장애가 다른 용도로 번진 사고가 측정될 때.
 
-### 5.3 Redis vs Valkey
+### 5.3 Redis 확정 (Valkey 대안은 채택하지 않음)
 
-기능 호환이라 결정을 미룬다(tech-stack §13: ADR-006 측정 시). 두 이미지 모두 유휴 메모리가 비슷하다(redis:8 6.8MiB, valkey 9 5.9MiB, 측정). 라이선스/배포 정책 확인 후 Phase 3 시작 때 하나를 고정한다(미확인).
+**Redis 로 확정(U8, 2026-11-05; 권장은 Valkey 였으나 사용자가 변경).** 두 이미지의 유휴 메모리는 비슷하다(redis:8 6.8MiB, valkey 9 5.9MiB, 측정). 최신 버전의 라이선스 조건은 Phase 3 착수 시 공식 문서로 확인한다(미확인).
 
 ### 5.4 포트 확장
 
@@ -827,7 +829,8 @@ flowchart LR
 | `challenge.created` · `challenge.cancelled` · `challenge.expired` | game | `challengeId`, 설정 | game-projector | 로비 |
 | **`game.started`** | game | `gameId`, 설정, 참가자 표시, `startedAt` | game-projector, **chat**(`chat-game-sync`: 방 개설·플레이어 참가자), trace-recorder | 두 번째 참가자 확정 시. P4 의 `game.created` 는 폐기(이 이벤트로 통일) |
 | `game.move_played` · `game.passed` · `game.resigned` · `game.timed_out` · `game.scoring_started` · `game.score_confirmed` | game | `gameId`, `seq`, 좌표/사유 | game-projector | 실시간 push 는 fast lane(`room_changed`), 이 이벤트는 투영용 |
-| **`game.finished`** | game | `gameId`, 결과, 종료 사유, 수 수, 규칙, `rated`, 참가자(ownerKey·색), 자격 판정 입력(수 수·종료 사유·같은 상대 반복 횟수) | game-projector, **ledger**(`EligibilityPolicy` 판정 후 reward `PENDING` 생성), **chat**(`chat-game-sync`: 플레이어 방 읽기 전용·관전자 방 공개 전환), trace-recorder | **analysis 는 이 이벤트를 직접 소비하지 않는다** — ledger 가 만든 `reward.pending_created` 로 작업을 만든다(자격 미달 대국은 reward 도 분석도 없음). `game.review.requested` 는 폐기 |
+| **`game.finished`** | game | `gameId`, 결과, 종료 사유, 수 수, 규칙, `rated`, 참가자(ownerKey·색), 자격 판정 입력(수 수·종료 사유·같은 상대 반복 횟수), **`undoCount`**(무르기 횟수), **덤(`komi`)**, **`rules`**(`chinese`·`japanese`) | game-projector, **ledger**(`EligibilityPolicy` 판정 후 reward `PENDING` 생성), **chat**(`chat-game-sync`: 플레이어 방 읽기 전용·관전자 방 공개 전환), trace-recorder | **analysis 는 이 이벤트를 직접 소비하지 않는다** — ledger 가 만든 `reward.pending_created` 로 작업을 만든다(자격 미달 대국은 reward 도 분석도 없음). `game.review.requested` 는 폐기 |
+| **`game.undo_requested`** · **`game.undo_accepted`** · **`game.undo_declined`** | game | `gameId`, `seq`, 요청/응답 색(`by`), `toPly`·`positionHash`(수락), `requestSeq`, `reason`(거절 `declined`·만료 `expired`·철회 `superseded`) | game-projector | U11 무르기(비레이팅 대국만, P1 §4.5). 실시간 push 는 `game_event` + `room_changed` 경로, 이 이벤트는 투영용 |
 | `game.abandoned` | game | `gameId`, 사유 | game-projector, chat(`chat-game-sync`: 방 종료) | 판정 근거는 game 소유 하트비트 신호(P1), presence 아님 |
 | `analysis.completed` · `analysis.failed` | analysis | `gameId`, 요약 지표, **색별** `verdicts[{color, rewardId, verdict(CLEAN·SUSPECT), inconclusive?}]` | game-projector(표시) | 보상 전이는 이벤트가 아니라 B12 쌍 #6 으로 같은 tx 에서 수행(reward 별로 자기 색의 판정). 2단계 후에도 INCONCLUSIVE 면 CLEAN 취급(확정)하되 `inconclusive=true` 로 기록·지표·감사 |
 | **`reward.pending_created`** | ledger | `gameId`, `rewards[{rewardId, ownerKey, color}]` | **analysis**(작업 멱등 생성, `UNIQUE (game_id)`), ledger-projector | `game.finished` 처리와 같은 tx 에서 발행 |
@@ -841,11 +844,12 @@ flowchart LR
 | `reservation.created` · `reservation.confirmed` · `reservation.expired` · `reservation.released` | deal | `reservationId`, `dealId`, `qty` | deal-projector, deal-redis-sync, order | |
 | `stock.changed` | deal | `dealId`, `remainingApprox` | 실시간 변환기(`deal.state` 휘발성 push, ≤1회/초 합치기) | **프로젝터 파생 신호**(outbox 계약 이벤트 아님 — 위 `reservation.*` 의 파생). 정본 계약 대상 밖이며 영역 문서가 이름만 인용 |
 | `order.created` | order | `orderId`, `number`, `totalKrw` | order-projector | |
-| **`order.paid`** | order | `orderId`, `orderVersion`, `lines[{lineId,skuId,qty,dealId?}]`, `totalKrw`, **`shippingAddressRef`**, `shippingMethod`, **`fulfillmentMode`**(`demo` 또는 `physical`), `paidAt` | **fulfillment**(`physical` 주문만), order-projector, 알림 | **주소 평문 금지**. `shippingAddressRef` = 불투명 참조(`<orderId>:<addressRev>`), 정정 시 rev 증가 |
+| **`order.paid`** | order | `orderId`, `orderVersion`, `lines[{lineId,skuId,qty,dealId?}]`, `totalKrw`, **`shippingAddressRef`**, `shippingMethod`, **`fulfillmentMode`**(`demo` 또는 `physical`), `paidAt`, (교환 신규 주문만) **`exchangeOfOrderId`**, **`releaseGate{type:'RETURN_INSPECTED', returnId}`** | **fulfillment**(`physical` 주문만), order-projector, 알림 | **주소 평문 금지**. `shippingAddressRef` = 불투명 참조(`<orderId>:<addressRev>`), 정정 시 rev 증가 |
 | **`order.cancel_requested`** | order | `orderId`, `reason`, `requestedBy` | fulfillment | 결제 후 취소 요청. 결과는 `fulfillment.cancelled` / `cancel_rejected` |
+| **`order.exchange_completed`** · **`order.exchange_cancelled`** | order | `orderId`, `exchangeId`, `newOrderId`, (취소) `reason` | 알림, order-projector; `exchange_cancelled` 는 **escrow**(`escrow-order-reactor`: 원 에스크로 `frozen→held` 재개)·fulfillment(신규 주문 취소는 `order.cancel_requested` 가 별도로 이끎) | 교환 완료(환불 + 게이트 해제 후) / 취소 (P2 §5.5) |
 | `order.demo_delivered` | order | `orderId`, `deliveredAt` | escrow(`escrow-order-reactor`: `shipment.delivered` 와 같게 해제 기한 설정), order-projector | `fulfillment_mode=demo` 주문을 관리자 `MarkDelivered` 로 종결할 때만 발행. 풀필먼트는 소비하지 않는다 |
 | `order.cancelled` · `order.expired` · `order.completed` · `order.disputed` | order | `orderId`, `reason` | order-projector, **fulfillment**(`cancelled`·`disputed`: 출고 보류/중지 판단) | 결제 전 취소는 풀필먼트와 무관. 주문 상태에 `fulfilling→cancelled` 전이가 있다 |
-| **`order.return_requested`** | order | `orderId`, `returnId`, `lines`, `reason` | fulfillment, **escrow**(자동 해제 기한 동결, `held→frozen`) | (P3 의 `return.requested` 는 이 이름으로 통일). 반품 요청 가능 기한 = 배송 완료 후 5일 < 에스크로 자동 해제 7일 |
+| **`order.return_requested`** | order | `orderId`, `returnId`, `lines`, `reason`, **`resolution`**(`REFUND`·`EXCHANGE`), (교환) **`exchangeId`**·**`newOrderId`** | fulfillment(`OpenReturn` 에 교환 연결), **escrow**(자동 해제 기한 동결, `held→frozen`) | (P3 의 `return.requested` 는 이 이름으로 통일). 반품 요청 가능 기한 = 배송 완료 후 5일 < 에스크로 자동 해제 7일 |
 | **`order.address_corrected`** | order | `orderId`, `shippingAddressRef`(새 rev) | fulfillment | (P3 의 `address.corrected` 통일) |
 | `payment.initiated` · `payment.approved` · `payment.failed` · `payment.unknown` · `payment.refund_pending` · `payment.refund_failed` · `payment.refunded` | payment | `paymentId`, `orderId`, `method`, `amountKrw`, `legs[{asset, amount, krwValue}]`, `snapshotId`(`refund_pending`·`refunded` 는 다리별 환불 `refundLegs[{asset, amount}]` 추가) | order(reactor), payment-projector, (`refunded`: **fulfillment**, escrow) | 포인트 결제도 결제 시작 때 FX 스냅샷을 고정(`snapshotId`). `refund_pending` 은 환불 접수(재시도·수동 처리 큐의 시작점), `refund_failed` 는 영구 실패(수동 처리 큐·경보) |
 | `payment.amount_mismatch` | payment | `paymentId`, `expectedKrw`, `observedKrw` | 감사/경보 | |
@@ -857,11 +861,11 @@ flowchart LR
 | **`fulfillment.rejected`** | fulfillment | `orderId`, `reason`(`OUT_OF_STOCK`·`ADDRESS_UNSHIPPABLE`) | **order**(주문 `cancelled`), **payment**(`payment-fulfillment-refunder` — 환불 사가 트리거, 멱등 키는 `eventId` 파생) | 상거래가 소비하는 거절 신호는 이것 하나(P2 의 `inventory.allocation_failed` 소비는 폐기) |
 | `fulfillment.allocation_completed` · `fulfillment.cancelled` · `fulfillment.cancel_rejected` | fulfillment | `orderId`, `foId`, `lines`/`stage`, `reason` | `allocation_completed`: fulfillment-projector 전용(상거래는 소비하지 않음 — `accepted` 가 이미 출고 준비를 알림); `cancelled`·`cancel_rejected`: order, (`cancelled`: **payment** `payment-fulfillment-refunder`) | `fulfillment.cancelled` → order 가 `order.cancelled`(`fulfilling→cancelled`) + 환불. **`reason=EXTERNAL`(order/payment 가 먼저 시작한 취소의 후속)이면 refunder 는 환불을 다시 시작하지 않는다**(중복 환불 방지, 환불 멱등 키는 `eventId` 파생). `fulfillment.allocated`·`fulfillment.partially_allocated` 는 `accepted` 에 병합되어 폐기 |
 | `package.packed` | fulfillment | `foId`, `packageId` | fulfillment-projector | |
-| **`shipment.dispatched`** | fulfillment | `orderId`, `foId`, `carrier`, `trackingNo`, `lines` | order(shipped), 알림 | (P2 의 `shipment.created/shipped` 통일) |
+| **`shipment.dispatched`** | fulfillment | `orderId`, `foId`, **`shipmentSeq`**, `carrier`, `trackingNo`, `lines` | order(shipped), 알림 | (P2 의 `shipment.created/shipped` 통일) |
 | `shipment.status_changed` | fulfillment | `shipmentId`, `status`, `occurredAt` | fulfillment-projector | |
-| **`shipment.delivered`** | fulfillment | `orderId`, `deliveredAt` | order(delivered), **escrow**(`release_due_at` = 배송 완료 + 7일 설정) | |
+| **`shipment.delivered`** | fulfillment | `orderId`, `deliveredAt`, **`shipmentSeq`**, **`allDelivered`**(모든 배송 완료일 때만 true) | order(`allDelivered=true` 에서만 delivered), **escrow**(`allDelivered=true` 에서만 `release_due_at` = 마지막 배송 완료 + 7일 설정) | |
 | **`shipment.delivery_failed`** | fulfillment | `orderId`, `attempts` | order, **escrow**(14일 상한 자동 해제 중지) | (P2 의 `shipment.failed` 통일). 반송(`RETURNED_TO_SENDER`)은 P3 가 ReturnCase/`RETURN_RECEIPT` 흐름으로 입고 |
-| **`return.received`** · **`return.inspected`** | fulfillment | `returnId`, `orderId`, (`disposition`: `RESTOCK`·`DISPOSE`·`REFUND_ONLY`·`REJECTED`) | order(환불 판단), **payment**(`payment-fulfillment-refunder`), **escrow**(`REJECTED` 면 `frozen→held`·해제 기한 재설정, 그 외는 환불 경로) | (P2 의 `shipment.returned` 통일). 반품 거절(`REJECTED_RETURN`)도 `return.inspected{disposition:'REJECTED'}` 로 발행하며 환불은 없다. `orderId` 단위 순서 보장을 위해 fulfillment.* 이벤트의 outbox 집합체 키는 `orderId` |
+| **`return.received`** · **`return.inspected`** | fulfillment | `returnId`, `orderId`, (`disposition`: `RESTOCK`·`DISPOSE`·`REFUND_ONLY`·`REJECTED`), **`lines[{lineId, qty}]`**(환불 대상 줄·수량), (교환) **`exchangeId`** | order(환불 판단), **payment**(`payment-fulfillment-refunder`), **escrow**(`REJECTED` 면 `frozen→held`·해제 기한 재설정, 그 외는 환불 경로) | (P2 의 `shipment.returned` 통일). 반품 거절(`REJECTED_RETURN`)도 `return.inspected{disposition:'REJECTED'}` 로 발행하며 환불은 없다. `orderId` 단위 순서 보장을 위해 fulfillment.* 이벤트의 outbox 집합체 키는 `orderId` |
 | `inventory.allocation_failed` | inventory | `skuId`, `foLineId`, `qty` | fulfillment (**inventory→fulfillment 내부 신호**, 상거래는 소비하지 않음) | fulfillment 가 `fulfillment.rejected` 로 변환 |
 | **`inventory.earmark_changed`** · **`inventory.earmark_rejected`** | inventory | `skuId`, `channelRef`, `qty` | **deal**(`deal_read.sku_capacity` 갱신 / 게시 거절) | **타임딜 총량 ≤ 약정 상한 규칙은 상거래(deal)가 받는다**: 게시 시 로컬 `sku_capacity` 로 1차 검증, 약정(`EarmarkStock`)이 조건부 UPDATE 로 최종 심판. 거절 시 `publishing` 이던 딜은 `draft` 로 복귀(`scheduled` 전이는 약정 승인 후) |
 | `inventory.stock_received` · `inventory.low_stock` · `inventory.discrepancy_detected` | inventory | `skuId`, `qty`/`atp`/`kind` | fulfillment(백오더 재할당), 관리자 알림 | |
@@ -954,7 +958,7 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 
 ### 10.2 관측·경보
 
-- 지표 네임스페이스 `pf_<도메인>_…`. 영역 설계가 도메인 지표를 정의하고 F17 카탈로그에 합친다. **종류 규약은 F17 과 같다**: 카운터만 `_total`, 게이지는 접미 없음(예: `pf_ledger_imbalance`). 원장 지표는 두 개다: `pf_ledger_imbalance`(분개 단위 불균형 게이지, 정상 0)와 `pf_ledger_trial_balance_nonzero`(대사: 자산별 시산표 합이 0 이 아닌 자산 수 게이지). `pf_ledger_unbalanced_journals` 는 쓰지 않는다. 새 지표를 만들기 전에 M1 지표에 `channel`/`mode` 레이블을 확장해 흡수할 수 있는지 먼저 본다 — 룸 연결 수는 `pf_ws_connections{channel="room"}`, 재개는 `pf_ws_resume_total{mode}` 로 흡수(별도 `pf_room_connections`·`pf_game_resync_total` 를 만들지 않는다).
+- 지표 네임스페이스 `pf_<도메인>_…`. 영역 설계가 도메인 지표를 정의하고 F17 카탈로그에 합친다. **종류 규약은 F17 과 같다**: 카운터만 `_total`, 게이지는 접미 없음(예: `pf_ledger_imbalance`). 원장 지표는 두 개다: `pf_ledger_imbalance`(분개 단위 불균형 게이지, 정상 0)와 `pf_ledger_trial_balance_nonzero`(대사: 자산별 시산표 합이 0 이 아닌 자산 수 게이지). `pf_ledger_unbalanced_journals` 는 쓰지 않는다. 새 지표를 만들기 전에 M1 지표에 `channel`/`mode` 레이블을 확장해 흡수할 수 있는지 먼저 본다 — 룸 연결 수는 `pf_ws_connections{channel="room"}`, 재개는 `pf_ws_resume_total{mode}` 로 흡수(별도 `pf_room_connections`·`pf_game_resync_total` 를 만들지 않는다). 영역 신규 카운터: 채팅 금칙어 마스킹 `pf_chat_masked_total{room_kind}`(P4), 바둑 `pf_game_undo_total{outcome}`·`pf_game_finished_total{rules}`(P1 §11).
 - 영역별 필수 경보 후보: 대국 중단 비율, 분석 큐 적체/실패, 재고 불일치(Redis vs Postgres), 결제 웹훅 실패/지연, 풀필먼트 SLA 초과, CS 응답 지연, `TransportLoss`.
 - 공개 대시보드(Grafana Public dashboards)에는 **도메인 요약 지표만** 노출한다(주문·결제의 개별 값 금지).
 
@@ -1026,6 +1030,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 
 - **구현 순서**: M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e. 로드맵 번호는 유지한다(§1.4 의 선행 의존·공백·해법).
 - **6a~6d 의 내부 순서**(CS 채팅 → Passkey → WMS → Solana)는 유지하되 의존을 확인한다: CS 채팅은 `order`(Phase 3)가 선행(배송 정보는 6c 이후 채워짐, G10), **WMS 는 주문·재고·결제(Phase 3·5) 선행**이라 5 이후가 맞고, Solana 에스크로는 payment/settlement 선행이다.
+- **6d 진행·6e 보류(U13 확정 2026-11-05)**: Solana devnet 에스크로(6d)는 진행하고 마작(6e)은 보류하며 경계(`RuleEngine` 포트)만 유지한다.
 - **마작(6e)은 Phase 1 의 게임 프레임이 `GameRules` 플러그인 구조일 때만 저비용**이다 → P1 에 "규칙 엔진 포트"(`RuleEngine`)를 두어 마작이 그 위에 올라가게 한다.
 - **Redis 는 Phase 2 가 아니라 Phase 3 에** 도입한다(D6). 구현 순서가 바뀌어도 Phase 3 이 먼저이므로 변함없고, Phase 2 의 분석 큐는 DB 선점이다(D23).
 - **`ledger` 는 Phase 3 에서 도입**한다(G1). 바둑 보상(Phase 2)은 도입된 원장 위의 마지막 포인트 출처다. 최소 `pricefeed`·`payment`·`escrow`·환불도 Phase 3 이다(G2~G4).
@@ -1051,7 +1056,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 |---|---|---|---|---|
 | 1 | design/04, ADR-018 | 세 번째 연결 `/ws/room`, 봉투 `ch:'room'`·`rm`, 인바운드 허용 목록(`hello`·`room.join`·`room.leave`·`ping`·`typing`), 휘발성 `room.presence`·`room.typing`, "WS 는 읽기 전용" 원칙에 룸 구독 제어 예외 명시 | P0·P1·P4 | 6a (`/ws/room` 첫 사용) |
 | 2 | F14 | `PublicHub` → 방별 `RoomHub` 일반화(포트 `RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper`·`RoomEventSource`), `SendQueue`·4408·`bye` 재사용, NOTIFY `room_changed` 구독, presence 소유(§6.9) | P0·P1·P4 | 6a |
-| 3 | design/03 §1.1 | 속도 제한 등급 추가: `write.game`, 채팅 7종(P4 §6.1), `write.purchase`·`write.checkout`·`write.refund`·`write.exchange`(USDC→POINT 교환), 웹훅 | P1·P2·P4 | Phase 3·6a·1 |
+| 3 | design/03 §1.1 | 속도 제한 등급 추가: `write.game`, 채팅 7종(P4 §6.1), `write.purchase`·`write.checkout`·`write.refund`·`write.exchange`(USDC→POINT 교환), **`write.return`**(반품·교환 요청, 세션당 10회/분 제안, P2 §5.5), 웹훅 | P1·P2·P4 | Phase 3·6a·1 |
 | 4 | design/03, 00 §4.3, F16 | 오류 wire code 추가(`illegal_move`·`not_your_turn`·`game_over`·…, CAS 경합 패배는 M1 `version_conflict` 재사용(`stale` 신규 코드 폐기), 결제·재고 코드 P2 §13.4, 채팅 코드), 접두사 없음 규칙 유지 | P1·P2·P4 | Phase 3·6a·1 |
 | 5 | design/01 B12, F16 §8.2, ADR-019 | 경계 규칙 **B12**(§2.4: 층 규칙 + `*InTx` 허용 쌍, `layers.json`·`tx-pairs.json`, `check:arch` 규칙 (a)~(d)), `TxContext` 를 받는 `InTx` 공개 함수 개념과 "중첩 `uow.run` 금지는 유지" 문구 | P0·P2·P4 | Phase 3(틀·쌍 #2~#5·#7·#8), 이후 쌍 추가 시 |
 | 6 | F16 가드 | `RequireRole(agent\|operator\|admin)`, `RequireParticipant`, `WebhookGuard`, `StepUpGuard`(6b, Passkey) | P1·P2·P3·P4 | Phase 3·5·6a·6b·1 |
@@ -1087,7 +1092,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 
 1. **앞 Phase 에서 배운 것 반영**: 실측값(지연·자원·처리량), 바뀐 가정, 실패한 가설을 해당 Phase 설계와 ADR 에 반영한다. 번호·구조는 유지하고 서술과 수치를 갱신한다.
 2. **독립 검토**: 해당 Phase 설계에 대해 앞선 구현과의 정합을 독립 검토자(결론을 주지 않은 상태)로 한 번 점검하고, 확인된 모순만 고친다.
-3. **ADR 확정**: 해당 Phase 의 Proposed ADR 을 Accepted 로 올릴지 사용자가 결정한다(U1).
+3. **ADR 확정**: ADR-030~048 은 2026-11-05 U1 로 일괄 Accepted 가 되었다. 이후 변경은 개정 ADR 로 한다.
 4. **스파이크**: 설계가 의존하는 미확인(외부 서비스, 성능, 실행 가능성)을 구현 전에 측정한다(예: PG 가입 조건·웹훅 서명, KataGo 성능, Passkey 라이브러리).
 5. **작업 분할**: `design/11` 형식으로 해당 Phase 의 작업을 쪼갠다(§13).
 6. 완료 후 **문서 동기**: 구현에서 달라진 점을 이 문서·영역 설계·README 에 반영한다.
@@ -1098,7 +1103,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 
 | 대상 | 내용 |
 |---|---|
-| `docs/adr/README.md` | ADR-030~033 색인(Proposed) 추가 |
+| `docs/adr/README.md` | ADR-030~033 색인 추가(현재 Accepted) |
 | ADR-006 | 확정 시 `Superseded by ADR-031` 표시 |
 | ADR-024 | 기존 포트 `StockReservation` 의 연산(`restock` 포함)과 도입 시점(Phase 3)·단일 인스턴스 규칙 참조 |
 | `database-schema.md §11` | 이 문서·영역 설계의 스키마 윤곽으로 교체, `realtime_read.room_log`·`room_seq`(예약, 현재 미사용), `security.data_key` 추가 |
@@ -1138,56 +1143,58 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 선택한 Redis 이미지 고정 후 인스턴스 분리(`redis-stock`/`redis-stream`) 재평가 | Phase 4 |
 | 방 로그 모델: 자체 로그 룸(대국·채팅) 외에 `room_log` 가 필요한 룸이 생기는지 | 새 룸 종류가 생길 때(현재 해당 없음) |
 
-## 16. 사용자 결정 목록 (모두 Proposed — 사용자 판단 필요)
+## 16. 사용자 결정 목록 (U1~U30 전부 확정 — 2026-11-05)
 
-영역 설계가 남긴 미결 중 **기술 근거만으로 정할 수 없는 항목**이다. 각 항목은 권장안을 따랐을 때의 기본값을 적었고, 결정이 없으면 권장안으로 진행한다.
+영역 설계가 남긴 미결 중 **기술 근거만으로 정할 수 없는 항목**이다. 2026-11-05 사용자가 U1~U30 을 모두 확정했다(U24~U29 는 앞선 대화에서 확정). 행마다 **구분**을 적는다: **[권장수용]** = Claude 가 제시한 권장안을 사용자가 선택, **[사용자 변경]** = 권장안과 다르게 사용자가 직접 선택. 결정이 행의 서술과 다르면 행을 결정에 맞게 고쳤다. 확정 이후 변경은 개정 ADR 로 한다(U1).
 
 | # | 결정 | 선택지 | 권장 | 영향·시점 |
 |---|---|---|---|---|
-| U1 | **ADR-030~048 확정** | 일괄 확정 / 개별 수정 | 영역별 검토 후 확정(Phase 착수 직전) | 설계 기준선. 확정 전에는 구현 근거로 쓰지 않는다 |
-| U2 | **경계 규칙 B12 허용 쌍(§2.4 표) 승인** | 승인 / 쌍 축소(사가로 대체) | 승인 | 상거래·CS 의 원자성. 거절하면 사가·보상 경로가 늘어난다 |
-| U3 | **데모 모드 샌드박스 작업자·상담원 체험** | 허용(샌드박스 데이터만) / 운영자만 | 허용(읽기 위주, 시뮬레이션 쓰기) | P3·P4 화면 공개 범위, 별도 `demo_` 스키마 필요 |
-| U4 | **배송지·수취인 익명화 기한** | 30일(제안) / 7일 / 90일 | 30일 | 개인정보 보관 정책 시연(§9.6) |
-| U5 | **실제 택배사 연동 여부** | 모의만(기본) / 한 곳 연동 | 모의만 | P3 어댑터 범위, 외부 계정·비용 |
-| U6 | **PG 선정**(Phase 5 착수 시) | 토스페이먼츠(1순위 후보) / 기타 | 착수 시 공식 문서 재확인 후 | 가입 조건·웹훅 서명 방식 미확인 |
-| U7 | **보관 기간** | 대국 채팅 30일 / CS 1년 / 신고 스냅샷 90일 / 결제 이벤트 90일 / 택배 이벤트 90일(모두 제안) | 제안값 | 개인정보 정책. 법적 의무는 법무 검토 필요·미확인 |
-| U8 | **Redis vs Valkey**(Phase 3 시작) | Redis / Valkey | 라이선스·이미지 확인 후 | 컨테이너 이미지, 클라이언트 |
-| U9 | **Streams 채택 여부**(Phase 3 측정 후) | Postgres 폴링 유지 / Streams / 둘 혼합 | 측정 합격선(ADR-031) 미달일 때만 Streams | 컨테이너·운영 복잡도 |
-| U10 | **에스크로 자동 확정 기한** | 7일(제안, 시연용 압축 가능) / 14일 | 7일 | ADR-016 미결 해소 |
-| U11 | **바둑 규칙 범위** | 중국식만 / 일본식 추가 / 무르기(undo) | 중국식만 | P1 룰 엔진·시험 세트 크기 |
-| U12 | **KataGo 실행 방식** | 라이브 호스트 CPU 저우선 / 오프라인 배치 / 보류 | 호스트 RAM·CPU 확인 후(Phase 2 스파이크) | 자원 예산(D14) |
-| U13 | **Solana devnet 에스크로(6d)·마작(6e) 진행 여부** | 진행 / 보류 | 경계(포트)만 설계 유지, 착수는 보류 | 일정 |
-| U14 | **KEK/DEK 상향 시점 승인**(Phase 5 착수 전, §9.3) | 승인 / 늦춤 | 승인 | ENC 필드 7개, 키 관리 |
-| U15 | **모의 면책·약관·환불 정책 문구** | 사용자 제공 | 제공 필요 | 법적 오해 방지(ADR-015, D18), design/12 |
-| U16 | **Web Push 채택 여부와 구독 토큰 등급**(P4, Phase 6 후반) | 채택 / 앱 내 읽지 않음 표시만 | 앱 내 표시만(Web Push 동작 미확인) | CS 응답 알림 수단, 구독 토큰 ENC 등급 |
-| U17 | **금칙어 정책: 마스킹 vs 거절**과 초기 목록(P4, 6a 착수 전 — 채팅 코어 도입 시) | 마스킹 / 거절 | 거절(우회 감소, 오탐은 신고로 보완) | 채팅 UX·모더레이션 부담 |
-| U18 | **포인트:원 환산 비율**(P2) — `POINT_KRW_RATE` 는 **1:1 고정으로 선언**(설정값 아님) | 1:1 고정 / 별도 비율(ADR 개정 필요) | 1:1 고정 | 포인트 결제 금액·바둑 보상 크기 |
-| U19 | **캡차/가상 대기열 도입 여부**(P2, 타임딜 부하 시험 후) | 도입 / 속도 제한·입장 토큰만 | 부하 시험 결과 후(기본은 입장 토큰만) | 봇 구매 방어·UX |
-| U20 | **seller 포털 필요 여부**(D11) | 두지 않음(단일 판매자) / Phase 6 이후 별도 ADR | 두지 않음 | 상품·딜 관리 화면, 권한 모델 |
-| U21 | **익명 플레이어 허용 확인**(P1 §10 은 비레이팅 대국 허용, P4 는 '플레이어 로그인 권장'): 플레이어 로그인 필수 여부, 관전자 익명 허용 | 로그인 필수 / 익명 비레이팅 허용 | 익명 비레이팅 허용(뮤트 우회 위험을 위험표에 기록) | 진입 장벽 vs 모더레이션 |
-| U22 | **분석 INCONCLUSIVE 처리**(P1/ADR-037): 2단계 후에도 결론이 안 나면 | CLEAN 취급(확정) / 수동 검토 큐 | CLEAN 취급(보수적 박탈 회피, 지표·감사 기록) | 보상 무결성 vs 운영 부담 |
-| U23 | **교환(반품+신규 주문) UX와 분할 배송의 구매자 노출**(P3, W4·W5) | 단순화(반품 후 재주문) / 교환 흐름 구현 | 반품 후 재주문 | P2·P3 UI 범위 |
+| U1 | **ADR-030~048 확정** | 일괄 확정 / 개별 수정 | 영역별 검토 후 확정(Phase 착수 직전) | 설계 기준선. 확정(2026-11-05)으로 구현 근거로 쓴다 <br>**결정**: **확정(2026-11-05) [권장수용]** ADR-030~048 지금 일괄 확정(Accepted). 이후 변경은 개정 ADR |
+| U2 | **경계 규칙 B12 허용 쌍(§2.4 표) 승인** | 승인 / 쌍 축소(사가로 대체) | 승인 | 상거래·CS 의 원자성. 거절하면 사가·보상 경로가 늘어난다 <br>**결정**: **확정(2026-11-05) [권장수용]** B12 허용 쌍 10쌍 승인(§2.4) |
+| U3 | **데모 모드 샌드박스 작업자·상담원 체험** | 허용(샌드박스 데이터만) / 운영자만 | 허용(읽기 위주, 시뮬레이션 쓰기) | P3·P4 화면 공개 범위, 별도 `demo_` 스키마 필요 <br>**결정**: **확정(2026-11-05) [권장수용]** 허용(샌드박스 데이터만), 별도 `demo_` 스키마 |
+| U4 | **배송지·수취인 익명화 기한** | 30일(제안) / 7일 / 90일 | 30일 | 개인정보 보관 정책 시연(§9.6) <br>**결정**: **확정(2026-11-05) [권장수용]** 배송지·수취인 암호문 익명화 30일 |
+| U5 | **실제 택배사 연동 여부** | 모의만(기본) / 한 곳 연동 | 모의만 | P3 어댑터 범위, 외부 계정·비용 <br>**결정**: **확정(2026-11-05) [권장수용]** 택배사 모의만 |
+| U6 | **PG 선정**(Phase 5 착수 시) | 토스페이먼츠(1순위 후보) / 기타 | 착수 시 공식 문서 재확인 후 | 가입 조건·웹훅 서명 방식 미확인 <br>**결정**: **확정(2026-11-05) [권장수용]** 토스페이먼츠 테스트 모드 확정(가입 조건이 안 맞으면 모의 PG 폴백; 조건·웹훅 서명은 Phase 5 착수 시 공식 문서로 재확인) |
+| U7 | **보관 기간** | 대국 채팅 30일 / CS 1년 / 신고 스냅샷 90일 / 결제 이벤트 90일 / 택배 이벤트 90일(모두 제안) | 제안값 | 개인정보 정책. 법적 의무는 법무 검토 필요·미확인 <br>**결정**: **확정(2026-11-05) [권장수용]** 제안값 수용(대국 채팅 30일·CS 본문 1년·신고 스냅샷 90일·결제 이벤트 90일·택배 이벤트 90일; 설정값, 법적 의무는 법무 검토 전 미확인) |
+| U8 | **Redis vs Valkey**(Phase 3 시작) | Redis / Valkey | 라이선스·이미지 확인 후 | 컨테이너 이미지, 클라이언트 <br>**결정**: **확정(2026-11-05) [사용자 변경]** Redis 확정(Valkey 아님; 최신 버전 라이선스 조건은 Phase 3 착수 시 공식 문서로 확인). 권장은 Valkey 였다 |
+| U9 | **Streams 채택 여부**(Phase 3 측정 후) | Postgres 폴링 유지 / Streams / 둘 혼합 | 측정 합격선(ADR-031) 미달일 때만 Streams | 컨테이너·운영 복잡도 <br>**결정**: **확정(2026-11-05) [권장수용]** 측정 합격선(ADR-031) 미달일 때만 Streams, 기본 Postgres 폴링 |
+| U10 | **에스크로 자동 확정 기한** | 7일(제안, 시연용 압축 가능) / 14일 | 7일 | ADR-016 미결 해소 <br>**결정**: **확정(2026-11-05) [권장수용]** 에스크로 자동 확정 7일(시연은 `ESCROW_TIME_SCALE` 압축). ADR-016 미결 해소 |
+| U11 | **바둑 규칙 범위** | 중국식만 / 일본식 추가 / 무르기(undo) | 중국식만 | P1 룰 엔진·시험 세트 크기 <br>**결정**: **확정(2026-11-05) [사용자 변경]** 중국식 + 일본식 + 무르기(undo) 모두 구현. 권장은 중국식만이었다. **설계 반영은 별도 작업 진행 중**(P1 룰 엔진·시험 세트, ADR-034·035) |
+| U12 | **KataGo 실행 방식** | 라이브 호스트 CPU 저우선 / 오프라인 배치 / 보류 | 호스트 RAM·CPU 확인 후(Phase 2 스파이크) | 자원 예산(D14) <br>**결정**: **확정(2026-11-05) [권장수용]** 라이브 호스트 CPU 저우선순위, 코어 2~3개 제한(집 서버는 구형 Xeon → Phase 2 스파이크 재측정) |
+| U13 | **Solana devnet 에스크로(6d)·마작(6e) 진행 여부** | 진행 / 보류 | 경계(포트)만 설계 유지, 착수는 보류 | 일정 <br>**결정**: **확정(2026-11-05) [권장수용]** 6d 진행, 6e(마작) 보류(경계만 유지) |
+| U14 | **KEK/DEK 상향 시점 승인**(Phase 5 착수 전, §9.3) | 승인 / 늦춤 | 승인 | ENC 필드 7개, 키 관리 <br>**결정**: **확정(2026-11-05) [권장수용]** Phase 5 착수 직전 KEK/DEK v2 상향 승인 |
+| U15 | **모의 면책·약관·환불 정책 문구** | 사용자 제공 | 제공 필요 | 법적 오해 방지(ADR-015, D18), design/12 <br>**결정**: **확정(2026-11-05) [권장수용]** Claude 가 ko/en 초안 작성 후 사용자 검토(법률 자문 아님) |
+| U16 | **Web Push 채택 여부와 구독 토큰 등급**(P4, Phase 6 후반) | 채택 / 앱 내 읽지 않음 표시만 | 앱 내 표시만(Web Push 동작 미확인) | CS 응답 알림 수단, 구독 토큰 ENC 등급 <br>**결정**: **확정(2026-11-05) [권장수용]** 앱 내 읽지 않음 표시만(Web Push 미채택) |
+| U17 | **금칙어 정책: 마스킹 vs 거절**과 초기 목록(P4, 6a 착수 전 — 채팅 코어 도입 시) | 마스킹 / 거절 | 거절(우회 감소, 오탐은 신고로 보완) | 채팅 UX·모더레이션 부담 <br>**결정**: **확정(2026-11-05) [사용자 변경]** 금칙어 마스킹(`***` 치환 후 전송). 권장은 거절이었다. **설계 반영은 별도 작업 진행 중**(P4, ADR-045) |
+| U18 | **포인트:원 환산 비율**(P2) — `POINT_KRW_RATE` 는 **1:1 고정으로 선언**(설정값 아님) | 1:1 고정 / 별도 비율(ADR 개정 필요) | 1:1 고정 | 포인트 결제 금액·바둑 보상 크기 <br>**결정**: **확정(2026-11-05) [권장수용]** 1 POINT = 1 KRW 고정 확인 |
+| U19 | **캡차/가상 대기열 도입 여부**(P2, 타임딜 부하 시험 후) | 도입 / 속도 제한·입장 토큰만 | 부하 시험 결과 후(기본은 입장 토큰만) | 봇 구매 방어·UX <br>**결정**: **확정(2026-11-05) [권장수용]** 입장 토큰·속도 제한만(캡차·가상 대기열 미도입) |
+| U20 | **seller 포털 필요 여부**(D11) | 두지 않음(단일 판매자) / Phase 6 이후 별도 ADR | 두지 않음 | 상품·딜 관리 화면, 권한 모델 <br>**결정**: **확정(2026-11-05) [권장수용]** seller 포털 두지 않음(단일 판매자) |
+| U21 | **익명 플레이어 허용 확인**(P1 §10 은 비레이팅 대국 허용, P4 는 '플레이어 로그인 권장'): 플레이어 로그인 필수 여부, 관전자 익명 허용 | 로그인 필수 / 익명 비레이팅 허용 | 익명 비레이팅 허용(뮤트 우회 위험을 위험표에 기록) | 진입 장벽 vs 모더레이션 <br>**결정**: **확정(2026-11-05) [사용자 변경]** 플레이어 로그인 필수(관전자만 익명 허용), 익명 비레이팅 대국 폐지. 권장은 익명 비레이팅 허용이었다. **설계 반영은 별도 작업 진행 중**(P1 §5·§10, P4) |
+| U22 | **분석 INCONCLUSIVE 처리**(P1/ADR-037): 2단계 후에도 결론이 안 나면 | CLEAN 취급(확정) / 수동 검토 큐 | CLEAN 취급(보수적 박탈 회피, 지표·감사 기록) | 보상 무결성 vs 운영 부담 <br>**결정**: **확정(2026-11-05) [권장수용]** INCONCLUSIVE 는 CLEAN 취급 + 지표·감사 기록 |
+| U23 | **교환(반품+신규 주문) UX와 분할 배송의 구매자 노출**(P3, W4·W5) | 단순화(반품 후 재주문) / 교환 흐름 구현 | 반품 후 재주문 | P2·P3 UI 범위 <br>**결정**: **확정(2026-11-05) [사용자 변경]** 교환 흐름 구현(반품 + 연결된 신규 주문, 분할 배송 구매자 노출). 권장은 반품 후 재주문이었다. **설계 반영은 별도 작업 진행 중**(P2·P3, ADR-040) |
 | U24 | **첫 로그인 지급 정책**(G1·D25): **원장 지급은 POINT 100,000 만**(사용자 결정 2026-11-05 개정; 당초 안은 USDC 10,000 + POINT 1,000, 개정 1: POINT 1,000 만, 개정 2: 100,000 으로 상향 — U27). USDC 는 원장에서 고정액으로 자동 지급하지 않고 테스트넷 환경에 따라 공급한다 — 설정 `WELCOME_GRANT_USDC_MICRO`(환경별 값; 로컬·시험은 시험용 값, 라이브 기본 0), 지갑 연결 사용자는 Circle faucet 으로 본인이 받은 devnet USDC 를 쓰는 6d 경로. 사용자당 1회, 재충전 없음, 관리자 지급 건당 상한. POINT 단독 결제도 가능하고 혼합 결제·교환 설계는 유지. 하위 질문(지갑 없는 라이브 사용자에게 USDC 를 어떻게 줄 것인가) **해결(2026-11-05 사용자 결정): '지갑이 없으면 애초에 연결하지 못하니(=USDC 를 받을 수 없으니) 지갑 연결을 유도하고, 지갑 없는 사용자에게는 POINT 로 물건을 구매하는 경험을 준다.'** ① 지갑 없는 사용자는 USDC 를 받지 않는다(원장 USDC 지급·관리자 지급·지급액 상향은 채택하지 않음; 단 POINT 지급액 상향은 U27 (c) 로 채택) ② 화면에서 지갑 연결을 안내·유도한다(연결하면 devnet USDC 경로 6d) ③ POINT 단독 결제가 지갑 없는 사용자의 핵심 구매 경험이므로 시드 상품 중 POINT 100,000 안에서 살 수 있는 상품이 다수 있어야 한다(U27) | (해결됨) 검토했던 안: 원장 USDC 지급액 상향 / 관리자 지급 / 지갑 연결 유도 → 지갑 연결 유도만 채택 | 하위 질문 해결(2026-11-05), 금액·재충전 정책은 기존대로 | Phase 3 시연 흐름, 지갑 연결 안내 화면, POINT 로 살 수 있는 시드 상품(U27), 어뷰징 방어 |
 | U25 | **총 발행 상한**(G1): `ledger.supply_cap.cap` 은 `numeric(40,0)`, 값은 **signed 64-bit 최대 9223372036854775807**(마이크로 단위; 각 잔액 컬럼이 BIGINT 인 한 합이 이를 넘을 수 없다). 원자 UPDATE 구조(T8)는 구조 방어로 유지하되 실질 무제한이며, 남용 방어는 사용자당 1회 지급(`github_id` 유일)과 속도 제한이 맡는다 | — | **확정(2026-11-05)** | 가입 농사 방어는 지급 유일성·속도 제한에 의존, 경보 기준 |
 | U26 | **교환 한도**: `ExchangeUsdcToPoint` 은 **무제한**(일일·건당 상한 없음). 잔액 부족 검사, 견적 만료, `maxUsdcMicro` 보호, `write.exchange` 속도 제한(남용 방어이며 한도가 아니다)은 유지 | — | **확정(2026-11-05)** | 차익·남용은 견적 만료·속도 제한으로 제어 |
 | U27 | **시드 상품 가격**: 실제 쇼핑몰(네이버 쇼핑 등)에서 대표 상품을 조사해 **참고 가격을 표시**하는 방식. `catalog.product` 에 `reference_price_krw`·`reference_source`(출처 이름)·`reference_checked_on`(확인일). 자동 수집(스크래핑)은 하지 않고 사람이 Phase 3 착수 시 조사해 `seeds/products.*` 에 기록한다. 이미지는 쇼핑몰 것을 복사하지 않는다(저작권·약관; 자체 일러스트 또는 무이미지). 화면에 '시점 스냅샷이며 실제 거래가 아님'을 표기한다. 실제 가격 수치는 아직 확보하지 못했다. **참고: 지갑 없는 사용자는 USDC 를 받지 않으므로(U24 해결) POINT 단독 구매가 핵심 경험이고, 시드 상품 중 POINT 100,000 안에서 살 수 있는 상품이 다수 있어야 한다. 지갑 연결 사용자의 USDC 경로(6d)·교환 경로는 추가 구매력일 뿐 전제가 아니다.** **가격 충돌은 해결(2026-11-05 사용자 결정): (c) 로 푼다** — 첫 로그인 POINT 지급을 1,000 → **100,000**(1 POINT = 1 KRW, 100,000 POINT = 100,000 KRW)으로 올리고 시드 상품은 **대략 현실 금액(참고가 그대로)** 을 쓴다. 폐기한 안: (a) 참고가 스케일링, (b) 소액 상품군 필수 포함(소액 상품을 넣는 것은 자유). 시드 상품은 참고가 대부분이 100,000원 이하가 되도록 조사하고, 100,000원을 넘는 상품은 USDC 교환·혼합 결제의 시연 대상으로 둔다. 총 발행 상한(U25)은 이미 최대치라 그대로다. | — | 방식 확정(2026-11-05), 가격 확정 (c) 로 해결(2026-11-05), 가격 조사는 Phase 3 착수 시 | 시연 현실감, 구매 가능성 |
 | U28 | **온체인 시연 토큰**(6d): **자체 발행 `tUSDC`(devnet 모의 토큰)를 기본**으로 하고 설정 `SETTLEMENT_MINT` 로 Circle devnet USDC(민트 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle 문서 developers.circle.com/stablecoins/usdc-contract-addresses; Circle faucet 과 Coinbase CDP faucet 이 같은 민트로 보낸다 — 2026-11-05 검색)에 연결할 수 있다. 이유: 지갑 연결이 유도 경로라 외부 faucet(한도는 제3자 자료 기준 Circle 20 USDC/2시간/주소 — Circle 자체 페이지 미확인; Coinbase CDP 1 USDC/요청·10 USDC/24시간) 두 곳을 거치면 이탈하므로 사이트가 tUSDC 를 발행해 주고 devnet SOL 수수료를 대납(fee payer)한다. 요구: 토큰 메타데이터 이름 'Test USDC (demo)', 화면에도 `tUSDC` 명시(진짜 USDC 와 오인 방지), **민트 권한 키·수수료 대납 키는 비밀(devnet 전용, ADR-026 비밀 관리 대상으로 등재)**, 지갑당 발행 속도·횟수 제한, `SETTLEMENT_MINT` 가 Circle USDC 일 때는 사이트가 발행하지 않고 사용자가 Circle faucet 으로 받은 것을 쓴다(수수료 대납은 유지 가능). 개정 이력: 같은 날 앞서 '권고는 Circle devnet USDC, 한도가 막을 때만 tUSDC 폴백'으로 적었으나 사용자 확정으로 기본이 tUSDC 로 바뀌었다 | tUSDC 기본 / Circle USDC 는 `SETTLEMENT_MINT` 로 선택 | **확정(2026-11-05)** | 방문자 시연 마찰, 발행 남용·수수료 키 고갈 방어 |
 | U29 | **devnet 수수료(SOL) 부담**: 플랫폼 대납 vs 사용자 파우셋 | **확정(2026-11-05)**: 플랫폼 대납 + 안전장치 — ① 지갑당 대납 횟수·일일 총량 상한 ② 대납 키 SOL 잔액 기준 이하 시 Discord 경보(ADR-027 경로; 게이지 `pf_wallet_fee_payer_balance_lamports` 제안) ③ 잔액 고갈 시 '사용자 faucet 안내' 화면으로 자동 폴백(지갑 연결·원장은 정상). 사용자 1명당 약 0.003 SOL 추정(서명당 약 5,000 lamports·토큰 계정 임대료 약 0.002 SOL, 미검증), 상한 숫자는 6d 착수 시 확정. 대납 키는 비밀 관리 대상(ADR-026) | 6d 착수 전 상한 숫자·수수료 값 재확인 | 대납 키 잔액 고갈, 키 관리 |
-| U30 | **반품 가능 기한**(`RETURN_WINDOW_DAYS`, P2·P3): 배송 완료(또는 `demo` 주문 종결) 후 5일(제안) < 에스크로 자동 해제 7일 | 5일 / 7일 미만의 다른 값 | 5일 | 반품 UX, 에스크로 동결 시점 |
+| U30 | **반품 가능 기한**(`RETURN_WINDOW_DAYS`, P2·P3): 배송 완료(또는 `demo` 주문 종결) 후 5일(제안) < 에스크로 자동 해제 7일 | 5일 / 7일 미만의 다른 값 | 5일 | 반품 UX, 에스크로 동결 시점 <br>**결정**: **확정(2026-11-05) [권장수용]** 반품 가능 기한 5일 |
 
-### 16.1 결정 시점 (구현 순서 기준)
+### 16.1 재확인·착수 시점 (구현 순서 기준)
 
-| 필요한 시점 | 결정 |
+**U1~U30 은 모두 2026-11-05 에 확정되었다.** 아래 표는 결정 시점이 아니라 **각 결정을 재확인하거나 그 결정에 따른 작업을 착수하는 시점**이다. 재확인은 결정을 뒤집는 것이 아니라 확정 당시 미확인으로 남긴 외부 사실(라이선스·가입 조건·법적 의무·실측)을 그때 공식 자료로 확인하는 것이다.
+
+| 시점 | 재확인/착수 항목 |
 |---|---|
-| **지금(M1 착수 전)** | **M1 명세 확정**, U1(ADR 확정 방식), U2(B12 승인 — Phase 3 에서 처음 필요) |
-| **Phase 3 착수 전** | U8(Redis vs Valkey), U9(Streams, 측정 후), U18(1:1 고정 선언 확인), U19(캡차·대기열, 부하 시험 후), U24(데모 지급), U25(총 발행 상한), U26(교환 한도), U27(시드 상품 가격), U4(익명화 기한 — 배송지 ENC 가 이때 도입), U10(에스크로 자동 확정 기한 — 최소 escrow 가 이때 도입), U15(모의 면책·약관 문구), U20(seller 포털) |
+| **지금(M1 착수 전)** | M1 명세 확정. U1(ADR 일괄 Accepted)·U2(B12 승인)는 반영 완료 |
+| **Phase 3 착수 전** | U8(Redis 최신 버전 라이선스 조건 확인), U9(Streams 는 측정 후 합격선 미달 시에만), U18(1:1 고정 반영), U19(입장 토큰·속도 제한 구현, 부하 시험으로 확인), U24~U27(지급·시드 상품 가격 조사), U4(익명화 30일 — 배송지 ENC 도입 시), U10(에스크로 7일 — 최소 escrow 도입 시), U15(모의 면책·약관 ko/en 초안 작성 후 사용자 검토), U20(seller 없음 반영) |
 | Phase 4 | HPA 사용자 지정 지표 방식(§15) |
-| **Phase 5 착수 전** | U6(PG 선정), U14(KEK/DEK 상향), U30(반품 기한), U7 의 결제 이벤트 보관 |
-| 6a 착수 전 | U3(데모 모드 샌드박스), U16(Web Push), U17(금칙어 정책), U7 의 CS 본문·신고 스냅샷 보관 |
-| 6c 착수 전 | U5(택배사 연동), U23(교환 UX), U7 의 택배 이벤트 보관 |
-| 6d 착수 전 | U29(확정 2026-11-05; 상한 숫자·수수료 값만 재확인), U13(진행 여부 — 경계는 설계 유지) |
-| 6e 착수 전 | U13 의 마작 진행 여부 |
-| **Phase 1 착수 전(바둑 계열)** | U11(바둑 규칙 범위), U21(익명 플레이어), U7 의 대국 채팅 보관 |
-| Phase 2 착수 전 | U12(KataGo 실행 방식, 스파이크 후), U22(INCONCLUSIVE 처리) |
+| **Phase 5 착수 전** | U6(토스페이먼츠 가입 조건·웹훅 서명 공식 문서 재확인, 안 맞으면 모의 PG), U14(KEK/DEK v2 상향 실행), U30(반품 기한 5일 반영), U7 의 결제 이벤트 보관 |
+| 6a 착수 전 | U3(`demo_` 샌드박스 구현), U16(앱 내 읽지 않음 표시), **U17(마스킹 — 설계 반영 별도 작업 진행 중)**, U7 의 CS 본문·신고 스냅샷 보관 |
+| 6c 착수 전 | U5(택배사 모의만), **U23(교환 흐름 — 설계 반영 별도 작업 진행 중)**, U7 의 택배 이벤트 보관 |
+| 6d 착수 전 | U29(상한 숫자·수수료 값만 재확인), U13(6d 진행 확정) |
+| 6e | U13(마작 보류 — 재개 시 별도 판단) |
+| **Phase 1 착수 전(바둑 계열)** | **U11(중국식+일본식+무르기 — 설계 반영 별도 작업 진행 중)**, **U21(플레이어 로그인 필수 — 설계 반영 별도 작업 진행 중)**, U7 의 대국 채팅 보관 |
+| Phase 2 착수 전 | U12(KataGo 코어 2~3개 저우선순위 — 구형 Xeon 이라 스파이크 재측정), U22(INCONCLUSIVE 는 CLEAN 취급 + 지표·감사 기록) |
 
 바둑 관련 결정은 뒤로, 타임딜·결제·PG 선정은 앞으로 당겨졌다. 위 시점은 각 Phase 의 설계 재검토(§12.5)에서 다시 확인한다.

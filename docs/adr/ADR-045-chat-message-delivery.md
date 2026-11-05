@@ -1,5 +1,5 @@
 # ADR-045: 채팅 메시지 전달 모델 — REST 쓰기, 방별 순번, 멱등, 재개
-- 상태: **Proposed** (사용자 확정 대기. 설계 문서 [phases/04-chat](../design/phases/04-chat.md))
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1. 설계 문서 [phases/04-chat](../design/phases/04-chat.md))
 - 날짜: 2026-11-04
 - 근거: README 로드맵 Phase 1(대국 채팅)·Phase 6(CS 채팅) / ADR-014(재접속)·018(CQRS)·020(inbox)·021(동시성)·025(쓰기는 트랜잭션) / design/04(WS 프로토콜)·F14(realtime)
 - 구현 순서(P0 D24): `chat` 코어는 **6a(CS 채팅)에서 먼저 도입**되고 대국 채팅 룸 종류는 Phase 1 에서 추가된다(P0 §1.4 G9).
@@ -16,6 +16,7 @@ M1 의 WebSocket 은 **읽기 전용 푸시 채널**이고 쓰기는 REST 이다
 5. **재개는 읽기 모델로**: 클라이언트가 방별 마지막 `seq` 를 `room.join { room, resume }` 에 보내면 gateway 가 `RoomEventSource`(chat 구현)로 `chat_read.message_view` 에서 `seq > resume` 를 재생하고, 이력이 없거나 너무 크면 최근 N건 스냅샷으로 대체한다. **구독을 먼저 등록한 뒤** `head` 를 쓰기 모델 `room.last_seq` 에서 읽고, 읽기 모델이 `head` 에 못 미치면 gateway 가 대기·재시도(100ms 간격 최대 2초)하며, 그래도 모자라면 클라이언트가 gap 으로 감지해 REST `GET ?after=` 로 채운다(소비자 둘의 처리 지연 차이로 push 가 투영보다 앞설 수 있기 때문, 검토 반영).
 6. **암호화 방(CS)은 응답 재생·재개에서도 본문을 내보내지 않는다**: `request_key.response_body` 는 `{messageId, seq}` 만 저장하고, 재개·스냅샷 모드는 `room.joined{head}` + `chat.notice {room, seq}` 만 보낸다. 본문은 REST 조회(api 가 복호화, ADR-047). 지원 방 전송은 `/support/tickets/{id}/messages` 만이며 `POST /rooms/{id}/messages` 는 `support_ticket` 방을 `409 room_kind_mismatch` 로 거절한다.
 7. **WS 인바운드는 `room.join`·`room.leave`·`typing` 3종**(P0 §6.3 허용 목록)뿐이고 `room.join` 은 연결당 초당 5회(P0 §6.8, 초과 시 `4429`)다. 어느 인바운드도 DB 쓰기·임대 연장을 하지 않는다.
+8. **금칙어는 거절하지 않고 마스킹한다**(U17, 2026-11-05): 대국 채팅의 `ContentPolicy` 는 길이·링크·중복 위반만 `400 validation_failed` 로 거절하고, 금칙어는 서버가 `*` 로 치환(코드포인트당 1개, 길이 보존)해 저장·push 한다. **치환 전 원문은 저장하지 않는다**(제안) — 저장·outbox·push·읽기 모델·`request_key` 응답 모두 치환본만 다루고, 응답은 `masked` 플래그를 싣는다. 우회(띄어쓰기·자모 분리)는 신고로 보완한다. CS 방에는 적용하지 않는다. 초기 금칙어 목록은 구현 시 사용자가 제공한다.
 
 ## 설계 상세
 
@@ -65,10 +66,12 @@ REST 쓰기 지연(요청→응답)이 **p95 150ms**(제안) 를 넘는 것이 �
 | 전달 지연이 길어 채팅이 답답함 | 지표 `pf_chat_fanout_seconds` 로 감시, 철회 조건 충족 시 WS 전송 도입 |
 | 동일 `client_msg_id` 를 다른 본문으로 재사용 | `request_hash` 불일치 시 `422 idempotency_key_reuse`(M1 규칙) |
 | `request_key` 만료 뒤 재전송이 카운터만 올림 | 충돌 시 롤백 후 기존 행 반환(결정 3), 시험 CH-AC9 |
+| 원문 미보존 때문에 신고 처리자가 치환 전 내용을 볼 수 없고 오탐을 복구할 수 없음, 우회 표현은 치환되지 않음 | `masked` 플래그·마스킹 지표로 상습 추정, 신고 시 앞뒤 5건 스냅샷(치환본), 한계가 드러나면 원문 단기 ENC 보관 재검토(PUB 등급·키 회전 부담이 있어 지금은 채택 안 함) |
 
 ## 검증 방법
 - 동시성: 같은 방에 N 명이 동시에 전송 → seq 연속·유일, 순서 = 커밋 순서.
 - 멱등: 같은 `client_msg_id` 동시 2회 → 메시지 1건, 응답 같은 seq.
+- 마스킹: 센티널 금칙어 전송 → `201`·`masked=true`, 저장소·이벤트·푸시·로그에 원문 없음(CH-AC13), 링크·중복은 거절 유지(CH-AC14).
 - 재접속: 클라이언트가 중간 seq 를 놓친 뒤 `resume` → 누락 없이 재생.
 - 지연 측정: REST 쓰기 p95, 푸시까지 종단 지연 p95 를 기록해 철회 조건 판단.
 

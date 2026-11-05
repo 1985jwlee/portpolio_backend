@@ -1,5 +1,5 @@
 # ADR-033: 자원 예산과 배포 단위 — 상시 60% 이하, CPU 예산 분리, 같은 이미지 유지
-- 상태: **Proposed** (사용자 확정 대기)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1)
 - 날짜: 2026-11-04
 - 근거: 무료 호스팅 제약(집 PC 16GB 기준 / Oracle 24GB 는 미추진, 참고용) / M1 실측(Bun 서버 36–90MB, Next 164MiB, Envoy 17–54MiB) / 이번 유휴 측정(postgres 56MiB, nginx 7.5MiB, prometheus 46MiB, grafana 440MiB, redis 6.8MiB, valkey 5.9MiB) / ADR-002
 - 관련 문서: [phases/00 §10~11](../design/phases/00-platform-evolution.md)

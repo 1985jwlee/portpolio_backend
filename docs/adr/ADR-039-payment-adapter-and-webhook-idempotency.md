@@ -1,5 +1,5 @@
 # ADR-039: 결제 어댑터와 웹훅 멱등 — 포트, 상태 머신, 승인은 트랜잭션 밖
-- 상태: **Proposed** (사용자 확정 대기)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1)
 - 날짜: 2026-11-04
 - 근거: Phase 3·5 / ADR-015(모의), ADR-016(PG 테스트 모드), ADR-020(inbox), ADR-021(선점·펜싱) / 2026-11-04 PG 후보 웹 검색(요약 수준, 재확인 필요)
 - 구현 순서(P0 D24): Phase 3 에는 `LedgerGateway`(포인트 우선 + USDC 혼합 결제, [ADR-048](ADR-048-mock-currency-and-mixed-payment.md)) 최소형만, 카드 어댑터·웹훅은 Phase 5(P0 §1.4 G2).

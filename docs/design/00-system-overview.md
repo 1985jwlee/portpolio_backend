@@ -22,6 +22,7 @@
 | [14](14-seo-and-error-pages.md) | SEO·공유 미리보기·robots/sitemap·JSON-LD·오류 화면(404/403/500/점검) |
 | [15](15-visual-design.md) | 시각 디자인: 토큰·타이포·컴포넌트 모양·핵심 화면 목업(모던 미니멀) |
 | [16](16-outage-fallback-page.md) | 서버 중단 시 정적 대체 페이지: 별도 주소 + 수동 전환(도메인 없음), G13 보류, 집 PC 단일 장애점 |
+| [17](17-mock-disclaimer-and-terms-draft.md) | 모의 면책·이용 약관·환불 정책·개인정보 요점·지갑 안내의 ko/en 초안(U15, 법무 검토 전) |
 | [features/](features/00-feature-catalog.md) | **기능 114개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
 | [phases/](phases/00-platform-evolution.md) | **Phase 1~6 영역 설계**: 공통 진화(P0: 서비스 경계·B12 트랜잭션 참여 규칙·이벤트 계약 정본·ENC 통합표·사용자 결정 목록), 바둑(P1), 상거래(P2), 풀필먼트(P3), 채팅(P4). ADR-030~047(Proposed) |
 

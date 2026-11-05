@@ -27,7 +27,7 @@ Phase 6 의 "WMS 풀필먼트" 항목(ADR-016)을 **아키텍처 수준**으로 
 | 재고 원장·잔고·실사·대사, 상거래 재고와의 관계 | 재고 최적 배치(슬로팅), 수요 예측 |
 | 출고: 할당·웨이브·피킹·패킹·라벨·인수인계 | 노무 관리(인력 스케줄·성과 점수) |
 | 배송 추적(모의 택배 어댑터), 배송 실패 처리 | 실제 택배사 API 연동 (인터페이스만 열어 둔다) |
-| 반품·검수·재입고/폐기 | 교환 자동 출고 (반품 + 신규 주문으로 표현) |
+| 반품·검수·재입고/폐기, **교환 연결 신규 주문의 출고 게이트**(U23, §5.2 끝·§12.8) | 교환 상품의 선출고(반품 검수 전 출고)·타 창고 재고로의 교환 |
 | 예외 케이스와 사람 개입 큐, 작업자 화면, 관리자 대시보드 | 하드웨어 연동(무선 스캐너 펌웨어, 라벨 프린터 드라이버) |
 | 시뮬레이터(주문 생성기·택배·작업자 봇), 카오스 주입 | 실물 바코드 표준 인증(GS1 준수는 미확인) |
 
@@ -331,7 +331,7 @@ earmark 소비는 `earmarked_total = earmarked_total - :q, allocated_total = all
 | `ALLOW_PARTIAL` | 가능한 줄/수량만 할당, 나머지는 백오더 | 분할 배송 허용 주문 |
 | `BACKORDER_WAIT` | 부족분을 대기열에 두고 입고 시 자동 재시도 | 입고 예정이 있는 경우 |
 
-부분 할당은 `FulfillmentOrder` 를 `PARTIALLY_ALLOCATED` 로 두고, 할당된 줄로 먼저 `FulfillmentShipment`(분할 배송 1)를 만든다. 백오더는 입고 완료 이벤트(`inventory.stock_received`)가 소비자 `backorder-retry` 를 깨운다.
+부분 할당은 `FulfillmentOrder` 를 `PARTIALLY_ALLOCATED` 로 두고, 할당된 줄로 먼저 `FulfillmentShipment`(분할 배송 1)를 만든다. 분할 배송은 구매자 화면에 **부분 배송 N건**으로 노출된다(`shipmentSeq`·`allDelivered`, §11.3·P2 §5.5.6). 백오더는 입고 완료 이벤트(`inventory.stock_received`)가 소비자 `backorder-retry` 를 깨운다.
 
 ### 4.4 대사 (reconciliation)
 
@@ -437,6 +437,7 @@ stateDiagram-v2
 - **RETURNED_TO_SENDER** 는 종결이 아니라 **반품 흐름의 시작**이다: 반송 확정 시 `ReturnCase`(`origin = RTS`)가 만들어져 `RETURN_RECEIPT` → 검수 → `RESTOCK`/`DISPOSE` 로 이어진다(§5.3).
 - 상태 전이는 모두 `version` 조건부 UPDATE 이고, 전이마다 `fulfillment_order_event`(추가 전용 이력)와 outbox 이벤트가 같은 트랜잭션에 쓰인다.
 - `PACKED` 이후 취소는 상태 머신에서 허용하지 않는다(§5.4 취소 표). 대신 출고 후 반품 경로로 간다.
+- **교환 출고 게이트 (U23)**: P2 의 상품 교환 신규 주문(`order.paid` 의 `exchangeOfOrderId` 있음)은 상태 머신에 **새 상태를 만들지 않는다**. 접수·할당은 일반 주문과 같고(`ALLOCATED`/`PARTIALLY_ALLOCATED`), `fulfillment_order.release_gate_return_id` 가 채워져 있는 동안 **웨이브 후보에서 제외**될 뿐이다(§13.2). 게이트는 연결된 `return_case` 가 `return.inspected` 환불 판정(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`)이 되는 **같은 `InspectReturn` 트랜잭션에서 해제**된다(`release_gate_return_id` 를 NULL 로). `REJECTED` 면 게이트는 풀리지 않고 P2 의 `order.cancel_requested` 가 와서 일반 취소 판정표(§5.4, `ALLOCATED` → 즉시 취소)로 끝난다. 게이트 동안 할당은 유지되고, 게이트 시간의 상한은 P2 의 발송 기한 + 검수 시간이며 초과하면 P2 가 취소를 요청한다.
 
 ### 5.3 하위 상태 머신
 
@@ -704,6 +705,10 @@ M1 의 `AppError` 계층에 편입한다: `StockInsufficientError`·`AllocationC
 | WM-61 | 반품 입고 | 작업자 | `ReceiveReturn` (RETURN_RECEIPT) | 원장 계열·`return_case` W | W5 |
 | WM-62 | 반품 검수·처분 결정 | 작업자 | `InspectReturn` (`ReturnDisposition`) | `return_inspection` W | W5 |
 | WM-63 | 재입고 / 폐기 | WM-62 | `RestockReturn` · `DisposeReturn` | 원장 계열 W | W5 |
+| WM-64 | 교환 연결 반품 접수(`resolution=EXCHANGE`, 신규 주문 연결) | inbox `order.return_requested` | `OpenReturn`(교환 분기) | `return_case` W | W5 |
+| WM-65 | 교환 신규 주문 출고 게이트 설정 | inbox `order.paid`(`exchangeOfOrderId`) | `AcceptOrder`(게이트 분기) | `fulfillment_order` W | W5 |
+| WM-66 | 교환 출고 게이트 해제 | WM-62 와 같은 tx | `InspectReturn` → `OpenReleaseGate` | `return_case`·`fulfillment_order` W | W5 |
+| WM-67 | 교환 사전 재고 확인(확약 아님, 읽기) | P2 호출 | `CheckExchangeAvailability` | `inventory_read.position_view` R | W5 |
 
 ### 6.6 예외 (fulfillment)
 
@@ -725,6 +730,7 @@ M1 의 `AppError` 계층에 편입한다: `StockInsufficientError`·`AllocationC
 | WM-85 | 재고 조회 화면 | `/admin/wms/inventory` | W1 |
 | WM-86 | 예외 큐 화면 | `/admin/wms/exceptions` | W6 |
 | WM-87 | 구매자 배송 추적 뷰 | 상거래 주문 상세(P2)에 `tracking_view` 제공 | W4 |
+| WM-88 | 분할 배송 노출(배송 N건·남은 줄) | `tracking_view.shipments[]`·`pendingLines`·`allDelivered` 를 P2 가 합성(P2 §5.5.6) | W4 |
 
 ### 6.8 시뮬레이터·운영
 
@@ -839,6 +845,8 @@ flowchart TD
 
 이 목록이 `modules/tx-pairs.json` 쌍 #10 의 정본이다(P0 §2.4). 목록 밖 `InTx` 호출은 CI 실패.
 
+**교환 게이트 해제의 잠금(U23).** `InspectReturn` 은 `return_case` 행을 잠근 뒤 **교환 신규 주문의 `fulfillment_order` 단 하나**를 잠가 `release_gate_return_id` 를 비운다. 원 주문의 FO 는 이미 종결(`DELIVERED`)이라 잠그지 않으므로 **한 트랜잭션이 두 FO 를 잡지 않는다**. 반대 방향(FO 를 잡은 뒤 기존 `return_case` 를 잠그는 usecase)은 없다 — RTS 의 `ReturnCase` 생성은 INSERT 뿐이다 — 그래서 교착이 없다.
+
 **잠금 순서(모든 usecase 공통)**: ① `fulfillment_order` 행(`FOR NO KEY UPDATE`) → ② `sku_position` 행들(`sku_id` 오름차순) → ③ `stock_balance` 행들(`(sku_id, lot_id, location_id)` 오름차순) → ④ `allocation`/`location_plan`. 역순 잠금이 있으면 교착 가능성이 있으므로 코드 리뷰 체크 항목이다.
 
 ---
@@ -851,9 +859,9 @@ flowchart TD
 
 | `type` | 발행 | 페이로드(가정) | 풀필먼트의 반응 |
 |---|---|---|---|
-| `order.paid` | commerce | `orderId`, `orderVersion`, `lines[{lineId, skuId, qty, dealId?}]`, `shippingAddressRef`, `shippingMethod`, `paidAt` | `AcceptOrder` (배송지는 **AcceptOrder 시점**에 tx 앞에서 `order.GetShippingAddress(shippingAddressRef)` 로 읽어 풀필먼트 자기 봉투로 다시 암호화해 저장) |
+| `order.paid` | commerce | `orderId`, `orderVersion`, `lines[{lineId, skuId, qty, dealId?}]`, `shippingAddressRef`, `shippingMethod`, `paidAt`, (교환 신규 주문만) `exchangeOfOrderId`, `releaseGate{type:'RETURN_INSPECTED', returnId}` | `AcceptOrder` (배송지는 **AcceptOrder 시점**에 tx 앞에서 `order.GetShippingAddress(shippingAddressRef)` 로 읽어 풀필먼트 자기 봉투로 다시 암호화해 저장) |
 | `order.cancel_requested` | commerce | `orderId`, `reason` | `CancelFulfillment` (판정표 §5.4) |
-| `order.return_requested` | order | `orderId`, `returnId`, `lines`, `reason` | `OpenReturn` |
+| `order.return_requested` | order | `orderId`, `returnId`, `lines`, `reason`, `resolution`(`REFUND`/`EXCHANGE`), (교환) `exchangeId`·`newOrderId` | `OpenReturn`(교환이면 `return_case` 에 신규 주문 연결) |
 | `order.address_corrected` | order | `orderId`, `shippingAddressRef` (새 rev) | `ON_HOLD` 해제 + 배송지 재스냅샷 |
 | `order.cancelled` · `order.disputed` · `payment.refunded` | order · payment | `orderId`, `reason` | 외부 사유 취소로 `CancelFulfillment`(`reason=EXTERNAL`, §5.4). 이미 출고된 주문은 반품/회수 안내 |
 | `deal.published` | deal | `dealId`, `skuId`, `totalQty` | `EarmarkStock` (거절 시 `inventory.earmark_rejected` 발행) |
@@ -873,12 +881,12 @@ flowchart TD
 | `fulfillment.cancelled` | 취소 완료 | `orderId`, `stage`, `reason`(`REQUESTED`·`EXTERNAL`·`ADDRESS_NOT_CORRECTED`·`OUT_OF_STOCK_AFTER_ACCEPT` 등) | commerce(환불 진행, `payment-fulfillment-refunder`) — `reason=EXTERNAL` 은 환불 중복 방지용 구분 |
 | `fulfillment.cancel_rejected` | 취소 불가 | `orderId`, `stage` | commerce |
 | `package.packed` | 포장 확정 | `foId`, `packageId` | 읽기 모델 |
-| `shipment.dispatched` | 인수인계 | `orderId`, `foId`, `carrier`, `trackingNo`, `lines` | commerce(주문 상태), 구매자 알림 |
+| `shipment.dispatched` | 인수인계 | `orderId`, `foId`, **`shipmentSeq`**, `carrier`, `trackingNo`, `lines` | commerce(주문 상태), 구매자 알림 |
 | `shipment.status_changed` | 추적 정규화 반영 | `shipmentId`, `status`, `occurredAt` | 읽기 모델 |
-| `shipment.delivered` | 배송 완료 | `orderId`, `deliveredAt` | commerce(에스크로 자동 확정 타이머 시작 등 P2 소관) |
+| `shipment.delivered` | 배송 완료 | `orderId`, `deliveredAt`, **`shipmentSeq`**, **`allDelivered`**(이 주문의 모든 배송이 완료됐을 때만 true — 주문 `delivered` 전이·에스크로 해제 기한은 true 에서만 시작) | commerce(에스크로 자동 확정 타이머 시작 등 P2 소관) |
 | `shipment.delivery_failed` | 시도 소진 | `orderId`, `attempts` | commerce |
 | `return.received` | 반품 입고 | `returnId`, `orderId` | commerce |
-| `return.inspected` | 검수 완료 | `returnId`, **`orderId`**, `origin`(`CUSTOMER`·`RTS`), `disposition`(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`·`REJECTED`) — `REJECTED` 는 `REJECTED_RETURN` 종결 시 발행(환불 없음) | **commerce(환불 판단, `payment-fulfillment-refunder`)**, **escrow**(`REJECTED` 면 `frozen→held` 해제 재개, 그 외는 환불 경로) |
+| `return.inspected` | 검수 완료 | `returnId`, **`orderId`**, `origin`(`CUSTOMER`·`RTS`), `disposition`(`RESTOCK`·`DISPOSE`·`REFUND_ONLY`·`REJECTED`), **`lines[{lineId, qty}]`**(환불 대상 줄·수량), (교환) **`exchangeId`** — `REJECTED` 는 `REJECTED_RETURN` 종결 시 발행(환불 없음) | **commerce(환불 판단, `payment-fulfillment-refunder`)**, **escrow**(`REJECTED` 면 `frozen→held` 해제 재개, 그 외는 환불 경로) |
 | `inventory.allocation_failed` | 할당 조건부 UPDATE 0행(inventory 내부) | `skuId`, `foLineId`, `qty` | **fulfillment 만**(상거래는 소비하지 않음) |
 | `inventory.earmark_changed` · `inventory.earmark_rejected` | 약정 변경 / 거절(`allocated + earmarked > available`) | `skuId`, `channelRef`, `qty`, (`reason`) | **deal**(`deal_read.sku_capacity` 갱신·딜 게시 거절 근거) |
 | `inventory.stock_received` | 입고 확정 | `skuId`, `qty` | `backorder-retry`, commerce |
@@ -891,7 +899,7 @@ flowchart TD
 
 | 소비자 | 소유 | 구독 | 효과 |
 |---|---|---|---|
-| `fulfillment-consumer` | fulfillment | `order.paid`·`order.cancel_requested`·`order.cancelled`·`order.disputed`·`payment.refunded`·`order.return_requested`·`order.address_corrected` | 출고 흐름 시작/취소(요청·외부 사유)/반품 |
+| `fulfillment-consumer` | fulfillment | (교환 필드를 포함해) `order.paid`·`order.cancel_requested`·`order.cancelled`·`order.disputed`·`payment.refunded`·`order.return_requested`·`order.address_corrected` | 출고 흐름 시작/취소(요청·외부 사유)/반품 |
 | `earmark-consumer` | inventory | `deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked` | 약정 증감(§4.6) |
 | `carrier-webhook-consumer` | fulfillment | 웹훅 inbox | 추적 반영 |
 | `fulfillment-projector` | fulfillment | `fulfillment.*`·`shipment.*`·`package.*`·`return.*` | `fulfillment_read` 갱신 |
@@ -926,7 +934,7 @@ flowchart TD
 
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
-| `fulfillment_order` | `id`, `order_id` **유일**, `state`, `policy`, `priority`, `cancel_requested`, `hold_reason`, `held_from_state`, `region_code`, **`recipient_enc`**, `recipient_anonymize_at`, `version`, 시각들 | `(state, priority, created_at)` 부분 인덱스(큐용), 유일 `order_id` | `recipient_enc`=**ENC**, `region_code`=PII(시·도 수준 평문, **익명화 대상 아님**), 나머지 SYS |
+| `fulfillment_order` | `id`, `order_id` **유일**, `state`, `policy`, `priority`, `cancel_requested`, `hold_reason`, `held_from_state`, **`release_gate_return_id` NULL**(교환 신규 주문의 출고 게이트, §5.2), `region_code`, **`recipient_enc`**, `recipient_anonymize_at`, `version`, 시각들 | `(state, priority, created_at)` 부분 인덱스(큐용), 유일 `order_id` | `recipient_enc`=**ENC**, `region_code`=PII(시·도 수준 평문, **익명화 대상 아님**), 나머지 SYS |
 | `fo_line` | `id`, `fo_id`, `sku_id`, `qty_ordered`, `qty_allocated`, `qty_picked`, `qty_shipped` | CHECK `qty_shipped <= qty_picked <= qty_allocated <= qty_ordered` | SYS |
 | `fulfillment_order_event` | `fo_id`, `from_state`, `to_state`, `at`, `trace_id` | **추가 전용** | SYS |
 | `wave` | `id`, `strategy`, `released_at`, `order_count` | | SYS |
@@ -936,7 +944,7 @@ flowchart TD
 | `package`·`pack_scan` | `fo_id`, `seq`, `state`, `weight_g`, `carton_code` | 유일(`fo_id`,`seq`) | SYS |
 | `shipment` | `id`, `fo_id`, `seq`, `carrier`, `tracking_no`, `state`, `last_attempt_no`, `last_event_at`, `version` | **유일 (`fo_id`,`seq`)**, 유일 (`carrier`,`tracking_no`) | SYS |
 | `carrier_event` | `carrier`, **`event_id`**, `shipment_id`, `raw_status`, `normalized`, `attempt_no`, `occurred_at`, `received_at` | **유일 (`carrier`,`event_id`)** | SYS |
-| `return_case`·`return_inspection` | `order_id`, `origin`(`CUSTOMER`·`RTS`), `state`, `disposition` | 유일(`return_id`) | SYS |
+| `return_case`·`return_inspection` | `order_id`, `origin`(`CUSTOMER`·`RTS`), `state`, `disposition`, **`resolution`**(`REFUND`/`EXCHANGE`), `exchange_id` NULL, `exchange_order_id` NULL(신규 주문), `lines` | 유일(`return_id`), 부분 인덱스 `(exchange_order_id) WHERE exchange_order_id IS NOT NULL` | SYS |
 | `exception_case` | `id`, `kind`, `ref_type`, `ref_id`, `state`, `assigned_to`(PSD), `claim_token`, `lease_until`, `resolution`, `resolved_by`(PSD) | 부분 인덱스 `WHERE state='OPEN'` | SYS |
 | `backorder` | `fo_line_id`, `qty_pending`, `since` | | SYS |
 | `request_key`·`inbox_message` | M1 공통 형태 | | M1 §9.1 |
@@ -947,7 +955,7 @@ flowchart TD
 |---|---|---|
 | `fulfillment_read.order_view` | 관리자 파이프라인·주문 상세(상태, 줄, 시각) | **수취인 정보 없음**, 이름은 마스킹 표시만 필요 시 별도 usecase |
 | `fulfillment_read.pipeline_counter` | 상태별 건수·평균 체류(분 단위 집계) | 배치 프로젝션(M1 `flow_counter` 방식) |
-| `fulfillment_read.tracking_view` | 구매자용 배송 추적(상태 이력) | P2 가 공개 usecase 로 읽음 |
+| `fulfillment_read.tracking_view` | 구매자용 배송 추적(상태 이력) + **배송 N건 목록**(`shipmentSeq`, 상태, 택배사, 마스킹 운송장, 줄·수량), `pendingLines`, `allDelivered` | P2 가 공개 usecase 로 읽음(P2 §5.5.6). 운송장은 마스킹 |
 | `fulfillment_read.task_queue_view` | 작업자 대기 작업(부분 인덱스) | `last_seq` 규약 |
 | `inventory_read.position_view` | SKU 별 재고·ATP | |
 | `inventory_read.balance_view` | 위치별 재고 | |
@@ -964,7 +972,7 @@ flowchart TD
 | 작업자 ID (`claimed_by`, `approved_by`) | PSD | 평문, 로그 레이블 금지 | 이력 보관 |
 | 재고 수량·위치·로트 | SYS | 평문 | 원장 영구(추가 전용), 읽기 모델은 재구성 가능 |
 | 운송장 번호 | PII(준) | 평문 — 택배 추적에 필요, 단 **로그·지표 레이블 금지**. P0 §9.2 와 같은 PII(준) | 주문과 함께 |
-| 택배 이벤트 원본 | SYS | `raw_status` 만 저장, 원본 본문에 주소가 있으면 저장하지 않음 | 90일(제안) |
+| 택배 이벤트 원본 | SYS | `raw_status` 만 저장, 원본 본문에 주소가 있으면 저장하지 않음 | 90일(확정, U7) |
 
 규칙:
 - 송장 출력·패킹에 필요한 수취인 정보는 `GetPackingSlip` usecase 가 **복호화해서 반환**하고, 호출은 감사 `recipient_viewed`(category `admin`)로 남긴다. 화면에는 필요한 최소 필드만 준다.
@@ -1009,7 +1017,7 @@ flowchart TD
 
 ### 11.3 구매자 (P2 가 소유하는 주문 API 에 연결)
 
-`GET /api/orders/{id}/tracking` 은 P2 의 라우트가 `fulfillment_read.tracking_view` 를 공개 usecase 로 읽어 응답한다(풀필먼트는 구매자 API 를 직접 열지 않는다).
+분할 배송은 응답의 `shipments[]`(배송 N건)·`pendingLines`·`allDelivered` 로 실려 구매자 화면이 "부분 배송 n/m" 으로 보여 준다(필드 계약 P2 §5.5.6). `GET /api/orders/{id}/tracking` 은 P2 의 라우트가 `fulfillment_read.tracking_view` 를 공개 usecase 로 읽어 응답한다(풀필먼트는 구매자 API 를 직접 열지 않는다).
 
 ### 11.4 WS
 
@@ -1195,6 +1203,41 @@ sequenceDiagram
     RC-->>P2: return.received · return.inspected {orderId, origin: RTS, disposition: RESTOCK}
 ```
 
+### 12.8 교환: 출고 게이트와 신규 주문 출고 (U23)
+
+```mermaid
+sequenceDiagram
+    participant P2 as commerce
+    participant FC as fulfillment-consumer
+    participant RC as ReturnCase
+    participant NFO as 신규 주문 FulfillmentOrder
+    participant W as 작업자
+    participant INV as inventory
+    P2->>FC: order.return_requested (resolution EXCHANGE, exchangeId, newOrderId)
+    FC->>RC: OpenReturn (exchange_order_id 연결, APPROVED)
+    P2->>FC: order.paid (exchangeOfOrderId, releaseGate)
+    FC->>NFO: tx: AcceptOrder 할당 + release_gate_return_id 설정
+    FC-->>P2: fulfillment.accepted (또는 fulfillment.rejected OUT_OF_STOCK)
+    Note over NFO: 웨이브 후보에서 제외, 할당은 유지
+    W->>RC: ReceiveReturn
+    RC->>INV: tx: RETURN_RECEIPT (QUARANTINE)
+    RC-->>P2: return.received
+    W->>RC: InspectReturn
+    alt 환불 판정 (RESTOCK · DISPOSE · REFUND_ONLY)
+        RC->>INV: tx: RESTOCK 또는 DISPOSE
+        RC->>NFO: 같은 tx: release_gate_return_id = NULL
+        RC-->>P2: return.inspected (disposition, lines, exchangeId)
+        Note over NFO: 다음 웨이브에서 일반 주문처럼 출고
+    else REJECTED
+        RC-->>P2: return.inspected (REJECTED, exchangeId)
+        P2->>FC: order.cancel_requested (신규 주문)
+        FC->>NFO: 취소 판정표 (ALLOCATED 즉시 취소, 할당 해제)
+    end
+```
+
+- 게이트가 열리기 전 취소(`order.cancel_requested`, 결제 만료 환불 등)는 일반 판정표와 같다. `fulfillment.rejected(OUT_OF_STOCK)` 는 P2 가 교환을 `cancelled(STOCK)` 으로 끝내고 원 주문 에스크로를 재개한다.
+- 같은 SKU 교환이면 반품 SKU 의 `RESTOCK` 이 가용량을 늘리지만 신규 주문의 할당은 이미 끝나 있다(두 사건은 각각 원장 이동이며 서로를 전제하지 않는다).
+
 ---
 
 ## 13. 핵심 순서도
@@ -1219,7 +1262,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["WaveReleaseJob 틱"] --> B["ALLOCATED 후보 조회 (우선순위·접수순)"]
+    A["WaveReleaseJob 틱"] --> B["ALLOCATED 후보 조회 (우선순위·접수순, release_gate_return_id 가 NULL 인 것만)"]
     B --> C{"WaveStrategy"}
     C -- "ImmediateRelease" --> D["후보 즉시 출고"]
     C -- "SizeOrTimeWave" --> E{"후보 수 ≥ N 또는 대기 ≥ T?"}
@@ -1315,6 +1358,9 @@ M1 08 의 계층·등급 체계를 따른다. 이 영역의 AC 후보:
 | AC-WM-12 | `recipient_anonymize_at`(완료 + 반품 기한 5일 + 30일) 경과 시 수취인 봉투가 익명화되고 `region_code` 는 남는다 | 시계 주입 L3 |
 | AC-WM-13 | 전량 할당 SKU 의 PICK·ISSUE·PUTBACK·ADJUST_MINUS 시퀀스에서 P1 이 깨지지 않고(PICK 가능, ISSUE 후 ATP 불변, ADJUST_MINUS 는 거절 후 할당 해제 경로) §3.4 표와 일치 | 속성 기반 + 표 기반 L2·L3 |
 | AC-WM-14 | 주문 (A,B)·(B,A) 를 동시에 1000쌍 수락해도 교착 0 이고 정확히 재고만큼 할당 | 동시성 L3 |
+| AC-WM-16 | 교환 신규 주문은 `release_gate_return_id` 가 있는 동안 웨이브에 들어가지 않고, `InspectReturn` 환불 판정과 같은 tx 에서만 게이트가 풀려 출고된다. `REJECTED` 면 게이트가 풀리지 않고 취소 요청으로 할당이 해제된다 | L3 |
+| AC-WM-17 | 교환 신규 주문 할당 중에도 P1~P6 불변식이 유지되고(약정 비소비, `allocated_total` 만 증가), 게이트 취소 시 `allocated` 가 정확히 복원된다 | 속성 + L3 |
+| AC-WM-18 | 분할 배송: 배송 2건 중 1건만 `delivered` 일 때 `allDelivered=false`, 마지막 완료 시에만 true 이며 `tracking_view` 가 배송 N건과 `pendingLines` 를 낸다 | L3 |
 | AC-WM-15 | 딜 `closed` 와 `settled` 사이에 `order.paid` 가 늦게 소비돼도 약정이 이미 해제된 일이 없고 `settled` 에서 `totalQty − confirmedQty` 만 해제 | 이벤트 순서 주입 L3 |
 
 시험 기법:
@@ -1397,11 +1443,12 @@ M1 08 의 계층·등급 체계를 따른다. 이 영역의 AC 후보:
 | SKU 마스터의 소유(상거래 카탈로그 vs `sku_logistics` 분리 소유) | W0 (잠정: 물류 속성만 `inventory` 소유) |
 | 데모 모드에서 방문자가 샌드박스 작업자 역할을 할 수 있는지(공개 상호작용) | W3 전 사용자 결정 |
 | 임대 길이(피킹 30초 제안), 오프라인 허용 한도(120초 제안), 웨이브 크기 N·대기 T | W3 측정 |
-| 수취인 익명화 기한(완료 + 반품 기한 5일 + 30일 = 35일, 제안), 택배 이벤트 보관 90일, ADDRESS_INVALID 정정 기한 72시간(제안) | 사용자 확인(U4) |
+| 수취인 익명화 기한(완료 + 반품 기한 5일 + 30일 = 35일; 30일은 U4 확정 2026-11-05), 택배 이벤트 보관 90일(U7 확정), ADDRESS_INVALID 정정 기한 72시간(제안) | 사용자 확인(U4) |
 | 포지션 슬롯 분할, 원장 파티셔닝 | W2·운영 측정 |
 | 바코드 형식(GS1 준수 여부), 라벨 레이아웃 | W4 (미확인) |
 | 실제 택배사 API 연동 여부(인터페이스만 열어 둠) | 사용자 결정, 기본은 비연동 |
 | 중량 허용 오차, 재포장 정책 | W3 |
 | 조정 승인 임계 수량, 실사 주기 | W6 |
-| 교환 처리(반품 + 신규 주문) UX | W5 |
-| 분할 배송의 구매자 노출(배송 N건) | W4, P2 와 협의 |
+| ~~교환 처리(반품 + 신규 주문) UX~~ | **닫힘(2026-11-05, U23)**: 연결 신규 주문 + 출고 게이트(§5.2, §12.8), UX 는 P2 §5.5·§14.6 |
+| ~~분할 배송의 구매자 노출(배송 N건)~~ | **닫힘(2026-11-05, U23)**: `shipments[]`·`allDelivered` 계약(P2 §5.5.6, §9.2·§11.3) |
+| 교환 출고 게이트 시점(`return.inspected` 채택 vs `return.received`)과 게이트 상한 | W5, 사용자 확인(P2 §20.4) |

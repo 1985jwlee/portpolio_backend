@@ -50,7 +50,7 @@
 | 마이그레이션 방식 | forward-only, 표현 불가 기능은 `generate --custom` raw SQL | — | 확정 | 부분 인덱스·확장 등 |
 | DB 드라이버 | **Bun.sql**(Bun 내장) | Bun 1.4.4 | **G4 실측 통과(로컬)** | 전 항목 통과. LISTEN 전용 연결의 자동 재구독이 백엔드 종료·서버 재시작 모두에서 동작한 것은 Bun.sql 뿐(postgres.js 4.0.0 은 재시작 후 복구 못함 → 쓰려면 3.4.7 고정, pg 는 재구독 직접 구현). SQLSTATE 는 `err.code` 가 아니라 **`errno`** 문자열로 읽는다. 차선 `postgres@3.4.7` |
 | 기본키 | uuid v7 | — | 확정 | 앱 생성(outbox 이벤트 id 를 트랜잭션 전에 알아야 함, ADR-017). DB 내장 `uuidv7()` 은 보조 |
-| 캐시·스트림 | Redis 또는 Valkey | Redis 8.10 / Valkey 9.1 | **M1 에서 쓰지 않음**(포트 뒤 이음새만, ADR-024) | 타임딜(Phase 3) 시점에 ADR-006 측정 후 선택(ADR-031). 클라이언트 후보 ioredis 등은 그때 |
+| 캐시·스트림 | **Redis**(U8 확정 2026-11-05; Valkey 아님) | Redis 8.10 | **M1 에서 쓰지 않음**(포트 뒤 이음새만, ADR-024) | Phase 3 착수 시 최신 버전 라이선스 조건을 공식 문서로 확인. Streams 는 측정 합격선(ADR-031) 미달일 때만(U9). 클라이언트 후보 ioredis 등은 그때 |
 
 ## 5. 프론트엔드
 
@@ -176,7 +176,7 @@
 | 로깅·지표 라이브러리 | G5 |
 | ~~DB 드라이버~~ | G4 로컬 실측으로 Bun.sql 선택(실서버 재시험은 S0-4) |
 | Oracle 경로 TLS 자동화 방식 | Oracle 추진 시(현재 미추진) |
-| Redis vs Valkey, 클라이언트 | ADR-006 측정(타임딜 Phase 3, ADR-031) |
+| Redis 라이선스 조건 확인(Redis 확정, U8), 클라이언트 | Phase 3 착수 시(ADR-031) |
 | ~~E2E 도구~~ | Playwright 1.64.1 채택(Bun 동작 확인, §11.1) |
 | 3D·게임 관련 라이브러리 | Phase 1 |
 | 백업 실행 도구(cron/컨테이너) | M1 후반(systemd 타이머, ADR-027). 암호화는 age 1.3.2 확인(§11.1) |

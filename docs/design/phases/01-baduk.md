@@ -14,11 +14,11 @@ M1 의 규약(모듈러 모놀리스, CQRS, domain·service·usecase, outbox·in
 
 | 단계 | 로드맵 내용 | 완료 기준(DoD) | 이 문서 절 |
 |---|---|---|---|
-| Phase 1-A | 서버·프로토콜: 룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF | 서버가 규칙·시계·승패를 권위로 판정, 두 클라이언트가 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **롤링 배포 중 룸 재구독 시험**(`room.join { resume }` 로 누락 없이 복구), **평문 본문 push·관전자 비공개 대국 채팅의 첫 실행**(`ChatRoomPolicy`) | §3~8, §11~13 |
+| Phase 1-A | 서버·프로토콜: 룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF | 서버가 규칙(중국식·일본식 선택)·시계·승패를 권위로 판정, 비레이팅 대국의 무르기(상대 동의), 플레이어는 GitHub 로그인 필수·관전자만 익명, 두 클라이언트가 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **롤링 배포 중 룸 재구독 시험**(`room.join { resume }` 로 누락 없이 복구), **평문 본문 push·관전자 비공개 대국 채팅의 첫 실행**(`ChatRoomPolicy`) | §3~8, §11~13 |
 | Phase 1-B | three.js 3D 클라이언트 | **두 브라우저에서 3D 대국 완료**, 새로고침·끊김 후 복구, 관전자 동기화 | §7 |
 | Phase 2 | KataGo 워커 + 바둑 보상(모의 포인트 원장은 **Phase 3 에서 도입**, 여기서는 보상 `PENDING → CONFIRMED/FLAGGED` 추가) | **대국 종료 → 비동기 분석 → 보상 확정 end-to-end**, 실패·재시도 확인 | §9~10 |
 
-범위 밖: 레이팅 시스템(Glicko 등), 토너먼트, 마작(Phase 6), 대국 중 물리적 AI 힌트, 모바일 네이티브 앱(웹 전용). 채팅 상세는 [04-chat](04-chat.md) 가 정본이고 이 문서는 대국 방과의 접점만 다룬다.
+범위 밖: 레이팅 시스템(Glicko 등), 핸디캡 돌, 토너먼트, 마작(Phase 6), 대국 중 물리적 AI 힌트, 모바일 네이티브 앱(웹 전용). 채팅 상세는 [04-chat](04-chat.md) 가 정본이고 이 문서는 대국 방과의 접점만 다룬다.
 
 ## 2. 아키텍처 개요
 
@@ -90,7 +90,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph usecase["usecase"]
-        CMD["command: CreateChallenge · JoinChallenge · PlayMove · Pass · Resign · SubmitDeadStones · ConfirmScore · ResumePlay · SweepTimeouts"]
+        CMD["command: CreateChallenge · JoinChallenge · PlayMove · Pass · Resign · RequestUndo · AcceptUndo · DeclineUndo · SubmitDeadStones · ConfirmScore · ResumePlay · SweepTimeouts"]
         QRY["query: ListLobby · GetGame · SyncGame · ListMyGames · ExportSgf"]
         EVT["event: GameProjector (game_read 갱신)"]
     end
@@ -104,7 +104,7 @@ flowchart TB
         EV2["GameEvent 계열"]
     end
     subgraph pkg["packages/baduk-rules (공유, 순수)"]
-        RE["RulesEngine · Board · Ruleset"]
+        RE["RulesEngine · Board · Ruleset(중국식 · 일본식)"]
     end
     CMD --> GS
     GS --> RE
@@ -135,7 +135,8 @@ flowchart TB
 ### 3.2 결정(제안): 직접 구현 + 라이브러리를 차분 시험 기준으로
 
 - 직접 구현(`packages/baduk-rules`)을 서버·클라이언트가 공유한다. 이유는 ADR-034 에 있다: 어느 후보도 유지보수·타입·직렬화를 모두 충족하지 못하고, 규칙 자체는 작으며, 클라이언트의 불법수 미리보기에 같은 코드를 쓰면 서버·클라이언트가 어긋나지 않는다.
-- **초기 규칙 하나**: 판 19(9·13 포함 가능), **중국식 영역 계가**, 자충 금지, **위치 슈퍼코(zobrist 해시)**, 덤 7.5(9·13 판은 제안값 별도, 미확인).
+- **규칙 세트 둘 (U11, 2026-11-05)**: 도전 개설 시 `rules: chinese | japanese` 를 고른다. 판 19(9·13 포함 가능), 자충 금지, **위치 슈퍼코(zobrist 해시)** 는 두 규칙 공통이고 **계가 방식과 덤 기본값만 규칙이 정한다** — **중국식 영역 계가**(덤 7.5), **일본식 영역(집) 계가 + 사로잡은 돌**(덤 6.5, **제안·공식 규정 근거 미확인**). 9·13 판의 덤은 두 규칙 모두 제안값 미정(미확인). 규칙·덤은 대국 시작 시 `game` 행에 스냅샷되고 이후 바뀌지 않는다.
+- **규칙 선택은 `Ruleset` 전략이다** — 같은 `RulesEngine` 이 `ChineseAreaRuleset`·`JapaneseTerritoryRuleset` 중 하나를 주입받는다(§3.4). 서버·클라이언트가 같은 코드를 쓰므로 계가 미리보기도 규칙별로 어긋나지 않는다.
 - 라이브러리는 **CI 차분 퍼징**에서 무작위 합법수 대국을 재생해 결과를 비교한다. 불일치는 규칙 해석 판정 대상이다.
 
 ### 3.3 시험 세트 (정본, 라이브러리 비의존)
@@ -148,10 +149,16 @@ flowchart TB
 | 패 | 즉시 되따냄 불법, 다른 곳 둔 뒤 허용 | `ko` |
 | 초강력 패 | 3패·장생 순환(위치 슈퍼코로 두 번째 반복 불법) | `superko` |
 | 패스·종국 | 연속 패스 → `scoring` 진입, 패스 뒤 착수는 연속 카운트 초기화 | |
-| 계가 | 영역 계가, 한 색만 접한 빈 영역, 중립점, 덤 | 점수 정확 |
+| 계가(중국식) | 영역 계가, 한 색만 접한 빈 영역, 중립점, 덤 7.5 | 점수 정확 |
+| 계가(일본식) | 영역(집) + 사로잡은 돌, 종국 때 사석 표시한 돌은 포획 돌로 가산하고 그 자리는 상대 집, 덤 6.5(제안), 착수한 돌(생존석)은 점수에 안 들어감 | 점수·내역(`territory`·`prisoners`) 정확 |
+| 규칙 차이 | 같은 종국 국면을 두 규칙으로 계가(집 안쪽에 둔 수가 중국식에서는 득실 0, 일본식에서는 1집 손실), 패스 횟수에 따른 점수 불변 | 규칙별 기대값 표(§3.5)와 일치 |
+| 시키(seki) | 공배 시키(양쪽 공유 활로), 한 눈 시키(눈 자리 빈 점), 시키 안 빈 점은 두 규칙 모두 어느 쪽 영역·집도 아님(§3.5), 시키 돌은 생존 | 규칙별 점수, 시키 돌은 생존 |
+| 사석 처리 | 사석 표시 → 제거 후 계가, 사석 표시 불일치 → 재개, 사석 없음 기본 판정(`scoring_timed_out`)을 규칙별로 | 규칙별 결과 |
+| 패(규칙별) | 단순 패, 3패·장생 순환(위치 슈퍼코)을 두 규칙에서 같은 거절로 처리, 일본식에서 순환 시 무승부 선언은 구현하지 않음(§3.5) | `ko` · `superko` |
+| 무르기 복원 | 임의 수열에서 N수 되돌린 뒤 재생한 국면 = 처음부터 (수열 − N수) 재생한 국면(돌·포획 수·패 해시 이력·`toPlay`) | 해시·포획 수 일치 |
 | 기보 코퍼스 | 공개 SGF 재생(라이선스 확인 후 선정, 미확인) | 결과 일치 |
-| 속성 기반 | 무작위 합법수 열: 돌 수 보존, 호흡 계산 불변식, 해시 일관, 직렬화 왕복 | 위반 0 |
-| 차분 퍼징 | 직접 구현 vs `tenuki` vs `gogame.js` 무작위 N 만 판 | 불일치 수집·판정 |
+| 속성 기반 | 무작위 합법수 열: 돌 수 보존, 호흡 계산 불변식, 해시 일관, 직렬화 왕복, **무작위 지점 되돌림 후 재생 동등성** | 위반 0 |
+| 차분 퍼징 | 직접 구현 vs `tenuki` vs `gogame.js` 무작위 N 만 판. **중국식은 세 구현이 모두 영역 계가를 지원하고, 일본식 계가는 `tenuki`(영역·집 계가 지원, 조사 사실)만 비교 대상이다** — `gogame.js` 는 영역 계가만 지원해 합법성·포획만 비교 | 불일치 수집·판정 |
 
 ### 3.4 어댑터 인터페이스와 클래스
 
@@ -163,7 +170,8 @@ classDiagram
         +tryPlay(pos, move) PlayResult
         +pass(pos) Position
         +isOver(pos) bool
-        +score(pos) ScoreResult
+        +replay(config, moves) Position
+        +score(pos, deadStones) ScoreResult
         +serialize(pos) string
         +deserialize(raw) Position
     }
@@ -172,7 +180,10 @@ classDiagram
         +koPolicy() KoPolicy
         +suicideAllowed() bool
         +scoring() Scoring
+        +id() RulesId
+        +defaultKomi() number
         +komi() number
+        +score(pos, deadStones) ScoreResult
     }
     class ChineseAreaRuleset
     class JapaneseTerritoryRuleset
@@ -191,6 +202,29 @@ classDiagram
         +captures Captures
         +history Set~bigint~
         +passes int
+    }
+    class RulesId {
+        <<enum>>
+        CHINESE
+        JAPANESE
+    }
+    class ScoreResult {
+        <<value>>
+        +rules RulesId
+        +black number
+        +white number
+        +komi number
+        +breakdown ScoreBreakdown
+    }
+    class ScoreBreakdown {
+        <<value>>
+        +area int
+        +territory int
+        +prisoners int
+        +deadStonesCaptured int
+    }
+    class SekiDetector {
+        +sekiPoints(board, dead) Point[]
     }
     class PlayResult {
         +legal bool
@@ -218,6 +252,9 @@ classDiagram
     Ruleset <|.. JapaneseTerritoryRuleset
     TsRulesEngine --> Board
     TsRulesEngine --> Position
+    JapaneseTerritoryRuleset --> SekiDetector
+    Ruleset ..> ScoreResult
+    ScoreResult --> ScoreBreakdown
     Board --> Zobrist
     TsRulesEngine ..> PlayResult
     PlayResult --> IllegalReason
@@ -225,8 +262,33 @@ classDiagram
     RulesEngine <|.. GogameOracle : 시험 전용
 ```
 
+- `replay(config, moves)` 는 수열 전체를 처음 국면에서 다시 둬 `Position` 을 만든다. **무르기(§4.5)는 되돌림 연산이 아니라 유효 수열을 줄여 재생하는 것**이라 `Board` 에 `undo` 가 없다 — 패 해시 이력(`history`)·포획 수가 항상 재생으로만 만들어져 어긋날 수 없다.
 - `Board`·`Position` 은 **불변 값**이다(구조 공유로 복사 비용을 낮춘다). 위치 슈퍼코 검사는 `history: Set<hash>` 한 번의 조회다.
 - `TenukiOracle`·`GogameOracle` 은 시험 코드에만 있고 서버 번들에 들어가지 않는다(경계 규칙: `test/` 외 임포트 금지).
+
+### 3.5 규칙 세트: 중국식과 일본식 (U11)
+
+| 항목 | 중국식 (`chinese`) | 일본식 (`japanese`) |
+|---|---|---|
+| 계가 | **영역 계가**: 살아 있는 내 돌 수 + 내 돌에만 둘러싸인 빈 점 | **영역(집) 계가**: 내 집(내 돌에만 둘러싸인 빈 점, 사석 제거 후) + **사로잡은 돌**(대국 중 따낸 돌 + 종국 때 사석으로 표시해 제거한 상대 돌) |
+| 사석 | 표시 후 제거, 계가에 포획 수 불필요 | 표시한 사석은 제거하며 **상대의 포획 돌로 가산**하고, 그 자리는 상대의 집이다 |
+| 집 안쪽에 둔 수 | 영역에서 돌이 되므로 득실 0 | 집이 줄어 **1집 손실**(착수한 돌은 점수가 아님) |
+| 시키(seki) | 영역 정의에 따라 계산(공유 활로의 빈 점은 두 색에 접하므로 어느 쪽 영역도 아님) | **시키 안의 빈 점은 누구의 집도 아니다**(돌은 생존) |
+| 덤 기본값 | 7.5 | **6.5 (제안 — 관행값이며 공식 규정으로 확인하지 못했다)** |
+| 자충 | 금지(다석 자충 포함) | 금지 |
+| 패 | **위치 슈퍼코** | **위치 슈퍼코**(제안) — 실제 일본 규정은 3패·장생을 무승부(무효국)로 다루지만 이 설계는 **무승부·무효국 결과를 구현하지 않고** 순환 착수를 거절한다. 대국 설정 화면에 고지한다 |
+| 종국 | 연속 패스 → `scoring` → 사석 합의 | 같음(합의 단계가 이미 있다, §4.2) |
+| 시한 경과 기본 판정 | 사석 제거 없이 모든 돌 생존, 영역 계가(Tromp-Taylor 방식) | **사석 제거 없이 모든 돌 생존, 일본식 계가**(모든 돌이 생존이면 한 색에만 접한 빈 영역만 집이 된다) |
+
+**일본식 계가 절차 (`JapaneseTerritoryRuleset.score`)**
+1. 합의된 사석 집합을 판에서 제거하고, 제거한 돌 수를 **상대의 `deadStonesCaptured`** 에 더한다.
+2. `prisoners = 대국 중 포획 수(Position.captures) + deadStonesCaptured`.
+3. `SekiDetector` 가 시키 안의 빈 점을 찾아 집 후보에서 뺀다. 나머지 빈 영역은 **한 색의 돌에만 접하면 그 색의 집**, 두 색에 접하면 중립이다.
+4. 점수 = `territory + prisoners`(색별), 흑 − 백 − 덤으로 승패를 낸다. 반환하는 `ScoreResult.breakdown` 에 내역을 싣는다(UI 표시·분쟁 확인용).
+- **시키 판정(`SekiDetector`)은 보수적 정의로 시작한다**: 서로 다른 색의 두 그룹이 활로를 공유하고, 어느 쪽도 상대 활로를 메우는 수가 자신의 자충 또는 선수 포획 당함으로 이어지는 형태. 한 눈이 시키 안에 있는 경우(눈 자리 빈 점을 집으로 셀지)와 복잡한 다중 그룹 시키는 **규정 해석이 갈리는 영역이라 착수 시 규정서로 확인한다(미확인)**. 확인 전에는 사석 합의 단계(사람 합의)가 최종 안전장치다.
+- **재개 중 수의 불이익**: 일본식은 분쟁 후 재개된 대국에서 둔 수에 대한 감점 처리 규정이 따로 있으나 이 설계는 **구현하지 않는다**(재개 뒤 계가는 재개 시점 포획 수 + 현재 국면으로 새로 계산). 규정 확인과 구현 여부는 미결(§19).
+- **중국식은 이전 설계와 같다**(회귀 시험으로 동일성을 고정한다). 일본식 추가가 중국식 점수·합법성에 영향을 주지 않는다 — 합법성 판정(`tryPlay`)은 규칙과 무관하게 공통이고 **규칙이 달라지는 곳은 `score` 와 덤 기본값뿐**이다.
+- **규칙은 대국 안에서 바뀌지 않는다.** 재개(`ResumePlay`)·무르기에도 `rules` 는 유지된다.
 
 ---
 
@@ -236,10 +298,10 @@ classDiagram
 
 | 이름 | 종류 | 설명 |
 |---|---|---|
-| `Room`(도전/방) | 집합체 | 대국을 만들기 전 로비 항목: 판 크기, 규칙, 시간 설정, 레이팅 여부, 공개/초대, 개설자 |
+| `Room`(도전/방) | 집합체 | 대국을 만들기 전 로비 항목: 판 크기, **규칙(`rules`: `chinese`·`japanese`)**, 시간 설정, 레이팅 여부, 공개/초대, 개설자(GitHub 로그인 사용자) |
 | `Game` | 집합체 루트 | 한 판. `version`, `eventSeq`, 상태, 현재 국면, 시계, 참가자 2명, 결과 |
-| `GameEvent` | 도메인 이벤트(추가 전용 로그 행) | `seq` 순서: `started`, `move_played`, `passed`, `resigned`, `timed_out`, `scoring_started`, `dead_marked`, `score_confirmed`, `resume_requested`, `resume_accepted`, `play_resumed`, `scoring_timed_out`, `finished`, `abandoned` (`scoring_timed_out` 은 scoring 시한 경과 종국의 사유 행이며 시계 패배의 `timed_out` 과 구분한다) |
-| `Participant` | 값 | 색, `user_id` 또는 `session_id`, 접속 상태, 남은 시간 |
+| `GameEvent` | 도메인 이벤트(추가 전용 로그 행) | `seq` 순서: `started`, `move_played`, `passed`, `resigned`, `timed_out`, **`undo_requested`, `undo_accepted`, `undo_declined`**, `scoring_started`, `dead_marked`, `score_confirmed`, `resume_requested`, `resume_accepted`, `play_resumed`, `scoring_timed_out`, `finished`, `abandoned` (`scoring_timed_out` 은 scoring 시한 경과 종국의 사유 행이며 시계 패배의 `timed_out` 과 구분한다) |
+| `Participant` | 값 | 색, `user_id`(**GitHub 로그인 사용자만 — 익명 세션은 플레이어가 될 수 없다**, U21), 접속 상태, 남은 시간 |
 | `TimeControl` | 값 객체 | `byoyomi`(주 시간 + 초읽기 횟수 × 초) 또는 `fischer`(주 시간 + 증분) |
 | `Move` | 값 | `(color, point | pass)`, `moveId`(멱등) |
 
@@ -251,6 +313,8 @@ stateDiagram-v2
     open --> playing : JoinChallenge (두 번째 참가자 확정)
     open --> cancelled : 개설자 취소 / 만료
     playing --> playing : PlayMove · Pass (연속 패스 아님)
+    playing --> playing : RequestUndo · DeclineUndo (국면 불변)
+    playing --> playing : AcceptUndo (유효 수열 되감기, 비레이팅만)
     playing --> scoring : 연속 패스 2회
     playing --> finished : Resign
     playing --> finished : TimeOut
@@ -265,13 +329,15 @@ stateDiagram-v2
 ```
 
 - 전이는 모두 **`version` 조건 갱신**이다. 같은 상태에서 동시에 일어나는 두 전이(착수와 시간 초과, 기권과 상대 착수)는 먼저 커밋된 쪽만 성공한다. **`game.version` 은 마지막 `game_event.seq` 와 같다**(S11). 종국 전이는 사유 행(`resigned`/`timed_out`/`score_confirmed`…)과 `finished` 행을 **같은 트랜잭션**에 쓰므로 한 번의 종국 전이로 `seq`·`version` 이 **+2** 된다(`FinalizeGame` 은 별도 tx 가 아니라 같은 tx 안의 단계다). 모든 명령은 `expectedVersion`(= 클라이언트가 본 마지막 `seq`)을 싣고, 불일치는 `version_conflict`, 이미 끝난 대국은 `game_over` 로 응답한다(§5.2).
+- 무르기(`undo_*`)는 **상태(`status`)를 바꾸지 않는다** — `playing` 안에서 국면(유효 수열)만 바뀌는 자기 전이이고 `seq`·`version` 은 항상 +1 이상이다. 세부는 §4.5.
 - `finished` 와 `abandoned` 는 종결 상태다. 결과는 **불변**이다(ADR-009). 이후 분석은 보상 상태만 바꾼다.
 - **계가와 재개 규칙(S9, ADR-035)**
   - `scoring` 에서는 양측이 `SubmitDeadStones` 로 사석을 표시하고 일치하면 `ConfirmScore` 로 종국한다. 표시가 **연속 2회 불일치**하면 자동으로 재개(`ResumePlay`)된다(재개 상한을 쓰는 재개로 센다). 재개가 일어나면 **불일치 카운터는 0으로 초기화**된다. 재개 상한(2회)을 소진한 뒤 불일치가 연속 2회 쌓여도 **자동 재개는 하지 않고** 아래 scoring 시한(10분) 경과 종국으로 진행한다.
   - 어느 쪽이든 `ResumePlay` 를 요청할 수 있으나 **상대의 수락**(`resume-accept`)이 있어야 재개된다(일방 재개 불가). 대국당 재개는 **최대 2회**다.
   - `resume-requests`(`resume_requested`)·`resume-accept`(`resume_accepted` 뒤 `play_resumed`)·`dead-marks`(`dead_marked`)는 각각 `game_event` 행을 쓰므로 **`version`/`seq` 를 소비**한다(수락 재개는 `resume_accepted`+`play_resumed` 로 seq +2). 시한 경과 종국은 `scoring_timed_out`+`finished` 로 seq +2 이다(S11).
+  - 계가는 대국의 `rules`(§3.5)로 한다. `scoring` 중에는 무르기를 쓸 수 없다(`not_playing`) — 분쟁은 사석 표시와 재개로만 푼다.
   - 재개 후 선수는 **마지막으로 패스한 쪽의 상대**다. 착수 시계는 `scoring` 중 정지하고 재개 시 이어서 흐른다.
-  - `scoring` 시한(제안 10분)이 지나면 현재 국면에서 **사석 제거 없이 모든 돌을 생존으로 보는 영역 계가(Tromp-Taylor 방식, 엔진 기본 판정)** 를 적용해 종결한다(`scoring_timed_out` 사유). 사석을 방치하면 불리해지므로 합의 유도가 되고, 서버는 항상 결정적 결과를 낸다.
+  - `scoring` 시한(제안 10분)이 지나면 현재 국면에서 **사석 제거 없이 모든 돌을 생존으로 보는 영역 계가(Tromp-Taylor 방식, 엔진 기본 판정)** 를 적용해 종결한다(`scoring_timed_out` 사유). (일본식 대국이면 같은 방식으로 **모든 돌 생존, 일본식 계가**, §3.5) 사석을 방치하면 불리해지므로 합의 유도가 되고, 서버는 항상 결정적 결과를 낸다.
 
 ### 4.3 시간 제어
 
@@ -283,6 +349,7 @@ stateDiagram-v2
 - 시계 상태(`time_ms[B,W]`, `period_left`, `turn_started_at`, `deadline_at`)는 `game` 행에 영속한다.
 - **서버가 정본**이다. 서버는 `Clock` 포트의 **벽시계 기반 `now()`**(`Date.now()` 계열) 로 착수 수신 시각을 정하고 `clock` 메시지를 보낸다. 클라이언트는 받은 값에서 **로컬 보간**만 한다(표시용). 클라이언트 시각을 판정에 쓰지 않는다.
 - 착수 시각은 `api` 가 **요청 수신 시점(`receivedAt`)에 서버 시계로 확정**한다. REST 전송 지연의 책임 소재와 지연 보상 정책(`lagGrace`, 제안 0.3초 가산)은 **§5.9** 가 정한다. 지연을 상대에게 전가하지 않는다는 원칙을 지킨다.
+- **무르기는 시계를 되감지 않는다**(§4.5): 이미 쓴 시간·소모한 초읽기 횟수는 그대로이고 유효 수열만 줄어든다. 무르기 요청이 대기 중인 동안에도 시계는 현재 차례 쪽에서 계속 흐른다.
 - 서버 타임스탬프는 `Date.now()` 계열을 쓴다(`performance.timeOrigin + performance.now()` 는 이 호스트에서 벽시계와 어긋남이 관찰됨 — 실측).
 
 ### 4.4 도메인 클래스
@@ -309,6 +376,10 @@ classDiagram
         +timeout(now) Result
         +markDead(color, points) Result
         +confirmScore(color) Result
+        +requestUndo(color, now) Result
+        +acceptUndo(color, now) Result
+        +declineUndo(color, now) Result
+        +effectiveMoves() Move[]
     }
     class DomainEvent {
         <<abstract>>
@@ -326,6 +397,9 @@ classDiagram
     class Resigned
     class TimedOut
     class ScoringStarted
+    class UndoRequested
+    class UndoAccepted
+    class UndoDeclined
     class DeadMarked
     class ScoreConfirmed
     class PlayResumed
@@ -354,6 +428,9 @@ classDiagram
     GameEvent <|-- Resigned
     GameEvent <|-- TimedOut
     GameEvent <|-- ScoringStarted
+    GameEvent <|-- UndoRequested
+    GameEvent <|-- UndoAccepted
+    GameEvent <|-- UndoDeclined
     GameEvent <|-- DeadMarked
     GameEvent <|-- ScoreConfirmed
     GameEvent <|-- PlayResumed
@@ -366,7 +443,48 @@ classDiagram
 ```
 
 - `Game.play()` 는 `RulesEngine.tryPlay` 결과가 합법일 때만 `MovePlayed` 를 기록한다. 도메인 서비스(`GameStateMachine`)가 전이를 판정하고, `Game` 은 불변식(차례, 상태, 시계)을 지킨다.
+- `Game.effectiveMoves()` 는 `game_event` 를 `seq` 순으로 접어(§4.5 접기 규칙) **유효 수열**을 만든다. 현재 국면(`position`)은 항상 이 수열의 재생과 같아야 하며 이것이 재생 동등성 시험(AC-BD-22)의 대상이다.
 - `GameEvent` 는 **두 얼굴**을 가진다: ① 대국별 `seq` 의 추가 전용 로그 행(동기화·재생의 정본) ② outbox 에 실리는 `DomainEvent`(투영·분석·보상용). 같은 클래스가 두 곳에 쓰이되 outbox 에는 `game.<verb-past>` 이름으로 발행한다(§12).
+
+### 4.5 무르기 (undo, U11)
+
+**원칙: 상대의 동의가 있어야만 되돌려지고, 되돌림은 로그를 고치지 않고 새 이벤트로 남긴다.** `game_event` 는 추가 전용이고 `game.version == 마지막 game_event.seq`(S11)는 그대로다 — 무르기가 일어나도 `seq` 는 **줄지 않고 증가**한다.
+
+| 항목 | 규칙 (값은 모두 제안, 미측정) |
+|---|---|
+| 허용 대국 | **비레이팅 대국만.** 레이팅(보상) 대국은 `403 undo_not_allowed`. 이유: 보상·분석(AN)은 레이팅 대국에만 있고, 무르기는 수 일치율 분석과 보상 파밍 방어(§8)를 약하게 만든다 |
+| 요청 자격 | `playing` 상태(`scoring` 에서는 `409 not_playing`), 참가자, 유효 수열에 **자기 착수가 1수 이상**, 대기 중 요청이 없을 것(`409 undo_pending`) |
+| 되돌릴 범위 | **요청자의 마지막 착수 직전 국면**으로 간다. 요청자의 마지막 수가 최신이면 1수(상대 차례였음), 상대가 그 뒤에 한 수 뒀으면 2수를 되돌린다. 어느 경우든 되돌린 뒤 **차례는 요청자**다. 패스도 수로 센다 |
+| 횟수 상한 | 대국당 **플레이어별 요청 3회**(수락 여부와 무관하게 센다 — 반복 요청 방지). 초과는 `409 undo_limit` |
+| 응답 제한 시간 | **30초**. 만료는 `TimeoutSweeper` 가 `undo_declined { reason: "expired" }` 를 기록한다. 응답자는 `undo-accept` 또는 `undo-decline` 을 보낸다 |
+| 자동 철회 | 대기 중 **어느 쪽이든 착수·패스·기권**을 하면 요청은 `undo_declined { reason: "superseded" }` 로 닫히고 같은 트랜잭션에서 그 명령이 이어진다(seq +2). 기권·시간 초과도 마찬가지로 요청을 닫는다 |
+| 시계 | **되감지 않는다.** 수락 시점의 시계 값을 그대로 쓰고 `turn_started_at` 만 수락 시각(`receivedAt`)으로 갱신한다. 수락한 응답자의 지연은 `lagGrace` 로 보상하지 않는다(응답은 착수가 아니다) |
+| 보상 자격 | 비레이팅 대국은 애초에 보상이 없다. 방어적 중복으로 `game.finished` 에 `undoCount` 를 싣고 `EligibilityPolicy` 가 `undoCount = 0` 을 요구한다(§10.3) |
+| 분석 입력 | 분석은 레이팅 대국만 하므로 무르기가 없는 것이 정상이다. 그래도 분석기에는 항상 **유효 수열**(접기 결과)을 넘긴다(§9.4) |
+
+```mermaid
+stateDiagram-v2
+    [*] --> requested : RequestUndo (undo_requested)
+    requested --> accepted : AcceptUndo (undo_accepted, 국면 되감기)
+    requested --> declined : DeclineUndo (undo_declined)
+    requested --> declined : 30초 만료 (reason=expired)
+    requested --> declined : 착수 · 패스 · 기권 (reason=superseded)
+    accepted --> [*]
+    declined --> [*]
+```
+
+**이벤트와 접기 규칙** — 로그는 아래 세 이벤트를 더할 뿐이고 `move_played` 행은 지워지지 않는다.
+
+| `type` | 페이로드(공개 가능한 값만) | `version`/`seq` | 효과 |
+|---|---|---|---|
+| `undo_requested` | `by`(색), `toPly`(되돌아갈 수 번호), `expiresAt` | +1 | `game.pending_undo` 설정 |
+| `undo_accepted` | `by`(수락한 색), `requestSeq`, `toPly`, `removed`(제거되는 수의 `ply`·색·좌표), `positionHash` | +1 | 유효 수열을 `toPly` 까지로 줄이고 `position`·`turn` 을 재생으로 갱신, `pending_undo` 해제 |
+| `undo_declined` | `reason`(`declined`·`expired`·`superseded`), `by`(`declined` 일 때 거절한 색), `requestSeq` | +1 | `pending_undo` 해제 |
+
+- **접기(fold)**: `move_played`/`passed` 는 유효 수열 끝에 붙고(`ply` = 유효 수열 길이 + 1), `undo_accepted` 는 유효 수열을 `toPly` 로 자른다. 서버·클라이언트·분석 입력·SGF 내보내기는 **같은 접기 함수**(`foldMoves`)를 쓴다(`game` 도메인 서비스, `baduk-rules` 의 `replay` 로 국면을 만든다).
+- **`move_played` 페이로드에 `ply`(유효 수열 번호)를 싣는다.** `seq` 는 로그 순번이고 `ply` 는 대국 수 번호이며 무르기 뒤에는 둘이 달라진다. `toPly` 가 가리키는 대상이 모호하지 않게 하는 필드다.
+- **기존 응답 규칙 유지**: 명령 응답은 `{ event, seq }` 이고 요청자는 응답으로 즉시 반영, 뒤따르는 push 의 같은 `seq` 는 중복 제거한다. 멱등은 `Idempotency-Key`(= `game_event.move_id`)다.
+- **보관**: 무르기 이벤트는 해당 `move_played` 와 같은 `game_event` 보관 규칙을 따른다(비레이팅은 종료 후 30일, §11.4). SGF 는 유효 수열만 담는다(§6).
 
 ---
 
@@ -374,19 +492,21 @@ classDiagram
 
 ### 5.1 원칙과 연결 모델
 
-**대국 명령(착수·패스·기권·사석 표시·계가 확인·재개)은 전부 REST 로 받는다.** 쓰기 경로는 `api` 한 곳이다(P0 D8, ADR-018, 채팅 [ADR-045](../../adr/ADR-045-chat-message-delivery.md) 와 같은 원칙). `ws-gateway` 는 **읽기·push 전용**이며 대국 상태를 쓰지 않는다.
+**대국 명령(착수·패스·기권·무르기 요청/응답·사석 표시·계가 확인·재개)은 전부 REST 로 받는다.** 쓰기 경로는 `api` 한 곳이다(P0 D8, ADR-018, 채팅 [ADR-045](../../adr/ADR-045-chat-message-delivery.md) 와 같은 원칙). `ws-gateway` 는 **읽기·push 전용**이며 대국 상태를 쓰지 않는다.
 
 | 항목 | 규칙 |
 |---|---|
 | 명령 경로 | 클라이언트 → `POST /api/games/{id}/…`(§5.2, `Idempotency-Key` = 명령 id = `moveId`) → `api` 가드 체인 → 명령 usecase → **한 트랜잭션**으로 `game`(CAS) + `game_event` + outbox + `pg_notify('room_changed')` |
 | push 경로 | 커밋 때 전달되는 `NOTIFY room_changed` 로 `ws-gateway` 가 깨어남 → `RoomEventSource.after(room, lastSent)` 로 `game_event` 조회 → 방 구독자에게 push (§5.10). 읽기 모델 투영(`game_view`, 로비)은 outbox 경로(비동기) |
-| 엔드포인트 | `/ws/room` — 세션 쿠키 필수(익명 세션 포함). 없으면 업그레이드 단계에서 `401`. `Origin` 검사는 04 와 같다 |
+| 엔드포인트 | `/ws/room` — 세션 쿠키 필수(익명 세션 포함: **익명 세션은 관전 구독만 가능**하다, 아래 "익명 세션의 경로"). 없으면 업그레이드 단계에서 `401`. `Origin` 검사는 04 와 같다 |
 | 연결 시점 | 대국/관전 화면에 들어갈 때(사이트 최초 진입 시가 아님). 한 연결에 방 여러 개 구독 가능(P0 §6.8: 연결당 최대 8) |
 | 방 키 | P0 §6.3 `<type>:<uuid>`: 대국 룸 `game:<gameId>`. 대국 채팅 룸은 `chat:<chatRoomId>`(chat 소유의 별도 uuid; players/spectators 두 개가 game 에 연결됨, 04 정본) — `chat:game:<id>` 표기는 폐기 |
-| 구독 권한 | `RoomAccessPolicy`(**realtime 소유 포트**, P0 §6.6)를 `game` 모듈이 `GameRoomPolicy` 로 구현해 조립부(compose)에서 등록한다: 공개 대국은 누구나 관전, 비공개는 초대 토큰 해시 검증, 플레이어는 참가자 확인 |
+| 구독 권한 | `RoomAccessPolicy`(**realtime 소유 포트**, P0 §6.6)를 `game` 모듈이 `GameRoomPolicy` 로 구현해 조립부(compose)에서 등록한다: 공개 대국은 익명 세션을 포함해 누구나 관전, 비공개는 초대 토큰 해시 검증, 플레이어는 참가자 확인(`role` = `black`·`white` 는 GitHub 로그인 사용자의 참가자 행이 있을 때만) |
 | 인바운드 허용 목록 | `hello`, `room.join { room, resume? }`, `room.leave { room }`, `ping`, 그리고 채팅 휘발성 `typing`(P4). **이 밖의 인바운드(`move` 포함)는 처리하지 않고** `room.error { code: inbound_not_allowed }`, 반복되면 `4400`. **구독 속도는 P0 §6.8 값(초당 5회)을 정본으로 하며 초과 시 `4429`** (연결당 클라이언트 메시지 초당 10건 한도는 M1 04 와 같다) |
 | 봉투 | P0 §6.3 과 같다 `{v, t, ch:"room", rm:"game:<id>", seq?, ts, d}`. `seq` 는 대국별 단조 증가(= `game_event.seq`) |
 | 하트비트·유휴·백프레셔 | 04 §1·§6 의 규칙(hb 25초, 송신 큐 64건/256KB, 4408) 그대로 |
+
+**익명 세션의 경로 (U21, 2026-11-05)**: **플레이어는 레이팅·비레이팅 모두 GitHub 로그인 사용자뿐**이고 익명 세션은 **관전만** 한다. 익명 세션은 M1 규칙대로 사이트 진입 시 `/ws/private`(자기 흐름 전용, M1 04)에 연결되고, 공개 대국을 볼 때 `/ws/room` 에 연결해 `room.join` 으로 **관전 구독(`role = spectator`)** 만 한다. 두 연결 모두 대국 상태를 쓰지 않으며(WS 는 push 전용) 도전 개설·수락·착수·무르기 등 모든 대국 명령 REST 는 가드 `RequireUser` 에서 `403 login_required` 로 거절된다. 익명 관전자가 대국에 참여하려면 로그인(GitHub OAuth) 후 도전을 만들거나 수락해야 하고, 로그인으로 세션이 회전하면 이전 익명 세션의 소켓은 서버가 `4401` 로 닫는다(M1 04). 이전 설계의 "익명 비레이팅 대국"은 **폐지**되었다.
 
 ### 5.2 REST 명령 API (정본 계약)
 
@@ -394,17 +514,21 @@ classDiagram
 
 | 메서드·경로 | 인증 | 본문 | 성공 | 오류(wire code) |
 |---|---|---|---|---|
-| `POST /api/games/{id}/moves` | 해당 대국 참가자 | `{ x, y, expectedVersion }` | `200 { event, seq, clock }` | `422 illegal_move`(`details.reason`: `occupied` · `suicide` · `ko` · `superko` · `out_of_bounds`(= 엔진 `OFF_BOARD`)) · `409 not_your_turn` · `409 version_conflict`(`details.current`) · `409 game_over` · `403 not_player` · `429 rate_limited` |
+| `POST /api/games/{id}/moves` | 해당 대국 참가자(로그인) | `{ x, y, expectedVersion }` | `200 { event, seq, clock }` | `422 illegal_move`(`details.reason`: `occupied` · `suicide` · `ko` · `superko` · `out_of_bounds`(= 엔진 `OFF_BOARD`)) · `409 not_your_turn` · `409 version_conflict`(`details.current`) · `409 game_over` · `403 not_player` · `429 rate_limited` |
 | `POST /api/games/{id}/pass` | 참가자 | `{ expectedVersion }` | `200 { event, seq, clock }` | 위와 같음 |
 | `POST /api/games/{id}/resign` | 참가자 | `{ expectedVersion }` | `200 { event, seq }` | `409 game_over` · `403 not_player` (버전 불일치는 서버 내부 재시도, 위 설명) |
 | `POST /api/games/{id}/dead-marks` | 참가자(`scoring`) | `{ points[], expectedVersion }` | `200 { event, seq }` | `409 not_scoring` · `409 version_conflict` |
 | `POST /api/games/{id}/score-confirmations` | 참가자(`scoring`) | `{ markHash, expectedVersion }` | `200 { event, seq }` | `409 mark_mismatch` · `409 not_scoring` · `409 version_conflict` |
+| `POST /api/games/{id}/undo-requests` | 참가자(`playing`, **비레이팅 대국만**) | `{ expectedVersion }` | `200 { event, seq }` (`undo_requested`; 상대 응답 전에는 되돌려지지 않음) | `403 undo_not_allowed`(레이팅 대국) · `409 not_playing` · `409 undo_pending` · `409 undo_limit`(플레이어별 3회) · `409 nothing_to_undo`(자기 착수 없음) · `409 version_conflict` |
+| `POST /api/games/{id}/undo-accept` | 상대 참가자(대기 요청이 있을 때) | `{ expectedVersion }` | `200 { event, seq }` (`undo_accepted`, 국면 되감기) | `409 no_pending_request` · `409 version_conflict` · `409 game_over` |
+| `POST /api/games/{id}/undo-decline` | 상대 참가자(대기 요청이 있을 때) | `{ expectedVersion }` | `200 { event, seq }` (`undo_declined`) | `409 no_pending_request` · `409 version_conflict` · `409 game_over` |
 | `POST /api/games/{id}/resume-requests` | 참가자(`scoring`) | `{ expectedVersion }` | `200 { event, seq }` (요청 기록; 상대 수락 전에는 재개되지 않음) | `409 not_scoring` · `409 resume_limit`(대국당 2회) |
 | `POST /api/games/{id}/resume-accept` | 상대 참가자(`scoring`, 요청이 있을 때) | `{ expectedVersion }` | `200 { event, seq }` (재개, `play_resumed`) | `409 no_pending_request` · `409 not_scoring` · `409 version_conflict` |
 | `POST /api/games/{id}/heartbeat` | 참가자 | `{}` | `204` (`game_player.last_seen_at` 갱신, 20초 간격, 이탈 판정 신호 §5.6) | `403 not_player` · `429` |
 | `GET /api/games/{id}` | 열람 권한(공개/참가자/토큰) | — | `200 { state, position, clock, players, seq }` | `404`·`403` |
 | `GET /api/games/{id}/events?after=&limit=` | 열람 권한 | — | `200 { events[], head }` (최대 200건) | 같음 |
 
+- **플레이어 명령 전부(위 표와 `POST /api/challenges`·`…/join`)는 GitHub 로그인 사용자만** 쓸 수 있다. 익명 세션이 호출하면 가드 `RequireUser` 가 `403 login_required` 로 거절한다(U21). 열람(`GET`)과 관전 구독은 익명도 가능하다.
 - 공통 오류 코드는 M1 00 §4.3 과 같다: `rate_limited`(429, `Retry-After`), `request_in_progress`(409), `idempotency_key_reuse`(422), `validation_failed`(400), `unauthenticated`(401).
 - 성공 응답에 **생성된 이벤트 자체**(`event`)가 들어간다 → 요청자는 즉시 화면에 반영(읽기-내-쓰기)하고, 뒤따르는 push 의 같은 `seq` 는 `SeqTracker` 가 중복으로 버린다.
 - 도전 개설·수락·로비는 §5.7, 기보 내보내기는 BD-13 이다.
@@ -434,7 +558,8 @@ classDiagram
 | `replay.end` · `room.error` · `bye` · `hb` | P0 §6.3 / 04 와 같다 | |
 
 - **`game.ack` / `game.reject` 는 없다**(명령 결과는 REST 응답). `room.error` 는 구독 거절(`forbidden`, `not_found`, `inbound_not_allowed`) 전용이고 연결은 유지된다.
-- 모든 `game.event` 의 `payload` 는 **공개 가능한 값만** 담는다(좌표, 색, 시간). 사용자 식별자는 이벤트에 싣지 않고 `players` 에서 표시 이름만 준다(익명 대국의 표시 이름은 세션 단위 가명). 변환은 `RoomMessageMapper`(역할별 허용목록)가 한다.
+- 모든 `game.event` 의 `payload` 는 **공개 가능한 값만** 담는다(좌표, 색, 시간). 사용자 식별자는 이벤트에 싣지 않고 `players` 에서 표시 이름만 준다(플레이어는 로그인 사용자의 표시 이름이고, 관전자 목록·`room.presence` 의 익명 관전자는 가명 또는 수만 노출한다). 변환은 `RoomMessageMapper`(역할별 허용목록)가 한다.
+- `undo_requested`·`undo_accepted`·`undo_declined` 도 `game.event` 로 같은 `seq` 순서로 전달된다. 클라이언트는 `undo_accepted` 를 받으면 **로컬 유효 수열을 `toPly` 로 자르고 `positionHash` 가 로컬 재생과 일치하는지 확인**하며(불일치면 `room.snapshot` 재요청), 스냅샷의 `data` 에는 `pendingUndo`(요청자·만료 시각)가 포함된다. 휘발성 `clock` 은 무르기와 무관하게 서버 값으로 보정된다.
 - 방별 `seq` 연속성은 04 §5 와 같은 규칙이다(건너뛰면 `room.join { resume }` 재요청).
 
 ### 5.4 착수 시퀀스 (정상, REST + 즉시 push)
@@ -517,18 +642,19 @@ flowchart TD
 
 - 스냅샷은 `game` 행(현재 국면 직렬화 + 시계 + `event_seq`)에서 만든다 — `GameSnapshotProvider`(`RoomSnapshotProvider` 구현)가 `game` 모듈의 조회 usecase 로 읽는다. 읽기 모델이 아니라 **쓰기 모델을 읽는 문서화된 CQRS 예외 X1** 이다: 스냅샷의 `game` 행뿐 아니라 `RoomEventSource.after` 의 `game_event` 조회, `SyncGame` 쿼리, `GET /api/games/{id}/events` 가 모두 쓰기 스키마 `game` 의 `game_event`(= 방 로그)를 읽는다. 이유는 `head`·`seq` 가 쓰기 모델과 정확히 일치해야 하고 복제 시 fast lane 의 이점이 사라지기 때문이다(M1 의 `LoadEntryForConflict` 와 같은 종류). X1 은 P0 §2.4 의 '문서화된 CQRS 예외' 표에 등재하고 M1 database-schema §1 예외 목록 반영은 §17 변경 요청에 포함한다.
 - 진행 중 대국의 이벤트는 대국이 끝날 때까지 전부 보관되므로 재생은 항상 가능하다. 종료 후 보관 정리 뒤에는 스냅샷 + SGF 로만 조회한다(§11 보관).
+- **무르기와 재접속·관전**: 무르기는 로그에 이벤트로 남아 있으므로 `resume` 재생과 스냅샷이 모두 같은 접기 결과를 낸다. 대기 중 요청의 응답자가 끊겨도 요청은 30초 뒤 `expired` 로 닫힌다(재접속한 응답자는 스냅샷의 `pendingUndo` 로 남은 시간을 본다). 관전자는 `undo_accepted` 를 받아 보드를 되돌리며 별도 권한이 필요 없다. 종료 후 이벤트 정리가 일어나도 SGF(유효 수열)로만 조회한다.
 - **플레이어 이탈**: 연결이 끊겨도 시계는 계속 간다. 접속 상태가 끊기면 `room.presence`(표시 전용)로 상대에게 알린다. 끊긴 플레이어는 시간 초과로 패하거나 재접속한다. **`abandoned` 의 근거는 presence 가 아니라 `game` 이 소유한 신호다(S3)**: 플레이어 클라이언트가 20초마다 `POST /api/games/{id}/heartbeat` 를 보내 `game_player.last_seen_at` 을 갱신하고(착수·패스 등 모든 명령도 같은 갱신을 함), `TimeoutSweeper` 가 **양측의 `last_seen_at` 이 모두 `grace`(제안 5분) 넘게 갱신되지 않은** 대국을 `abandoned`(무효, 보상 없음)로 닫는다. presence 는 근사값이고 gateway 가 둘 이상이 되면 합산이 안 되므로 판정에 쓰지 않는다. REST 착수·heartbeat 는 WS 연결이 없어도 가능하다.
 
 ### 5.7 로비·매칭
 
 | 항목 | 규칙 |
 |---|---|
-| 도전(챌린지) | 개설자가 판 크기·규칙·시간·레이팅 여부·공개/초대를 정해 `open` 방을 만든다(REST `POST /api/challenges`). 로비에 노출 |
-| 수락 | 다른 사용자가 `JoinChallenge`(REST) → 색 배정(무작위 또는 개설자 선택) → `playing` |
+| 도전(챌린지) | **로그인한** 개설자가 판 크기·**규칙(`rules`: 중국식·일본식, 덤 기본값은 규칙이 정하고 화면에 표시)**·시간·레이팅 여부·공개/초대를 정해 `open` 방을 만든다(REST `POST /api/challenges`). 로비에 노출. 무르기는 비레이팅 도전에서만 가능함을 설정 화면에 표시 |
+| 수락 | 다른 **로그인** 사용자가 `JoinChallenge`(REST) → 색 배정(무작위 또는 개설자 선택) → `playing` |
 | 빠른 매칭 | M1 범위: 같은 설정의 열린 도전에 자동 수락. 레이팅 기반 매칭은 후속(범위 밖) |
 | 만료 | `open` 은 15분 후 자동 `cancelled`(제안) |
 | 로비 조회 | `game_read.lobby_view`(읽기 모델). 새 도전·시작·종료는 이벤트로 갱신하고 WS `/ws/public` 로 요약 푸시(공개 정보만) |
-| 익명 대국 | 익명 세션도 비레이팅 대국 가능. **보상·레이팅은 GitHub 로그인 사용자 간 대국만**(§10). 익명 허용의 정본은 이 절(§5.7)이다 |
+| 익명 | **플레이어는 레이팅·비레이팅 모두 GitHub 로그인 필수**(U21). 익명 세션은 로비 조회와 공개 대국 **관전만** 가능하다(§5.1 "익명 세션의 경로"). 익명 비레이팅 대국은 폐지. 이 절(§5.7)과 §5.1 이 정본이다 |
 
 ### 5.8 명령 검증 순서도 (REST 가드 체인 → usecase)
 
@@ -554,6 +680,8 @@ flowchart TD
     I -- "아니오" --> R5["409 version_conflict (이미 끝났으면 game_over) → 클라이언트 GET 또는 room.join resume"]
     I -- "예" --> OK["200 {event, seq, clock}, push 는 NOTIFY 경로"]
 ```
+
+- **무르기 명령의 추가 검사**: `RequireUser`(로그인) → 참가자 → `status = playing` → `rated = false` → 요청이면 대기 요청 없음·플레이어별 횟수·자기 착수 존재, 응답이면 대기 요청 존재와 응답자 = 요청자의 상대. 모두 `game` 행 `FOR UPDATE` 아래 CAS 로 직렬화되며, 응답과 만료·착수·기권이 경합하면 먼저 커밋된 쪽이 이기고 늦은 쪽은 `no_pending_request`(또는 `version_conflict`/`game_over`)다.
 
 ### 5.9 시계 공정성 — 서버 시계와 REST 지연 (제안)
 
@@ -640,12 +768,18 @@ classDiagram
         +markHash string
     }
     class ResumeCommand
+    class UndoRequestCommand
+    class UndoRespondCommand {
+        +accept bool
+    }
     GameCommand <|-- MoveCommand
     GameCommand <|-- PassCommand
     GameCommand <|-- ResignCommand
     GameCommand <|-- DeadMarkCommand
     GameCommand <|-- ScoreConfirmCommand
     GameCommand <|-- ResumeCommand
+    GameCommand <|-- UndoRequestCommand
+    GameCommand <|-- UndoRespondCommand
     class GameCommandRoute {
         <<api route>>
         +post(path, schema, guards) Response
@@ -749,11 +883,11 @@ classDiagram
 
 | 항목 | 규칙 |
 |---|---|
-| 내보내기 | 종료된 대국의 `game_event` 를 `@sabaki/sgf` 로 직렬화: `FF[4] GM[1] SZ RU[Chinese] KM PB PW DT RE[B+R / W+3.5 / B+T …]` + 착수 노드. 종료 후 한 번 만들어 `game.sgf` 텍스트로 저장(보관 정리 후에도 기보는 유지) |
-| 가져오기 | 연습·분석용 업로드: 크기 상한(제안 256KB), 노드 수 상한(제안 1000), 지원 속성만 사용(`;B ;W AB AW AE SZ KM RU`), 나머지는 무시. 변화도(분기)는 주 변화만 사용 |
+| 내보내기 | 종료된 대국의 `game_event` 를 `@sabaki/sgf` 로 직렬화: `FF[4] GM[1] SZ RU[Chinese 또는 Japanese] KM PB PW DT RE[B+R / W+3.5 / B+T …]` + 착수 노드(**무르기로 제거된 수는 담지 않는 유효 수열**). 종료 후 한 번 만들어 `game.sgf` 텍스트로 저장(보관 정리 후에도 기보는 유지) |
+| 가져오기 | 연습·분석용 업로드: 크기 상한(제안 256KB), 노드 수 상한(제안 1000), 지원 속성만 사용(`;B ;W AB AW AE SZ KM RU`, `RU` 는 `Chinese`·`Japanese` 만 인정하고 그 밖의 값은 `chinese` 로 연습 분석), 나머지는 무시. 변화도(분기)는 주 변화만 사용 |
 | 라운드트립 시험 | 문자열이 아니라 **노드·속성 의미 동등성**(실측: 파싱 후 재직렬화 문자열은 정규화 차이로 불일치) |
-| 분석 입력 | KataGo 질의의 `moves` 는 SGF 가 아니라 서버가 `game_event` 에서 `[["B","D4"],…]` 로 변환 |
-| 개인정보 | 대국자 표시 이름만 `PB/PW` 에 기록(익명이면 가명), 사용자 ID·세션 ID 는 포함하지 않는다 |
+| 분석 입력 | KataGo 질의의 `moves` 는 SGF 가 아니라 서버가 `game_event` 를 접어(`foldMoves`, §4.5) 얻은 **유효 수열**을 `[["B","D4"],…]` 로 변환 |
+| 개인정보 | 대국자 표시 이름만 `PB/PW` 에 기록(플레이어는 로그인 사용자), 사용자 ID·세션 ID 는 포함하지 않는다 |
 
 ---
 
@@ -767,7 +901,8 @@ classDiagram
 | `room.snapshot` 한 번(또는 REST `GET /api/games/{id}`)으로 화면을 전부 복원 가능 | 스냅샷 적용 시 렌더 상태를 전부 교체 |
 | 서버 시계 정본, `clock` 은 보정용 | 로컬 보간만, 판정 없음 |
 | 거절은 REST 오류 응답의 wire code(`illegal_move`·`not_your_turn`·`version_conflict`·`game_over`·`rate_limited`) | 낙관적 착수 표시는 응답 전까지 "대기 중" 표현, 오류면 되돌림. `version_conflict` 이면 재동기화(`GET` 또는 `room.join { resume }`) |
-| 규칙 판정은 서버가 최종 | 같은 `baduk-rules` 로 **불법수 미리보기**만(서버가 최종) |
+| 규칙 판정은 서버가 최종 | 같은 `baduk-rules` 로 **불법수 미리보기**와 규칙별(`rules`) **계가 미리보기**만(서버가 최종) |
+| 무르기는 `undo_accepted` 이벤트로만 반영 | 요청 버튼은 비레이팅 대국에서만 노출, 응답 대기 UI(30초 카운트다운), 수락 시 보드를 `toPly` 로 되돌리고 해시 검증, 포획 애니메이션 큐는 비운다 |
 
 ### 7.2 구조 (렌더 상태와 도메인 상태의 분리)
 
@@ -811,6 +946,8 @@ flowchart LR
 | 보상 파밍(계정 둘이 대국) | 보상 자격 정책(§10.3), 같은 상대 일일 한도, 최소 수 수, 기권 대국 제외 | IP 는 저장하지 않으므로(ADR-023) 계정 단위 규칙만 |
 | 고의 이탈·시간 끌기 | 시계 + `game` 소유 heartbeat 기반 이탈 유예 한도(§5.6, presence 는 판정에 쓰지 않음), 반복 이탈은 레이팅 대국 참가 제한(후속) | |
 | 초대 링크 추측 | 토큰 128비트 난수, 해시 저장 | ADR-026 HSH |
+| 무르기 남용(시간 끌기·반복 요청·분석 회피) | 비레이팅 대국만, 플레이어별 3회, 대기 1건·30초, 시계 되감지 않음, 요청 대기 중 착수하면 철회 | 레이팅 대국은 불허라 보상·분석 경로에 영향 없음(§4.5) |
+| 익명 계정을 이용한 모더레이션 우회 | **플레이어는 로그인 필수**라 대국 참여·착수·무르기 경로의 우회 위험은 사라졌다. **남은 위험은 관전자 익명**뿐이다: 익명 세션은 세션 재발급으로 뮤트를 피해 관전 채팅에 다시 나타날 수 있다 | 관전자 채팅 쓰기 권한·속도 제한·신고는 P4 `ChatRoomPolicy` 가 정본이고, 이 문서는 익명이 플레이어가 될 수 없다는 보장만 한다 |
 
 ---
 
@@ -825,8 +962,19 @@ flowchart LR
 | 질의 필드: `id`, `moves`, `rules`, `komi`, `boardXSize/YSize`, `analyzeTurns`, `maxVisits` | 서버가 `game_event` 로 질의 생성 |
 | 응답: `moveInfos[]`(`move`·`order`·`winrate`·`scoreLead`·`prior`·`pv`), `rootInfo` | 일치율·승률 손실 계산 입력 |
 | 순수 CPU 빌드(`EIGEN`, AVX2 변형)와 작은 신경망 존재 | 무료 호스팅 CPU 가능성 있음 |
-| 규칙 문자열 목록은 분석 엔진 문서에 없음(`tromp-taylor` 예시만) | 우리 규칙(중국식 영역·위치 슈퍼코)에 대응하는 문자열은 **스파이크에서 확인(미확인)** |
+| 규칙 문자열 목록은 분석 엔진 문서에 없음(`tromp-taylor` 예시만) | 우리 규칙 둘(중국식·일본식, 위치 슈퍼코)에 대응하는 KataGo 의 규칙 이름·옵션은 **공식 문서로 확인되지 않았다 — 착수 시(S0 스파이크) 확인**(아래 규칙 매핑) |
 | CPU 초당 방문 수, 모델 파일 크기·출처 | **미확인** — S0 스파이크로 측정 |
+
+**KataGo `rules` 파라미터 매핑 (U11)** — 질의의 `rules` 는 우리 `game.rules` 에서 만든다. **KataGo 가 지원하는 규칙 이름·세부 옵션(영역/집 계가, 패 규칙, 자충, 시키 처리)은 공식 문서로 확인하지 못했으므로 모든 칸을 "착수 시 확인"으로 둔다.**
+
+| 우리 `rules` | KataGo `rules` 후보 | 상태 | 확인 전 임시 방침 |
+|---|---|---|---|
+| `chinese` | 중국식에 대응하는 이름 또는 옵션 조합 | **착수 시 확인** | 확인 못 하면 질의에 쓰는 규칙은 문서에 예시가 있는 `tromp-taylor` 로 둔다(영역 계가·위치 슈퍼코이므로 우리 중국식과 가장 가깝다고 보되 **그 대응 자체도 시험으로 확인**) |
+| `japanese` | 일본식에 대응하는 이름 또는 옵션 조합 | **착수 시 확인** | 같음. 집 계가를 못 쓰면 `tromp-taylor` 로 근사하고 **`scoreLead` 지표를 쓰지 않는다**(점수 의미가 달라진다) |
+
+- 의심도 지표(상위 일치율·승률 손실, §9.5)는 주로 정책·승률에 의존하므로 계가 방식 차이의 영향이 작을 것으로 **추정**하나 측정하지 않았다. 규칙 매핑이 근사인 경우 `analysis_result.report` 에 `rules_mapping: "exact" | "approx"` 를 기록해 임계값 보정 때 구분한다.
+- 질의에는 항상 대국에 스냅샷된 `komi` 를 명시한다(규칙 기본 덤에 맡기지 않는다). `boardXSize/YSize`·`moves`(**유효 수열**)·`rules`·`komi` 는 모두 `game` 모듈의 공개 조회 포트가 `game.rules`·`komi`·`foldMoves` 결과로 제공한다.
+- 분석 대상은 레이팅 대국뿐이고 레이팅 대국은 무르기가 없으므로 유효 수열 = 기록된 전체 수열이 정상이다. 접기 결과가 달라졌다면 불변식 위반이므로 분석을 `failed` 로 두고 경보한다.
 
 ### 9.2 구성
 
@@ -893,8 +1041,8 @@ sequenceDiagram
     L->>D: EligibilityPolicy 통과 시 reward PENDING 생성 + outbox: reward.pending_created
     T->>O: 선점 후 analysis inbox 로 전달
     W->>D: inbox 선점 (processing, claim_token), analysis_job 멱등 생성
-    W->>D: 기보(game_event → moves) 조회
-    W->>K: 질의 {moves, rules, komi, analyzeTurns, maxVisits}
+    W->>D: 기보(game_event 접기 → 유효 수열, rules, komi) 조회
+    W->>K: 질의 {moves(유효 수열), rules(매핑 §9.1), komi, analyzeTurns, maxVisits}
     K-->>W: 턴별 moveInfos / rootInfo (비동기)
     W->>W: SuspicionScorer 로 일치율 · 승률 손실 · 의심도 계산
     W->>D: tx: CompleteAnalysis — 색별 analysis_result 저장 + 색별 보상 전이 (claim_token 일치 조건, B12 쌍 #6)
@@ -937,7 +1085,7 @@ flowchart TD
 | 모델 파일 | 저장소 밖 볼륨, 출처·라이선스 확인 후 | 크기 미확인 |
 | 실패 시 대안 | ① 분석 범위 축소(중반 구간 샘플링) ② 1단계만 운영 ③ 분석 비활성(보상은 `PENDING` 유지 후 정책 유예) | ADR-036 |
 
-**S0 스파이크(Phase 2 착수 시)**: ① KataGo 바이너리(AVX2·Eigen)와 작은 신경망 두어 종을 내려받아 이 호스트에서 초당 방문 수 측정 ② 우리 규칙에 대응하는 규칙 문자열 확인 ③ 250수 대국 1단계 분석 소요 시간 ④ 메모리 상한 ⑤ 프로세스 풀 크기.
+**S0 스파이크(Phase 2 착수 시)**: ① KataGo 바이너리(AVX2·Eigen)와 작은 신경망 두어 종을 내려받아 이 호스트에서 초당 방문 수 측정 ② 우리 규칙 둘(`chinese`·`japanese`)에 대응하는 KataGo 규칙 이름·옵션 확인 ③ 250수 대국 1단계 분석 소요 시간 ④ 메모리 상한 ⑤ 프로세스 풀 크기.
 
 ### 9.7 클래스
 
@@ -964,7 +1112,7 @@ classDiagram
         +onLine(cb)
     }
     class AnalysisQueryBuilder {
-        +fromGame(events, ruleset) Query
+        +fromGame(effectiveMoves, rules, komi) Query
     }
     class SuspicionScorer {
         +score(turns, config) SuspicionReport
@@ -1042,8 +1190,9 @@ stateDiagram-v2
 
 | 조건 | 값(제안, 미확정) |
 |---|---|
-| 양측 모두 GitHub 로그인 사용자 | 필수 |
-| 레이팅(보상) 대국 선택 | 필수 |
+| 양측 모두 GitHub 로그인 사용자 | 필수(U21 이후 모든 플레이어가 로그인 사용자이므로 **방어적 중복 검사**) |
+| 레이팅(보상) 대국 선택 | 필수. 중국식·일본식 모두 대상(제안) |
+| 무르기 미사용 | `undoCount = 0` 필수(레이팅 대국은 무르기 불허라 방어적 중복) |
 | 서로 다른 계정 | 필수 |
 | 최소 수 | 30수 이상 |
 | 종료 사유 | 기권은 최소 수 이상일 때만, 시간 초과는 허용, 무효(abandoned)는 제외 |
@@ -1153,10 +1302,10 @@ classDiagram
 
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 보호 등급 |
 |---|---|---|---|
-| `challenge` | `id`, `creator_actor`, `board_size`, `ruleset`, `time_control jsonb`, `rated`, `visibility`, `invite_token_hash`, `status`, `expires_at`, `version` | `status`·`expires_at` 부분 인덱스(`open`) | actor=PSD, 설정=SYS, `invite_token_hash`=HSH |
-| `game` | `id`, `challenge_id`, `status`, `version`(= 마지막 `game_event.seq`, §4.2), `event_seq`, `position` (직렬화 text), `clock jsonb`, `turn`, `deadline_at`, `result jsonb`, `ruleset`, `rated`, `started_at`, `finished_at` | `(status, deadline_at)` 부분 인덱스(`playing`·`scoring`), `(finished_at)` | position·result=PUB(대국 내용), 나머지 SYS |
-| `game_player` | `game_id`, `color`, `actor_key`, `user_id`, `display_name`, `last_seen_at`(heartbeat·명령으로 갱신, 이탈 판정 신호 §5.6) | PK(`game_id`,`color`), `(actor_key)` | actor_key·user_id=PSD, display_name=PUB(가명 가능), last_seen_at=SYS |
-| `game_event` | `game_id`, `seq`, `type`, `payload jsonb`, `move_id`(= `Idempotency-Key`), `at`(= 서버 수신 시각 `receivedAt`, §5.9) | PK(`game_id`,`seq`), `UNIQUE (game_id, move_id)` where not null | PUB(좌표·색·시간), 추가 전용 |
+| `challenge` | `id`, `creator_actor`(로그인 사용자), `board_size`, `ruleset`(값 `chinese`·`japanese`, API 필드명 `rules`), `komi`(규칙 기본값 스냅샷), `time_control jsonb`, `rated`, `visibility`, `invite_token_hash`, `status`, `expires_at`, `version` | `status`·`expires_at` 부분 인덱스(`open`) | actor=PSD, 설정=SYS, `invite_token_hash`=HSH |
+| `game` | `id`, `challenge_id`, `status`, `version`(= 마지막 `game_event.seq`, §4.2), `event_seq`, `position` (직렬화 text), `clock jsonb`, `turn`, `deadline_at`, `result jsonb`, `ruleset`, `komi`, `rated`, `pending_undo jsonb`(요청 색·`expiresAt`·`requestSeq`, 없으면 null), `undo_count jsonb`(색별 요청 횟수), `started_at`, `finished_at` | `(status, deadline_at)` 부분 인덱스(`playing`·`scoring`), `(finished_at)` | position·result=PUB(대국 내용), 나머지 SYS |
+| `game_player` | `game_id`, `color`, `actor_key`, `user_id`(NOT NULL — 플레이어는 로그인 사용자만, U21), `display_name`, `last_seen_at`(heartbeat·명령으로 갱신, 이탈 판정 신호 §5.6) | PK(`game_id`,`color`), `(actor_key)` | actor_key·user_id=PSD, display_name=PUB, last_seen_at=SYS |
+| `game_event` | `game_id`, `seq`, `type`(무르기 이벤트 `undo_*` 포함, 로그는 추가 전용이라 무르기가 행을 지우지 않음), `payload jsonb`, `move_id`(= `Idempotency-Key`), `at`(= 서버 수신 시각 `receivedAt`, §5.9) | PK(`game_id`,`seq`), `UNIQUE (game_id, move_id)` where not null | PUB(좌표·색·시간), 추가 전용 |
 | `game_sgf` | `game_id`, `sgf text`, `created_at` | PK(`game_id`) | PUB(가명 표시 이름) |
 | `inbox_message` | M1 공통 형태(§4-5) | | M1 과 동일 |
 | `request_key` | M1 공통 | | M1 과 동일 |
@@ -1192,7 +1341,7 @@ classDiagram
 | `challenge`(만료·취소) | 7일 | M1 의 이벤트 로그 규칙과 동일 |
 | `analysis_*` | 영구(작음) | |
 | `ledger_*` | 영구 | 감사·정합성 |
-| 세션 만료 시 | `game_player.actor_key`(익명 세션)는 익명화, `user_id` 는 로그인 사용자라 유지 | ADR-008 익명화 규칙 확장 |
+| 세션 만료 시 | 플레이어는 모두 로그인 사용자라 `game_player` 에 익명 세션 행이 없다(U21). 익명 세션은 관전 구독·presence 에만 나타나고 `game` 쓰기 스키마에 저장되지 않는다. 사용자 삭제 시 `user_id` 처리는 ADR-008 | ADR-008 |
 
 ---
 
@@ -1205,8 +1354,9 @@ classDiagram
 | `challenge.created` · `challenge.cancelled` · `challenge.expired` | game | 설정, 개설자 표시 | `game-projector`(lobby_view) |
 | `game.started` | game | 대국 id, 설정, 참가자 표시, 시작 시각 | `game-projector`, **`chat`**(`chat-game-sync`: 방 개설, P4), trace-recorder |
 | `game.move_played` · `game.passed` | game | seq, 좌표/패스, 색 | `game-projector`(game_view 수 수). 실시간 push 는 outbox 가 아니라 `game_event` + `NOTIFY room_changed` 경로(§5.10) |
-| `game.resigned` · `game.timed_out` · `game.scoring_started` · `game.score_confirmed` | game | 사유, 점수 | `game-projector` |
-| **`game.finished`** | game | 결과, 수 수, 종료 사유, 규칙, **레이팅 여부, 참가자별 `userId`·로그인 여부(= 자격 판정 입력)**, 종료 시각(내부 식별은 ownerKey) | `game-projector`, **`ledger`**(`reward-settler`: `EligibilityPolicy` → reward `PENDING`), **`chat`**(`chat-game-sync`: 플레이어 방 읽기 전용·관전자 방 공개 전환), trace-recorder |
+| `game.resigned` · `game.timed_out` · `game.scoring_started` · `game.score_confirmed` | game | 사유, 점수(규칙별 내역 포함) | `game-projector` |
+| **`game.undo_requested` · `game.undo_accepted` · `game.undo_declined`** (**P0 §8.3 에 없음 — 추가 요청**) | game | `seq`, 요청/응답 색, `toPly`·`positionHash`(수락), `reason`(거절·만료·철회) | `game-projector`(`game_view` 수 수 보정). 실시간 push 는 `game_event` + `NOTIFY room_changed` 경로(§5.10), 이 이벤트는 투영용 |
+| **`game.finished`** | game | 결과, 수 수(유효 수열 기준), 종료 사유, 규칙(`chinese`·`japanese`), 덤, **무르기 횟수 `undoCount`(P0 §8.3 페이로드 추가 요청)**, **레이팅 여부, 참가자별 `userId`·로그인 여부(= 자격 판정 입력)**, 종료 시각(내부 식별은 ownerKey) | `game-projector`, **`ledger`**(`reward-settler`: `EligibilityPolicy` → reward `PENDING`), **`chat`**(`chat-game-sync`: 플레이어 방 읽기 전용·관전자 방 공개 전환), trace-recorder |
 | **`reward.pending_created`** | ledger | `gameId`, `rewards:[{rewardId,userId,color}]` | **`analysis`**(`analysis_job` 멱등 생성), trace-recorder |
 | `game.abandoned` | game | 사유 | `game-projector`, **`chat`**(`chat-game-sync`: 방 종료, P0 §8.3) |
 | `analysis.completed` · `analysis.failed` | analysis | `gameId`, 요약 지표, 색별 `verdict`(`CLEAN`·`SUSPECT`) | `game-projector`(분석 상태 표시). 보상 전이는 이벤트가 아니라 B12 #6 으로 같은 tx |
@@ -1241,13 +1391,17 @@ classDiagram
 | BD-13 | 기보 내보내기 | `GET /api/games/{id}/sgf` | P1 | |
 | BD-14 | 기보 가져오기(연습) | `POST /api/sgf/import` | P1 후반 | 상한·무시 속성 |
 | BD-15 | 대국 기록 조회 | `GET /api/games`, `/api/games/{id}` | P1 | |
-| BD-16 | 룰 엔진 패키지 | 라이브러리 | P1 | `baduk-rules`, 시험 세트·차분 퍼징 |
+| BD-16 | 룰 엔진 패키지 | 라이브러리 | P1 | `baduk-rules`(중국식·일본식 `Ruleset`), 시험 세트·차분 퍼징 |
 | BD-17 | 3D 클라이언트 | web | P1-B | R3F, 2D 폴백 |
 | BD-18 | 악용 방어(속도 제한·권한) | 가드 | P1 | §8 |
 | BD-19 | 종료 대국 보관 정리 | worker | P1 후반 | `game_event` 30일 규칙 |
 | BD-20 | 방 이벤트 원천·즉시 push(fast lane) | 명령 tx 의 `pg_notify('room_changed')` | P1 | `GameRoomEventSource`(`RoomEventSource` 구현), §5.10 |
 | BD-21 | 룸 포트 구현 | gateway 조립부 | P1 | `GameRoomPolicy` · `GameSnapshotProvider` · `GameMessageMapper`(P0 ADR-032) |
 | BD-22 | 시계 공정성(수신 시각·`lagGrace`) | 명령 usecase | P1 | §5.9, `ClockService` |
+| BD-23 | 무르기 요청 | `POST …/undo-requests` | P1 후반 | `RequestUndo`, 비레이팅만·플레이어별 3회(§4.5) |
+| BD-24 | 무르기 수락·거절·만료 | `POST …/undo-accept` · `…/undo-decline` · worker 만료 | P1 후반 | `AcceptUndo`(유효 수열 되감기, 시계 유지)·`DeclineUndo`, `TimeoutSweeper` 가 30초 만료 |
+| BD-25 | 규칙 선택(중국식·일본식)·규칙별 계가·덤 | 도전 설정 / 룰 엔진 | P1 | `Ruleset`, §3.5 |
+| BD-26 | 플레이어 로그인 가드·익명 관전 | 가드 `RequireUser` / `GameRoomPolicy` | P1 | U21, §5.1 |
 
 ### 13.2 분석 (AN)
 
@@ -1287,6 +1441,8 @@ classDiagram
 | 착수 vs 시간 초과 | 같은 deadline 근처 | `game` 행 `FOR UPDATE` + 같은 `version` CAS. 스윕은 `deadline_at + lagGrace + commitMargin` 뒤에만 선언하므로 정시 수신 착수가 이긴다(§5.5). 늦게 수신된 착수는 `game_over(timeout)` |
 | 착수 vs 기권 | 거의 동시 | 같은 CAS |
 | 도전 수락 | 둘이 동시에 수락 | `challenge` 상태 CAS(`open → matched`), 하나만 성공 |
+| 무르기 요청 vs 상대 착수 | 대기 중 상대가 착수 | `game` 행 `FOR UPDATE` + CAS. 먼저 커밋된 쪽이 이기고, 착수가 먼저면 요청은 `superseded` 로 닫히거나(요청 후) `version_conflict`(요청이 늦음) |
+| 무르기 수락 vs 만료·기권 | 30초 경계, 동시 응답 | 같은 CAS. `pending_undo` 가 이미 해제되었으면 `no_pending_request`. 만료 판정은 `expiresAt` 으로 하고 응답 경로도 수신 시각이 `expiresAt` 이후면 만료로 처리 |
 | 계가 확인 | 동시 `score.confirm` | 합의 상태(`mark_hash`)를 CAS로 갱신, 양측 확인 시 종결 |
 | 분석 선점 | 두 워커 | `analysis_job` 선점 CAS + `claim_token` 완료, 임대는 1/3 간격 토큰 조건 연장(ADR-021) |
 | 보상 전이 | 분석 완료 vs 수동 처리 | `reward.status` 조건부 UPDATE |
@@ -1310,6 +1466,9 @@ classDiagram
 | KataGo 프로세스 사망 | 분석 중단 | 임대 만료 회수, 프로세스 풀 재시작, 재시도 상한 후 `failed` |
 | 분석 장기 지연 | 보상 `PENDING` 정체 | 지표·경보(`pf_reward_pending_age_seconds`), 유예 정책(미결) |
 | 원장 불균형 | 포인트 불일치 | 점검 잡 경보, 보정 거래(수동), 코드 롤백 |
+| 무르기 후 국면 불일치(접기 vs 스냅샷) | 클라이언트·분석·SGF 가 서로 다른 수열을 봄 | `positionHash` 검증 → 스냅샷 재요청, 서버는 재생 동등성 시험(AC-BD-22)과 점검 쿼리로 `game.position` = 접기 재생을 대조 |
+| 무르기 만료 스윕 지연 | 요청이 30초 넘게 남음 | 응답 경로가 `expiresAt` 으로 만료를 재판정, 대기 중 착수는 어차피 철회로 처리 |
+| 일본식 계가 버그(시키·사석) | 점수 오판정 | 결과 불변이라 사후 수정 불가 → 규칙별 시험 세트(§3.3)·차분 퍼징(`tenuki`), 사석 합의 단계가 최종 안전장치, 시키 해석은 규정서 확인 전 보수적 정의(§3.5) |
 | 룰 엔진 버그 | 잘못된 합법/불법 판정 | 대국 결과 불변이므로 **사후 수정 불가** → 시험 세트·차분 퍼징이 방어선, 이상 판정은 감사·재생으로 조사 |
 
 ---
@@ -1327,6 +1486,8 @@ classDiagram
 | `pf_game_lag_grace_used_total` | C | — |
 | `pf_game_cas_conflicts_total` | C | `kind`(move·timeout·resign·join) |
 | `pf_game_timeouts_total` | C | `source`(sweeper·move_check) |
+| `pf_game_undo_total` | C | `outcome`(requested·accepted·declined·expired·superseded·rejected) |
+| `pf_game_finished_total` | C | `rules`(chinese·japanese) |
 | `pf_analysis_jobs` | G | `status` |
 | `pf_analysis_duration_seconds` | H | `stage`(1·2) |
 | `pf_analysis_queue_age_seconds` | G | — |
@@ -1349,7 +1510,7 @@ classDiagram
 | AC-BD-06 | 착수와 시간 초과가 동시에 일어나도 결과가 하나로 정해진다 |
 | AC-BD-07 | 서버 재시작 후에도 시간 초과가 `deadline_at` 기준으로 판정된다 |
 | AC-BD-08 | 연속 패스 후 사석 합의, 재개(상대 수락·대국당 최대 2회), 사석 불일치 연속 2회 자동 재개와 재개 뒤 카운터 초기화, 재개 상한 소진 후 불일치는 자동 재개 없이 scoring 시한(10분) 경과 시 엔진 기본 판정(`scoring_timed_out`)으로 종국하며, `resume_requested`·`resume_accepted`·`dead_marked` 가 각각 version/seq 를 소비한다 |
-| AC-BD-09 | 룰 시험 세트와 차분 퍼징에서 불일치 0(또는 판정된 예외만) |
+| AC-BD-09 | 룰 시험 세트(규칙별)와 차분 퍼징에서 불일치 0(또는 판정된 예외만) |
 | AC-BD-10 | 대국 종료 → 분석 → 보상 `CONFIRMED`/`FLAGGED` 가 end-to-end 로 동작한다(Phase 2) |
 | AC-BD-11 | 분석 워커를 강제 종료해도 임대 만료 후 다른 실행이 이어받고 결과가 한 번만 반영된다 |
 | AC-BD-12 | 같은 `game.finished` 재전달에도 보상·원장 기장이 한 번만 일어난다 |
@@ -1359,12 +1520,18 @@ classDiagram
 | AC-BD-16 | 게이트웨이는 대국 명령 인바운드를 받지 않는다(`move` 등 WS 메시지는 `room.error inbound_not_allowed`, 상태 불변) |
 | AC-BD-17 | 착수 → 상대 화면 push 도착 지연이 측정·기록되고 p95 ≤ 250ms(P0 D10)이거나 원인이 기록된다 |
 | AC-BD-18 | `receivedAt ≤ deadline_at + lagGrace` 로 수신된 착수는 스윕과 경합해도(커밋이 늦어져도) 이기고, 초과 수신은 `game_over(timeout)` 이며, 스윕은 `commitMargin` 뒤에만 선언한다 |
+| AC-BD-19 | 도전 개설 때 `rules`(중국식·일본식)를 고르고 규칙별 덤 기본값이 표시·스냅샷되며, 같은 종국 국면의 계가 결과가 서버와 클라이언트 미리보기에서 규칙별로 일치한다 |
+| AC-BD-20 | 일본식 시험 세트(영역+사로잡은 돌, 사석 가산, 시키 안 빈 점 제외, 집 안쪽 착수 1집 손실)가 통과하고 중국식 시험 세트 결과는 일본식 추가 전후로 동일하다 |
+| AC-BD-21 | 무르기: 요청 → 상대 수락 시 요청자의 마지막 착수 직전 국면으로 돌아가 차례가 요청자이고, 거절·30초 만료·대기 중 착수(철회)는 국면 불변이며, 시계는 되감기지 않는다 |
+| AC-BD-22 | 무르기 후 `game_event` 재생(접기) 결과 = `game` 스냅샷 = 관전자·재접속 `resume` 결과이고, `undo_*` 가 각각 `seq`·`version` 을 +1 소비해 `version == 마지막 seq` 를 유지하며 `seq` 가 줄지 않는다 |
+| AC-BD-23 | 레이팅 대국의 무르기 요청은 `403 undo_not_allowed`, 비레이팅 대국은 플레이어별 3회 초과 `409 undo_limit`, 대기 요청이 있으면 `409 undo_pending`, `scoring`·종료 후는 불가 |
+| AC-BD-24 | 익명 세션은 도전 개설·수락·착수·무르기 REST 에서 `403 login_required` 를 받고 `/ws/room` 에서 `room.join` 으로 공개 대국 관전만 가능하며, 로그인 후에는 같은 흐름으로 플레이할 수 있다 |
 
 ### 16.3 시험 전략
 
 | 계층 | 내용 |
 |---|---|
-| 단위(L2) | `baduk-rules` 시험 세트·속성 기반·시계 계산·상태 머신 전이표 |
+| 단위(L2) | `baduk-rules` 시험 세트(규칙별 계가·시키·패)·속성 기반(무르기 재생 동등성)·시계 계산·무르기 접기 함수·상태 머신 전이표 |
 | 차분 퍼징(L2~L3) | 직접 구현 vs `tenuki` vs `gogame.js`, 야간 |
 | 통합(L3) | 실제 Postgres: 착수 CAS·멱등·재생 동등성(이벤트 재생 결과 = 스냅샷) |
 | 카오스(L3) | 착수·시간초과 경합(결정적 대기 지점 주입), 게이트웨이 재시작, 분석 워커 강제 종료, 원장 중복 전달 |
@@ -1372,6 +1539,8 @@ classDiagram
 | 부하(L3) | 동시 N 대국(§16.4), 룸당 관전자 N, k6 REST 착수 + WS push 도착 시각 대조(`Date.now()` 기준, §5.10) |
 | 시계 공정성(L2~L3) | 가짜 시계로 `receivedAt`·`lagGrace` 경계(정확히 grace 안/밖) 속성 시험, 스윕·착수 경합 결정적 재현 |
 | 푸시 전용 불변(L3) | 게이트웨이에 `move` 인바운드를 보내도 거절·상태 불변 |
+| 무르기 경합(L3) | 요청·수락·만료·착수·기권 경합을 결정적 대기 지점으로 재현, 재생 동등성·`version == seq` 대조 |
+| 익명 가드(L3) | 익명 세션으로 모든 플레이어 명령 REST 가 `403 login_required`, 관전 구독만 성공 |
 
 ### 16.4 자원·확장 추정 (모두 **추정**)
 
@@ -1392,12 +1561,13 @@ classDiagram
 | 대상 | 변경/요청 | 이유 |
 |---|---|---|
 | `04-ws-protocol.md` | 세 번째 연결 `/ws/room` 절 추가. **"WS 는 읽기 전용" 원칙은 유지**하고 인바운드는 `hello`·`room.join`·`room.leave`·`ping`(+채팅 `typing`)만 허용 | P0 ADR-032, 채팅 ADR-045 와 정합 |
-| `03-api-contract.md` | 대국 명령·조회 엔드포인트(§5.2), 속도 제한 등급 `write.game`, 오류 코드(`illegal_move`·`not_your_turn`·`game_over`·`not_player`·`not_scoring`·`mark_mismatch`·`resume_limit`·`no_pending_request`; CAS 경합은 M1 `version_conflict` 재사용) 추가, `heartbeat`·`resume-accept` 엔드포인트 | 쓰기는 `api` 한 경로 |
+| `03-api-contract.md` | 대국 명령·조회 엔드포인트(§5.2), 속도 제한 등급 `write.game`, 오류 코드(`illegal_move`·`not_your_turn`·`game_over`·`not_player`·`not_scoring`·`mark_mismatch`·`resume_limit`·`no_pending_request`, 무르기 `undo_not_allowed`·`undo_pending`·`undo_limit`·`nothing_to_undo`·`not_playing`, 가드 `login_required`; CAS 경합은 M1 `version_conflict` 재사용) 추가, `heartbeat`·`resume-accept`·`undo-requests`·`undo-accept`·`undo-decline` 엔드포인트 | 쓰기는 `api` 한 경로 |
 | `features/14-realtime.md` | `PublicHub` 를 방별 구독자 집합이 있는 `RoomHub` 로 일반화하되 **P0 ADR-032 의 포트**(`RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper`·`RoomEventSource`) 방식을 따른다. `SendQueue`·4408·`bye` 재사용 | 팬아웃 구조 동일, 도메인 의존 역전 |
 | `ws-gateway` | **변경 없음(읽기·push 전용 유지)**. 룸 포트·`/ws/room`·`RoomHub` 는 6a 에서 이미 도입되어 있고, 여기서는 NOTIFY 채널 `room_changed` 구독과 조립부의 `GameRoomPolicy`·`RoomEventSource` 등록만 추가, DB 쓰기·명령 호출 없음 | M1 04·F14 의 읽기 전용 모델 보존 |
 | `api` | 대국 명령 라우트와 가드(`RequireParticipant`), 수신 시각 `receivedAt` 확정 미들웨어 추가 | §5.2, §5.9 |
+| P0 §8.3 이벤트 정본 | `game.undo_requested`·`game.undo_accepted`·`game.undo_declined` 추가, `game.finished` 페이로드에 `undoCount`·덤 추가 (**요청만, 이 문서가 P0 를 고치지 않는다**) | 무르기·일본식 (U11) |
 | `events` | `game.finished` 구독 레지스트리에 `ledger`·`chat` 소비자, `reward.pending_created` 에 `analysis` 소비자 등록. 전달 계층 전환(Streams)은 **P0 D4: Phase 3 에서 판정**하므로 Phase 2 의 분석 큐는 **Postgres inbox 선점**이다(§2.2·§9 는 이에 맞춰 조정 완료) | 분석 큐 |
-| `identity` | **변경 불필요**: 자격 판정은 `ledger` 의 `EligibilityPolicy` 가 `game.finished` 페이로드(로그인 여부 포함)로 한다 | §10.3 |
+| `identity` | **변경 불필요**(세션의 로그인 여부는 기존 속성): 플레이어 명령 가드 `RequireUser`(`login_required`)는 `api` 쪽에 둔다. 자격 판정은 `ledger` 의 `EligibilityPolicy` 가 `game.finished` 페이로드(로그인 여부 포함)로 한다 | §10.3 |
 | `database-schema.md` §1 예외 목록 | `game_event`(쓰기 스키마)를 `ws-gateway`·`SyncGame`·`events` 조회가 읽는 **CQRS 예외 X1** 등재(P0 §2.4) | §5.6 |
 | `database-schema.md` §11 | 본 문서 §11 의 핵심 테이블 반영 | Phase 윤곽 동기 |
 | `architecture.md` §12 | Phase 1~2 행 갱신(`/ws/room`, `game_event` 로그, `analysis` 모듈) | |
@@ -1414,10 +1584,10 @@ classDiagram
 
 | 순서 | 작업 | 완료 기준 | 위험 |
 |---|---|---|---|
-| 1 | `baduk-rules` 패키지 + 시험 세트 + 차분 퍼징 | AC-BD-09 | 규칙 해석 오류 → 시험이 방어선 |
-| 2 | `game` 모듈: 도전·대국·**REST 명령 라우트**·착수·CAS·`game_event`·`pg_notify room_changed` | AC-BD-01·02·05·06 | 핫 행 경합 지표 |
+| 1 | `baduk-rules` 패키지(중국식 → 일본식 순) + 시험 세트 + 차분 퍼징 | AC-BD-09·19·20 | 규칙 해석 오류(특히 일본식 시키·사석) → 시험이 방어선 |
+| 2 | `game` 모듈: 도전·대국·**REST 명령 라우트**(로그인 가드)·착수·CAS·`game_event`·`pg_notify room_changed` | AC-BD-01·02·05·06·24 | 핫 행 경합 지표 |
 | 3 | `/ws/room` 에 **대국 룸 추가**(룸 포트·허브·재개는 6a 에서 이미 존재): `GameRoomPolicy` + `RoomEventSource` + `room.join`(game)/event/clock | AC-BD-03·04·07·16 | P0 ADR-032 와의 정합, 연결 수 |
-| 4 | 시간 제어·`TimeoutSweeper`·종국·계가 합의 | AC-BD-06·08 | 지연 허용치 미결 |
+| 4 | 시간 제어·`TimeoutSweeper`·종국·계가 합의·**무르기(접기 함수·이벤트·만료)** | AC-BD-06·08·21~23 | 지연 허용치 미결, 무르기-재생 동등성 |
 | 5 | 로비·`game_read` 투영·SGF | | |
 | 6 | 3D 클라이언트(R3F) + 2D 폴백 | Phase 1-B DoD | 번들·성능 예산 |
 | 7 | 악용 방어·속도 제한·관측 + 지연 측정(§5.10) + `lagGrace` 시험 | AC-BD-15·17·18 | 지연 예산 초과 시 원인 분리 |
@@ -1439,13 +1609,17 @@ classDiagram
 | ~~대국 방 presence 소유(P1 vs chat)~~ | **닫힘(2026-11-04)** | `realtime` 모듈이 소유(P0 D19, §6.9), `game` 은 읽기 포트만 |
 | 이탈 grace(`abandoned`)와 heartbeat 주기 | 구현 시 | 제안 grace 5분, heartbeat 20초 (S3) |
 | `commitMargin`(7초)·scoring 시한(10분)·재개 횟수(2회) 값 | Phase 1 시험 후 | 제안 (S2·S9) |
-| 일본식(집 계가) 규칙 추가 여부 | Phase 1 후반 | `Ruleset` 전략으로 가능 |
+| ~~일본식(집 계가) 규칙 추가 여부~~ | **닫힘(2026-11-05, U11)** | 중국식 + 일본식 둘 다 제공(§3.5) |
+| 일본식 덤 기본값(6.5)·9·13 판 덤 | 구현 시 | 6.5 는 제안(공식 규정 미확인), 9·13 판 미확인 |
+| 일본식 시키(한 눈 시키·다중 그룹) 정의, 재개 중 수의 감점 처리, 3패·장생 무승부 미구현 고지 | 일본식 구현 착수 시 | 규정서 확인(미확인), §3.5 |
+| 무르기 값(플레이어별 3회·응답 30초)과 "요청자의 마지막 착수 직전" 범위 | Phase 1 시험 후 | 제안 (§4.5) |
+| 레이팅 대국의 무르기 불허 | 레이팅 시스템 도입 시 재검토 | 제안: 불허 (§4.5) |
 | 레이팅 시스템(Glicko 등) | Phase 1 이후 | 범위 밖 |
 | ~~분석 임대 연장(heartbeat) 예외~~ | **닫힘(2026-11-04)** | ADR-021 이 토큰 조건 연장을 허용하므로 예외가 아님(S8). 연장 간격 = 임대/3 |
 | 보상 유예 경과 전이 허용 | Phase 2 | ADR-009 미결 |
-| KataGo 규칙 문자열·모델·성능 | Phase 2 스파이크 | 미확인 |
+| KataGo 규칙 이름·옵션(중국식·일본식 대응)·모델·성능 | Phase 2 스파이크(착수 시 확인) | 미확인, §9.1 |
 | 공개 SGF 코퍼스 선정·라이선스 | Phase 1 시험 설계 시 | 미확인 |
 | 9·13 판의 덤 | 구현 시 | 미확인 |
-| 대국 중 `undo` 요청 | 후속 | 현재 범위 밖(이벤트 로그 추가 전용과 충돌 → 보상 이벤트로 설계 필요) |
+| ~~대국 중 `undo` 요청~~ | **닫힘(2026-11-05, U11)** | 상대 동의 + 새 이벤트(`undo_*`)로 표현, 로그는 추가 전용 유지(§4.5) |
 
 신규 ADR(모두 **Proposed**, 사용자 확정 대기): [ADR-034](../../adr/ADR-034-baduk-rules-engine.md) 룰 엔진 · [ADR-035](../../adr/ADR-035-game-state-and-realtime-protocol.md) 대국 상태·프로토콜 · [ADR-036](../../adr/ADR-036-katago-analysis-worker.md) KataGo 워커 · [ADR-037](../../adr/ADR-037-simulated-points-ledger.md) 포인트 원장.

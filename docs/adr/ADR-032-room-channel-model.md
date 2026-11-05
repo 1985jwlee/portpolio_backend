@@ -1,5 +1,5 @@
 # ADR-032: 룸 실시간 채널 — `/ws/room` 세 번째 연결, push 전용, 도메인이 정책을 등록
-- 상태: **Proposed** (사용자 확정 대기)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1)
 - 날짜: 2026-11-04
 - 근거: 사용자 결정(public/private 분리 연결) / ADR-018(CQRS, WS push) / ADR-014(재접속) / M1 04·F14 / M1 G1·G2 실측
 - 관련 문서: [phases/00 §6](../design/phases/00-platform-evolution.md), [design/04](../design/04-ws-protocol.md)

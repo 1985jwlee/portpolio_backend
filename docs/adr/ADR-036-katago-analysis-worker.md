@@ -1,5 +1,5 @@
 # ADR-036: KataGo 분석 워커 — 별도 프로세스, 2단계 분석, 선점·임대 큐
-- 상태: **Proposed** (사용자 확정 대기)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1)
 - 날짜: 2026-11-04
 - 근거: ADR-009(사후 분석)·006(전달 계층)·021(선점·임대)·024(Redis 이음새)·023(백오프) / KataGo 공식 문서 조사(2026-11-04)
 - 구현 순서(P0 D24): Phase 2 — Phase 1 다음. 선행: Phase 1(`game.finished`), Phase 3(`ledger`). KataGo 실행 가능성 스파이크는 Phase 1 착수 전에 앞당겨 실행하는 것을 제안한다(P0 §1.4 G14).
@@ -15,8 +15,9 @@
 2. **큐는 Postgres inbox 선점(DB 큐)이다**(P0 D4·D6·D23, [ADR-031](ADR-031-event-transport-streams.md)). 소비 순서는 **의존 체인**이다: `game.finished` → `ledger` 의 `reward-settler` 가 `EligibilityPolicy`(ledger 소유)로 자격을 판정해 통과하면 reward `PENDING` 을 만들고 `reward.pending_created {gameId, rewards[{rewardId,userId,color}]}` 를 발행 → **`analysis` 의 소비자가 이 이벤트로 `analysis_job`(`UNIQUE (game_id)`)을 멱등 생성**한다. 자격 미달 대국은 보상이 없으므로 분석하지 않고, 분석 작업은 reward 행이 이미 존재할 때만 생기므로 "분석이 보상보다 먼저 끝나는" 순서 의존이 없다. `game.review.requested` 는 폐기(ADR-009 개정).
 3. **분석은 트랜잭션 밖**에서: 선점(`processing`, `claim_token`, `lease_until`) → 분석 → 토큰 일치 조건으로 **색별 결과 저장 + 색별 보상 전이를 한 트랜잭션**에서 한다. 판정 단위는 **색(참가자)** 이다 — `analysis_result` 는 `(game_id, color)`, 보상은 자기 색의 판정으로 `ledger.ConfirmRewardInTx`/`FlagRewardInTx`(**`rewardId` 키**, B12 허용 쌍 #6, `analysis`→`ledger`)를 호출한다. 분석이 길어 **임대는 토큰 조건으로 연장**한다(ADR-021 의 적용이며 ADR-023 의 예외가 아니다): 연장 간격은 임대의 1/3, ADR-023 의 "임대 ≥ p99×10, 핸들러 제한시간 ≤ 임대/2" 는 연장 간격과 한 번의 연장 단위에 적용하고 총 분석 시간에는 적용하지 않는다. 2단계 후에도 `INCONCLUSIVE` 이면 `CLEAN` 취급으로 `CONFIRMED`(감사·지표 기록).
 4. **2단계 분석**: 1단계 정책 일치율(전 수 `maxVisits` 매우 작게, 신경망 한 번 평가) → 의심 구간만 2단계(방문 수 확대). 비용을 줄이고 CPU 에서도 현실적으로 만든다. 방문 수·분석 수 범위는 스파이크 후 결정(미확인).
+4a. **`rules` 파라미터 (U11)**: 대국 규칙이 중국식·일본식 둘이 되었으므로 질의의 `rules` 는 대국에 스냅샷된 `rules`·`komi` 에서 만든다. **KataGo 가 지원하는 규칙 이름·옵션은 공식 문서로 확인하지 못했다 — 착수 시(S0 스파이크) 확인한다**(문서에 예시가 있는 것은 `tromp-taylor` 뿐). 확인 전 임시 방침은 `tromp-taylor` 근사 + `scoreLead` 지표 미사용이고 `analysis_result.report.rules_mapping`(`exact`/`approx`)에 기록한다. 질의 `moves` 는 항상 `game_event` 를 접은 **유효 수열**이다(분석은 레이팅 대국만 하고 레이팅 대국은 무르기 불허이므로 정상 시 전체 수열과 같고, 달라지면 불변식 위반으로 `failed`). 매핑 표는 [phases/01 §9.1](../design/phases/01-baduk.md).
 5. **의심도**는 일치율·승률 손실 분포 등 여러 지표로 계산하고, 임계값은 실제 데이터로 보정하기 전까지 **자동 박탈 없음** — `FLAGGED` 까지만(ADR-009).
-6. **자원 상한**: 워커 컨테이너 CPU 코어·메모리 제한을 두고, 분석은 대국 종료 후 큐 순서대로 **하나씩(동시 1, ADR-033 정본; 스파이크에서 CPU 여유가 확인되면 2 로 상향 검토)**. 메모리 한도는 P0 자원 추정(0.5–3GiB, 가정 1.5GiB)과 S0 스파이크 결과로 확정한다(잠정 2GB 는 OOM 여지가 있음). 분석 워커의 DB 권한은 `analysis` 스키마와 B12 쌍 #6 을 통한 `ledger` 전이에 한정하고, 이미지는 서버 래퍼 이미지와 분리된 `pf-analysis` 다. 실패·지연은 보상 `PENDING` 유지(자동 확정 유예는 두지 않음).
+6. **자원 상한**: 워커는 **라이브 호스트에서 CPU 저우선순위로, 코어 2~3개로 제한**해 돌린다(U12 확정 2026-11-05; 집 서버는 구형 Xeon 이라 Phase 2 스파이크에서 재측정). 워커 컨테이너 CPU 코어·메모리 제한을 두고, 분석은 대국 종료 후 큐 순서대로 **하나씩(동시 1, ADR-033 정본; 스파이크에서 CPU 여유가 확인되면 2 로 상향 검토)**. 메모리 한도는 P0 자원 추정(0.5–3GiB, 가정 1.5GiB)과 S0 스파이크 결과로 확정한다(잠정 2GB 는 OOM 여지가 있음). 분석 워커의 DB 권한은 `analysis` 스키마와 B12 쌍 #6 을 통한 `ledger` 전이에 한정하고, 이미지는 서버 래퍼 이미지와 분리된 `pf-analysis` 다. 실패·지연은 보상 `PENDING` 유지(자동 확정 유예는 두지 않음).
 
 ## 설계 상세
 모듈 이름은 `analysis`(P0 §2.1)다. 초기 초안의 `review` 모듈·`review.requested` 이벤트·`review.completed/failed` 는 각각 `analysis`·(없음)·`analysis.completed/failed` 로 통일했다.
@@ -50,7 +51,7 @@ S0 스파이크: 후보 신경망별 초당 방문 수, 250수 대국 정책 일
 GPU 분석 풀과 분석 결과 캐시, 모델 버전 관리, 이의 제기 절차를 둔다.
 
 ## 재검토 조건
-스파이크에서 CPU 분석이 비현실적일 때(분석 범위 축소 또는 외부 GPU 옵션). 임계값 보정 데이터가 쌓였을 때.
+KataGo 규칙 매핑이 근사(`approx`)로만 가능해 의심도 지표가 규칙별로 크게 흔들릴 때. 스파이크에서 CPU 분석이 비현실적일 때(분석 범위 축소 또는 외부 GPU 옵션). 임계값 보정 데이터가 쌓였을 때.
 
 ## 관련 ADR
 ADR-006, ADR-009, ADR-020, ADR-021, ADR-023, ADR-024, ADR-035, ADR-037

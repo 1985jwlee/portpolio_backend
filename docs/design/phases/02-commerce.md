@@ -475,6 +475,7 @@ stateDiagram-v2
     shipped --> return_requested: shipment.delivery_failed 후 반송(RETURNED_TO_SENDER)
     return_requested --> refunded: return.inspected (REJECTED 가 아닌 환불 판정)
     return_requested --> delivered: return.inspected REJECTED (반품 거절, 에스크로 frozen→held 재개)
+    return_requested --> delivered: 부분 교환·반품 환불 완료 (잔여 줄 있음, 잔여 다리로 frozen→held 재개, §5.5)
     paid --> disputed: 분쟁 제기
     shipped --> disputed: 분쟁 제기
     delivered --> disputed: 분쟁 제기
@@ -494,6 +495,7 @@ stateDiagram-v2
 | 외부 주도 전이 | `fulfilling`/`shipped`/`delivered`/`return_requested` 의 후속은 풀필먼트 이벤트의 inbox 소비로만 일어난다(주문이 풀필먼트를 직접 호출하지 않는다) |
 | `fulfilling → cancelled` | `fulfillment.accepted` 는 AcceptOrder 단일 tx 가 접수(+할당 시도)를 끝낸 뒤 발행되고 페이로드에 `allocation(FULL\|PARTIAL\|PENDING)`·`lines[{lineId, qtyAllocated}]` 를 싣는다(P3 판본이 정본, `PENDING` 은 접수 후 할당 대기). 주문이 `fulfilling` 이 된 뒤에도 PICKING 중 취소 등으로 `fulfillment.cancelled`·`rejected` 가 올 수 있다. 이 전이를 허용 표에 둔다(없으면 상태 머신이 막힌다). 출고(PACKED 이후)는 취소가 아니라 반품 경로 |
 | 반품 | `delivered` 후 **반품 가능 기한 5일**(`RETURN_WINDOW_DAYS`, 제안) 안에서만 `order.return_requested`; **5일을 넘긴 요청은 `409 return_window_closed` 로 거절**한다. 기한은 에스크로 자동 해제(7일)보다 **짧게** 두어 반품 요청이 해제 전에 도달하도록 한다(§7.2). 요청 시 에스크로 해제를 동결(`held→frozen`)한다(§7.1). 검수 결과 `return.inspected{disposition ∈ RESTOCK\|DISPOSE\|REFUND_ONLY\|REJECTED}` 중 `REJECTED` 는 환불 없이 `return_requested → delivered` 로 되돌리고 에스크로를 `frozen→held` 로 재개하며, 같은 주문의 **반품 재요청은 막는다**. `demo` 주문(§5.2.1)에는 반품 경로가 없다 |
+| 교환 | 반품 기한(5일) 안에서 반품 요청에 **교환 의사**를 실을 수 있다(U23). 교환은 새 주문 상태가 아니라 **반품 케이스 + `exchange_of_order_id` 로 연결된 신규 주문**이며, 원 주문은 반품과 같은 `return_requested` 경로를 탄다. 흐름·가격차·순서는 §5.5. `demo` 주문에는 교환 경로가 없다 |
 | 환불 후속 | `cancelled`·`return_requested`(`REJECTED` 가 아닌 환불 판정)의 환불은 `payment-fulfillment-refunder`(§6.6)가 근거 이벤트를 소비해 수행한다. 주문 상태는 `payment.refunded` 소비로 `refunded` 가 된다 |
 | 이벤트 역전 | 늦게 온 이벤트가 이미 지나간 상태로 되돌리지 못한다. 상태 순위(rank)가 낮아지는 전이는 `NOOP` 으로 흡수한다 |
 
@@ -527,6 +529,132 @@ stateDiagram-v2
 - 풀필먼트에는 주소 원문이 아니라 **`shippingAddressRef`(불투명 참조 `<orderId>:<addressRev>`, 정정 시 rev 증가)** 만 전달하고, 풀필먼트가 **접수(AcceptOrder) 시점에** `order.GetShippingAddress` 공개 usecase 를 호출한다(풀필먼트는 자기 키로 다시 암호화한 사본을 둔다, [P0 §9.6](00-platform-evolution.md))(관리자·워커 권한, 감사 `system.shipping_address_read` 기록).
 - ADR-026 의 재검토 조건("암호화 필드 3개 이상이면 KEK/DEK 로 상향")에 **이 필드와 `escrow_dispute.reason_enc`, `payment.provider_payment_key_enc` 가 더해져** 필드가 4개가 된다. Phase 5 착수 시 KEK/DEK 상향을 결정한다(미결, §20).
 - 보관: `physical` 주문은 **배송 완료 + 반품 기한 5일 + 30일**(취소는 취소 후 30일), `demo` 주문은 **종결(수령 확인/`MarkDelivered`) 후 30일** 지나면 주소를 익명화(암호문 삭제)한다(제안, 모의 데이터라도 정책을 시연). 주문 자체는 보관(금융 기록).
+
+### 5.5 상품 교환 (U23) — 반품 케이스 + 연결된 신규 주문
+
+> **용어.** 이 문서에서 "교환"은 이미 §8.2.1~8.2.2 의 **USDC→POINT 화폐 교환**(`ExchangeUsdcToPoint`, ST-15)을 뜻한다. 이 절의 **상품 교환**(구매한 상품을 다른 상품·옵션으로 바꾸는 것)은 이름이 겹치지 않게 `Exchange` 접두 대신 **`order_exchange`·`RequestExchange`** 로 쓰고, API 도 `/api/orders/{id}/exchanges` 로 분리한다. 화폐 교환의 견적·속도 제한 등급(`write.exchange`)과 무관하다.
+>
+> **결정 이력.** 처음 설계는 "반품 후 재주문"(교환을 반품 + 구매자의 새 주문으로 단순화)이었으나 사용자가 **교환 흐름 구현**을 선택했다(2026-11-05, U23 — 권장안과 다르게 사용자가 변경). 아래는 그 확장 설계이며 값(기한·등급)은 제안이다.
+
+#### 5.5.1 모델
+
+| 항목 | 내용 |
+|---|---|
+| 연결 | 신규 주문 `order.exchange_of_order_id`(NULL 이면 일반 주문) = 원 주문. 교환 한 건은 `order_exchange` 행(§10.3)이 원 주문·신규 주문·`returnId` 를 묶는다 |
+| 대상 | 원 주문의 **줄·수량 단위**(부분 교환 가능). 같은 줄에 대한 반품·교환 총량은 `order_line.qty_returned + 요청 ≤ qty` 조건부 UPDATE 로 막는다(동시 이중 요청 방지) |
+| 신규 주문 줄 | 카탈로그 정가의 일반 SKU 만. **타임딜 줄은 허용하지 않는다**(딜 재고 `confirmed`·개인 한도(I1)를 다시 거치는 경로를 만들지 않으려는 범위 한정, 제안) → `409 exchange_not_allowed`. 신규 주문은 `deal_id` 와 `reservation_id` 가 NULL 이다(`UNIQUE(reservation_id)` 는 NULL 을 허용) |
+| 재고 | 상거래의 Redis 게이트를 거치지 않는다. 요청 시 P3 의 읽기 usecase `CheckExchangeAvailability`(ATP 조회, 확약 아님)로 사전 확인하고, 실제 확보는 신규 주문의 `order.paid` 를 받은 풀필먼트의 `AcceptOrder` 할당이 한다(§5.5.5). 사전 확인에서 부족하면 `409 exchange_stock_unavailable` |
+| 가격차 | `price_diff_krw = 신규 주문 총액 − 반품 줄 환불 대상 금액`(양수 = 구매자 추가 부담, 음수 = 구매자 환급). **표시·영수증용 값**이고 별도 정산 분개를 만들지 않는다(§5.5.3) |
+| 기한 | 요청은 반품 기한(`RETURN_WINDOW_DAYS`=5일) 안, 구매자의 반품 발송은 요청 후 `EXCHANGE_RETURN_SHIP_DAYS`(7일, 제안) 안, 신규 주문 결제는 일반 결제 TTL(§6.7) 안 |
+
+#### 5.5.2 교환 상태 (`order_exchange.status`)
+
+```mermaid
+stateDiagram-v2
+    [*] --> awaiting_payment: RequestExchange (원 주문 return_requested + 에스크로 frozen + 신규 주문 pending_payment)
+    awaiting_payment --> awaiting_return: 신규 주문 paid (신규 에스크로 held)
+    awaiting_payment --> cancelled: 결제 만료·구매자 취소
+    awaiting_return --> inspecting: return.received
+    awaiting_return --> cancelled: 발송 기한 초과·구매자 취소·fulfillment.rejected(신규 주문)
+    inspecting --> completed: return.inspected 환불 판정 (RESTOCK·DISPOSE·REFUND_ONLY) 환불 완료
+    inspecting --> cancelled: return.inspected REJECTED (신규 주문 취소·환불)
+    cancelled --> [*]
+    completed --> [*]
+```
+
+- 전이는 모두 `status`·`version` 조건부 UPDATE 다. `cancelled` 의 원인은 `cancel_reason`(`PAYMENT_EXPIRED`·`BUYER`·`SHIP_TIMEOUT`·`STOCK`·`INSPECTION_REJECTED`)에 기록한다.
+- `cancelled` 가 되면 **원 주문은 반품 거절과 같은 방식으로 복귀**한다: 에스크로 `frozen→held`(`release_due_at = now + 1일`, 제안), 주문 `return_requested→delivered`. 신규 주문이 이미 `paid` 였다면 취소·환불 경로(§6.6, 출고 전이므로 `fulfillment.cancelled`)를 탄다. 이미 반품 입고(`return.received`) 후에 `cancelled` 가 되는 경우는 `INSPECTION_REJECTED` 뿐이다.
+- 교환은 한 번 `cancelled` 가 되면 **같은 줄에 대해 새 교환을 열 수 없다**(`REJECTED` 의 "반품 재요청 금지"와 같은 규칙, 단 `PAYMENT_EXPIRED`·`BUYER`·`STOCK` 사유는 기한 안이면 다시 요청할 수 있다).
+
+#### 5.5.3 에스크로·원장 순서와 가격차 정산
+
+신규 주문은 **전액을 독립 결제**하고, 원 주문의 반품 줄은 **별도 환불**한다. 두 흐름은 서로 다른 트랜잭션이며 **어떤 트랜잭션도 두 에스크로를 동시에 잠그지 않는다**. 가격차는 이 둘의 순 효과로 나타난다.
+
+```mermaid
+sequenceDiagram
+    participant B as 구매자
+    participant O as order
+    participant E1 as 원 주문 escrow
+    participant N as 신규 주문 payment/escrow
+    participant F as fulfillment
+    participant RF as payment-fulfillment-refunder
+    B->>O: POST /api/orders/{id}/exchanges (Idempotency-Key, 반품 줄, 신규 줄)
+    O->>O: tx1: 반품 줄 qty_returned 가산 + order_exchange(awaiting_payment) + 신규 주문 pending_payment + outbox order.return_requested{resolution:EXCHANGE}
+    O-->>E1: escrow-order-reactor: held→frozen (해제 타이머 정지)
+    O-->>F: OpenReturn (교환 연결)
+    B->>N: 신규 주문 결제 (ConfirmPurchase, 전액)
+    N->>N: tx2: payment → escrow(신규 held) → ledger 계정 (§4.7 락 순서)
+    N-->>F: order.paid{exchangeOfOrderId, releaseGate:RETURN_INSPECTED} → AcceptOrder (할당만, 출고 대기)
+    B->>F: 반품 발송 → 작업자 ReceiveReturn · InspectReturn
+    F-->>RF: return.inspected{disposition, lines}
+    alt 환불 판정 (RESTOCK · DISPOSE · REFUND_ONLY)
+        RF->>RF: tx3: 원 payment 환불 F (다리별 §6.6.1) → 원 escrow 감액 → 원장 역분개 (payment → escrow → ledger 계정)
+        F->>F: 신규 FO 출고 게이트 해제 → 웨이브 대상
+        O->>O: order_exchange completed, order.exchange_completed
+    else REJECTED
+        F-->>O: return.inspected REJECTED
+        O->>O: order_exchange cancelled(INSPECTION_REJECTED) → 신규 주문 취소·환불 (tx4, 출고 전)
+        O-->>E1: frozen→held (해제 재개)
+    end
+```
+
+| 단계 | 원 주문 에스크로 | 신규 주문 | 락·트랜잭션 |
+|---|---|---|---|
+| 요청 | `held→frozen`(`frozen_reason='return'`, 기존 반품 동결 그대로) | `pending_payment` 생성 | tx1 은 `order`·`order_exchange` 만, 에스크로 변경은 inbox 소비자(별 tx) |
+| 신규 결제 | 변화 없음 | 결제 승인과 같은 tx 에서 `held` 생성(§4.7) | 신규 결제의 전역 락 순서 `reservation`(없음) → `payment` → `escrow` → 계정 id 오름차순. **원 에스크로를 잡지 않는다** |
+| 검수 환불 | 환불 대상 줄 금액 F 만큼 다리별 감액. 전량이면 `frozen→refunded`, **부분이면 `escrow_leg.refunded_amount` 증가 후 `frozen→held`**(잔여 다리로 해제 재개) | 출고 게이트 해제 | 환불 tx3: `payment → escrow → ledger 계정`(§6.6). 신규 주문 행을 건드리지 않는다 |
+| 정산 | 잔여 다리 `amount − refunded_amount` 로 §8.5.1 그대로(교환이 새 정산 규칙을 만들지 않는다) | 독립 에스크로·독립 정산 | 서로 다른 `escrow_id` 의 `settlement` |
+
+- **가격차 의미.** 신규 > 원(`price_diff_krw > 0`): 구매자는 신규 전액을 먼저 내고 원 환불액 F 를 나중에 돌려받아 **순 차액을 부담**한다. 신규 < 원(`< 0`): 같은 방식으로 **순 차액이 환불**된다. 환불은 원 결제의 자산·다리로 돌아가고(§6.6.1) 신규 결제는 구매자가 새로 고른 수단을 쓰므로 두 흐름의 자산이 다를 수 있다 — 그래서 합산 분개를 만들지 않고 각자 자기 분개를 가진다.
+- **부분 환불 잔여 다리와의 관계.** 교환이 부분(일부 줄)이면 원 에스크로의 일부 다리만 줄어들고, 이후 해제 시 정산 입력이 `amount − refunded_amount`(§8.5.1, 누적 비례 환불 §6.6.1)이므로 `r ≥ 0`·`net+fee+dust=gross` 항등식이 그대로 성립한다. 속성 시험(AC-C34)에 "교환 환불 후 정산" 시퀀스를 추가한다(AC-C42).
+- **위험 1 — 자금 일시 이중 점유.** 신규 결제가 환불보다 먼저이므로 구매자는 일시적으로 N + (원 대금)을 묶어 둔다. 잔액이 모자라면 포인트·USDC 부족으로 신규 결제가 실패한다(`awaiting_payment` 에서 `PAYMENT_EXPIRED`). 화면은 "필요 금액 = 신규 총액(환불은 검수 후)"을 명시한다. 원 에스크로 잔여분을 신규 에스크로로 직접 이월하는 방식은 서로 다른 `escrow_leg` 자산 구성·락 순서(두 에스크로 동시 잠금)를 요구해 **채택하지 않았다**(미결, §20.4).
+- **위험 2 — 출고 게이트의 지연.** 신규 상품은 `return.inspected` 환불 판정 뒤에야 출고된다(반품이 불량·미도착이면 신규 출고 후 회수가 불가능하므로 보수적으로 둔다). 대신 교환 소요 시간이 길어진다. 입고(`return.received`) 시점 출고로 줄이는 안은 `REJECTED` 시 회수 불가 손실을 감수해야 해서 보류(미결).
+- **멱등.** 요청은 `Idempotency-Key` 필수. 환불 키는 기존 규칙 `refund:<paymentId>:<eventId>:<asset>`, 교환 완료·취소 전이는 `return.inspected` 의 inbox 중복 제거와 `order_exchange.version` CAS 로 한 번만 일어난다.
+
+#### 5.5.4 이벤트 (이름과 필드 — P0 §8.3 반영 요청 대상)
+
+| 이벤트 | 변경 | 소비자 |
+|---|---|---|
+| `order.return_requested` | 필드 추가: `resolution ∈ {REFUND, EXCHANGE}`, `exchangeId`, `newOrderId`(교환일 때) | 풀필먼트(`OpenReturn` 에 교환 연결), `escrow-order-reactor`(기존 동결 그대로) |
+| `order.paid` | 필드 추가: `exchangeOfOrderId`(NULL 허용), `releaseGate`(`{type:'RETURN_INSPECTED', returnId}`, 교환 신규 주문만) | 풀필먼트(할당 후 출고 게이트 설정) |
+| `return.inspected` | 필드 추가: `lines[{lineId, qty}]`(환불 대상 줄·수량, 부분 환불 금액 계산), `exchangeId`(NULL 허용) | `payment-fulfillment-refunder`(줄 단위 금액 F), `escrow-order-reactor`(부분이면 `frozen→held`), order |
+| `shipment.delivered` · `shipment.dispatched` | 필드 추가: `shipmentSeq`, `allDelivered`(분할 배송에서 마지막 배송 완료일 때만 true) — §5.5.6 | order(주문 `delivered` 전이·에스크로 기한은 `allDelivered=true` 에서만) |
+| **신규 `order.exchange_completed`** | 교환 완료(환불 + 게이트 해제 후) | 알림·프로젝터 |
+| **신규 `order.exchange_cancelled`** | `reason`(위 `cancel_reason`) | `escrow-order-reactor`(원 에스크로 `frozen→held` 재개), 풀필먼트(`order.cancel_requested` 가 별도로 신규 주문 취소를 이끎), 알림 |
+
+`return.exchange_requested` 는 두지 않는다 — 요청은 `order.return_requested` 의 `resolution` 필드로 충분하고 이벤트를 늘리면 풀필먼트·에스크로 소비자가 둘로 갈린다.
+
+#### 5.5.5 재고 약정·할당 영향 (P3)
+
+- 신규 주문의 할당은 일반 주문과 같은 `AcceptOrder`(단일 tx, `AllocateInTx`) 이다. **약정(earmark)을 소비하지 않는다**(타임딜 줄이 없으므로) — `sku_position.allocated_total` 만 오른다.
+- 출고 게이트 동안 할당은 **유지**된다(재고를 잡아 둔다). 게이트는 최대 `EXCHANGE_RETURN_SHIP_DAYS` + 검수 시간이며, 그 뒤 `cancelled` 면 `ReleaseAllocationInTx` 로 풀린다. 오래 잡는 비용은 `pf_exchange_gate_age_seconds`(§18.1)로 본다.
+- 반품 상품이 `RESTOCK` 이면 반품 SKU 의 `available_total` 이 늘어나며(AC-WM-09), 교환 신규 SKU 의 할당과 **독립**이다(같은 SKU 교환이면 순증감 0이어도 두 사건은 각자 원장 이동이다).
+- 할당이 실패하면(`fulfillment.rejected(OUT_OF_STOCK)`) 신규 주문은 환불되고 교환은 `cancelled(STOCK)`, 원 주문은 `frozen→held` 로 복귀하며 구매자는 같은 기한 안이면 환불형 반품으로 다시 요청할 수 있다.
+
+#### 5.5.6 분할 배송의 구매자 노출 (UI 계약)
+
+`ALLOW_PARTIAL` 정책에서 한 주문이 여러 `shipment` 로 나뉘어도 **주문 상태는 하나**로 유지하고(§5.2), 구매자 화면은 부분 배송을 다음 계약으로 보여 준다. 정본 데이터는 P3 `fulfillment_read.tracking_view` 이고 P2 의 주문 상세 라우트가 합성한다(풀필먼트는 구매자 API 를 열지 않는다).
+
+| 필드(`GET /api/orders/{id}` 응답에 추가) | 의미 |
+|---|---|
+| `fulfillment.allocation` | `FULL`·`PARTIAL`·`PENDING`(풀필먼트 `accepted` 의 값 그대로) |
+| `fulfillment.shipments[]` | `{shipmentSeq, status(dispatched·in_transit·delivered·delivery_failed), carrier, trackingNoMasked, lines:[{lineId, qty}], dispatchedAt, deliveredAt}` |
+| `fulfillment.shippedQty` · `fulfillment.totalQty` | 합계(화면의 "부분 배송 1/2"), 대기 중인 줄은 `pendingLines[{lineId, qty}]` |
+| `fulfillment.allDelivered` | 모든 배송이 완료됐는지(반품 가능 기한·자동 확정 기산 기준) |
+
+- **주문 상태 의미**: 첫 `shipment.dispatched` 에 `shipped`, `allDelivered=true` 인 `shipment.delivered` 에 `delivered` 가 된다. 일부만 배송 완료된 동안은 `shipped` 이며 **에스크로 `release_due_at` 도 마지막 배송 완료 기준**으로 설정한다(`shipment.delivered` 하나로 전체 타이머가 시작되는 일을 막는다).
+- 반품·교환 기한(5일)은 `allDelivered` 시각부터 센다(먼저 받은 상품은 구매자에게 유리하게 더 오래 열려 있다. 단순함을 우선한 제안). 줄 단위 반품은 이미 배송 완료된 줄만 선택할 수 있고, 배송 중·대기 줄은 취소 경로(`order.cancel_requested`, 판정표 P3 §5.4)로 간다.
+- 구매자 화면은 배송 N건 타임라인(건별 택배 상태)과 "남은 상품은 입고 후 발송됩니다" 안내를 보여 준다(백오더 `PENDING` 줄). 택배는 모의라 운송장은 시연용이다.
+
+#### 5.5.7 API·보안
+
+| 엔드포인트 | 권한 | 설명 |
+|---|---|---|
+| `POST /api/orders/{id}/exchanges` | 주문 소유 구매자, `Idempotency-Key` 필수 | 본문 `{returnLines[{lineId, qty}], newLines[{skuId, qty}], reasonCode}` → `201 {exchangeId, newOrderId, priceDiffKrw}`. 오류: `409 return_window_closed`·`exchange_not_allowed`·`exchange_stock_unavailable`·`return_quantity_exceeded` |
+| `GET /api/orders/{id}/exchange` | 소유 구매자 | 교환 상태(§5.5.2)·가격차·다음 행동 |
+| `POST /api/orders/{id}/exchange/cancel` | 소유 구매자 | `awaiting_payment`·`awaiting_return` 에서만(입고 후 취소는 불가) |
+
+속도 제한 등급은 `write.return`(세션당 10회/분, 제안; `write.exchange` 는 화폐 교환 전용). 소유 검사는 주문 `buyer_user_id` 와 세션 사용자의 일치이며 불일치는 `404`(존재 은닉). 자유 텍스트 사유는 두지 않고 `reasonCode` 열거만 받는다(개인정보 입력 경로 최소화).
 
 ---
 
@@ -1231,8 +1359,9 @@ classDiagram
 
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
-| `order` | `id`, `number`, `buyer_user_id`, `status`(§5.2), `fulfillment_mode`(`demo`/`physical`, §5.2.1, 확정 시 고정), `total_krw`, `deal_id` NULL, `reservation_id`, `seller_id`, `shipping_address_enc`, `paid_at`, `delivered_at`, `version`, 시각 | `UNIQUE(number)`, **`UNIQUE(reservation_id)`**, `(buyer_user_id, created_at DESC)` | PSD·SYS·**ENC**(`shipping_address_enc`) |
-| `order_line` | `order_id`, `line_no`, `sku`, `name_snapshot`, `unit_price_krw`, `qty` | PK `(order_id, line_no)`, `CHECK (qty > 0)` | PUB·SYS |
+| `order` | `id`, `number`, `buyer_user_id`, `status`(§5.2), `fulfillment_mode`(`demo`/`physical`, §5.2.1, 확정 시 고정), `total_krw`, `deal_id` NULL, `reservation_id`, `seller_id`, `shipping_address_enc`, **`exchange_of_order_id` NULL**(상품 교환 신규 주문이 원 주문을 가리킴, §5.5), `paid_at`, `delivered_at`, `version`, 시각 | `UNIQUE(number)`, **`UNIQUE(reservation_id)`**, `(buyer_user_id, created_at DESC)` | PSD·SYS·**ENC**(`shipping_address_enc`) |
+| `order_line` | `order_id`, `line_no`, `sku`, `name_snapshot`, `unit_price_krw`, `qty`, **`qty_returned`**(반품·교환 확정 요청 누계, 기본 0) | PK `(order_id, line_no)`, `CHECK (qty > 0)`, `CHECK (qty_returned BETWEEN 0 AND qty)` | PUB·SYS |
+| `order_exchange` | `id`, `original_order_id`, `new_order_id`, `return_id`, `status`(§5.5.2), `cancel_reason` NULL, `price_diff_krw`, `refund_krw`(반품 줄 환불 대상 F), `version`, 시각 | `UNIQUE(new_order_id)`, `UNIQUE(return_id)`, 부분 인덱스 `(original_order_id) WHERE status IN ('awaiting_payment','awaiting_return','inspecting')`, `order_exchange` 가 활성인 줄에 대한 중복 요청은 `qty_returned` 조건부 UPDATE 가 막는다 | SYS |
 | `order_status_history` | `id`, `order_id`, `from_status`, `to_status`, `cause_event_id`, `at`, `actor_key` | 추가 전용, `(order_id, id)` | SYS·PSD |
 | `request_key`, `inbox_message` | 공통 | `inbox` 소비자 `order-fulfillment-reactor`(풀필먼트 이벤트), `order-reservation-reactor` | — |
 
@@ -1300,7 +1429,7 @@ classDiagram
 | `reservation` 종료 행 | 종료 후 30일 | 대사 근거 |
 | `price_sample` | 30일, `price_snapshot` 은 보관(결제가 id 로 참조) | |
 | 웹훅 `inbox_message` | 7일(`processed`), `dead` 30일 | M1 규약(ADR-023) |
-| `payment_event` | 90일 | |
+| `payment_event` | 90일(확정, U7) | |
 | `request_key` | 24시간 | M1 규약 |
 
 ---
@@ -1321,7 +1450,7 @@ classDiagram
 | `order.paid` | `ConfirmPurchase` | `orderId`, `orderVersion`, `lines[{lineId,skuId,qty,dealId?}]`, `totalKrw`, **`fulfillmentMode`**(`demo`/`physical`, §5.2.1), **`shippingAddressRef`**(불투명 참조), `shippingMethod`, `paidAt` | **풀필먼트**(`physical` 만 소비), `order-projector`, 알림 | 개인 알림. 주소 평문 금지(P0 §9.6) |
 | `order.demo_delivered` | `MarkDelivered`(관리자, `demo` 주문) | `orderId`, `deliveredAt` | **`escrow-order-reactor`**(`shipment.delivered` 와 같게 해제 기한 설정), 프로젝터 | 개인 알림 |
 | `order.cancel_requested` | `RequestCancel` (결제 후 취소 요청) | `orderId`, `reason`, `requestedBy` | **풀필먼트**(결과: `fulfillment.cancelled`/`cancel_rejected`) | 없음 |
-| `order.return_requested` | `RequestReturn`(반품 기한 5일 이내) | `orderId`, `returnId`, `lines`, `reason` | **풀필먼트**, **`escrow-order-reactor`**(해제 동결) | 개인 알림 |
+| `order.return_requested` | `RequestReturn`·`RequestExchange`(반품 기한 5일 이내) | `orderId`, `returnId`, `lines`, `reason`, **`resolution`**(`REFUND`/`EXCHANGE`), `exchangeId`·`newOrderId`(교환일 때, §5.5.4) | **풀필먼트**, **`escrow-order-reactor`**(해제 동결) | 개인 알림 |
 | `order.address_corrected` | `CorrectShippingAddress` | `orderId`, `shippingAddressRef`(새 rev) | **풀필먼트** | 없음 |
 | `order.cancelled` / `order.expired` / `order.completed` / `order.disputed` | 각 usecase | `orderId`, `reason` | 풀필먼트(취소 시), 프로젝터 | 개인 알림 |
 | `payment.initiated` / `.approved` / `.failed` / `.unknown` / `.refund_pending` / `.refund_failed` / `.refunded` | 결제 usecase | `paymentId`, `orderId`, `method`, `amountKrw`, **`legs[{asset, amount, krwValue}]`**(결제 다리), `status`, `snapshotId`, (`refundReason`), **`.refund_pending`·`.refunded` 는 `refundLegs[{asset, amount, krwValue}]`**(이번 환불의 다리별 수량, 누적 아님) | 프로젝터, `payment-order-reactor`, 풀필먼트(`.refunded`) | 개인 알림 |
@@ -1622,6 +1751,9 @@ classDiagram
 | `PriceFeedStaleError` | 503 | `pricefeed_stale` |
 | `RefundExceedsPaidError` | 409 | `refund_exceeds_paid` |
 | `ReturnWindowClosedError` | 409 | `return_window_closed` |
+| `ExchangeNotAllowedError` | 409 | `exchange_not_allowed` (타임딜 신규 줄·`demo` 주문·이미 활성 교환 등, §5.5.1) |
+| `ExchangeStockUnavailableError` | 409 | `exchange_stock_unavailable` (사전 ATP 확인 실패) |
+| `ReturnQuantityExceededError` | 409 | `return_quantity_exceeded` (`qty_returned` 조건부 UPDATE 0행) |
 | `ExchangeQuoteExpiredError` / `PriceMovedError` | 409 | `quote_expired` / `price_moved` (교환 견적 만료 / 확정 비용이 `maxUsdcMicro` 초과, §8.2.2) |
 | `SupplyCapExceededError` | 409 | `supply_cap_exceeded` |
 | `EscrowStateError` | 409 | `escrow_state_conflict` |
@@ -1673,6 +1805,11 @@ classDiagram
 | OD-10 | 주문 프로젝션·알림 | inbox | `OrderProjector` | `order_read.order_view` | P3 |
 | OD-11 | 배송지 익명화(보관 규칙, `demo` 는 종결 후 30일) | worker 주기 | `AnonymizeShipping` | `order.order` | P5 |
 | OD-12 | `demo` 주문 배송 완료 처리(관리자) | `POST /api/admin/orders/{id}/mark-delivered` | `MarkDelivered` | `order.order`, outbox `order.demo_delivered` | P3 |
+| OD-13 | 상품 교환 요청(반품 줄 + 신규 주문 생성, 사전 재고 확인) | `POST /api/orders/{id}/exchanges` | `RequestExchange`, `CheckExchangeAvailability`(P3 읽기 포트) | `order.order`, `order_line`, `order_exchange`, outbox `order.return_requested` | P5·6c |
+| OD-14 | 교환 상태 조회·취소 | `GET /api/orders/{id}/exchange`, `POST …/exchange/cancel` | `GetExchange`, `CancelExchange` | `order_exchange`, outbox `order.exchange_cancelled` | P5·6c |
+| OD-15 | 교환 진행 반응(신규 결제·`return.received`·`return.inspected`·`fulfillment.rejected` → 상태 전이, 완료/취소 발행) | inbox | `ExchangeReactor` | `order_exchange`, outbox `order.exchange_completed`/`cancelled` | P5·6c |
+| OD-16 | 교환 기한 스윕(결제 만료·발송 기한 초과 → `cancelled`) | worker 주기 | `ExchangeDeadlineSweeper` | `order_exchange` | P5·6c |
+| OD-17 | 분할 배송 합성(주문 상세의 `fulfillment.shipments[]`) | `GET /api/orders/{id}` | `ComposeFulfillmentView`(P3 `tracking_view` 읽기) | (읽기) | 6c |
 
 ### 14.3 PY — 결제·견적
 
@@ -1737,6 +1874,8 @@ classDiagram
 | 구매 흐름 | 예약(남은 시간) → 배송지 → 결제 수단 → 확정, 실패별 안내(품절·한도·만료) | P3 |
 | 결제창 | PG 위젯 임베드, 견적(USDC 환산 참고) 표시 | P5 |
 | 내 주문·에스크로 | 최소형(보류·수령 확인·환불, `demo` 주문 종결) → 타임라인(결제·보류·출고·배송·확정 기한), 구매 확정/분쟁 | P3(최소)·P5 |
+| 교환 | 반품 줄·신규 줄 선택, 가격차("추가 부담/환급 예정")와 "필요 금액 = 신규 총액, 환불은 검수 후" 안내, 상태 타임라인(§5.5.2) | P5·6c |
+| 부분 배송 | 주문 상세의 배송 N건 타임라인·"부분 배송 n/m"·남은 줄 안내(§5.5.6) | 6c |
 | 포인트 | 잔액·내역 | P3 |
 | 관리자 | 딜·상품 관리, 분쟁 판정, 시세 스냅샷·보류 목록, 정산 내역, 대사 결과 | P3~P5 |
 
@@ -1765,6 +1904,8 @@ classDiagram
 | 환불 이중 실행 | 같은 이벤트 재전달·두 소비자 | 환불 멱등 키 `refund:<paymentId>:<eventId>`(다리별 `:<asset>`) 유일 |
 | 지급 이중 실행·상한 | 로그인 중복·재가입·관리자 동시 지급 | `ledger.grant UNIQUE (github_id, kind)` + 자산별 저널 키 + `supply_cap` 단일 문장 조건부 UPDATE |
 | 교환 이중 실행 | 같은 요청 재전송·견적 재사용 | `Idempotency-Key` + 저널 키 `exchange:{userId}:{key}:{asset}` + `exchange_quote` `open→used` 조건부 |
+| 같은 줄의 반품·교환 동시 요청 | 두 요청이 같은 수량을 동시에 가져감 | `order_line.qty_returned + q ≤ qty` 조건부 UPDATE(0행이면 `return_quantity_exceeded`) |
+| 교환 취소 vs `return.inspected` | 구매자 취소와 검수 완료가 동시 | `order_exchange` `status`·`version` CAS 로 한쪽만 성공, 환불 키로 환불은 한 번 |
 | 에스크로 해제 vs 반품 요청 | 자동 해제와 반품이 동시 | `held→frozen` 조건부 전이와 `held→released` 조건부 전이 중 하나만 성공. 반품 기한(5일) < 자동 해제(7일) 불변. 반품 거절 시 `frozen→held` 로 재개 |
 | 약정 해제 vs 늦은 `order.paid` | 딜 `settled` 와 결제 확정 소비 사이 순서 없음 | 해제량 = `total − confirmed`(미판매분만), 해제는 `settled`(활성 예약 0·미결제 주문 0) 이후 |
 
@@ -1890,6 +2031,8 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | `pf_payment_duration_seconds` | histogram | `method` | 시작→승인 시간(TTL 보정 근거) |
 | `pf_payment_late_total` | counter | `outcome`(`new_reservation`/`refunded`) | 늦은 결제 |
 | `pf_escrow_frozen` | gauge | `reason`(`return`/`delivery_failed`) | 동결 중 에스크로 |
+| `pf_exchange_total` | counter | `result`(`completed`/`cancelled_*` 열거 `cancel_reason`) | 상품 교환 결과 |
+| `pf_exchange_gate_age_seconds` | histogram | — | 신규 주문의 출고 게이트 대기(할당 유지) 시간 |
 | `pf_refund_total` | counter | `reason`,`result` | 환불 결과 |
 | `pf_payment_webhook_total` | counter | `result`(`accepted`/`duplicate`/`invalid`/`unknown_payment`) | 웹훅 |
 | `pf_payment_amount_mismatch_total` | counter | — | **0 이어야 함** |
@@ -1965,6 +2108,12 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | AC-C25 | `shipment.delivery_failed` 후 14일 경과 → 자동 해제 안 됨(`frozen`) |
 | AC-C37 | 배송 완료 후 **5일을 넘긴**(예: 6일째) 반품 요청 → `409 return_window_closed`, 에스크로는 `held` 그대로 7일째 정상 자동 해제 |
 | AC-C38 | `return.inspected{disposition:'REJECTED'}` → 환불 없음, 에스크로 `frozen→held` 와 `release_due_at` 재설정, 주문 `return_requested→delivered`, 반품 재요청 거절, 이후 정상 자동 해제 |
+| AC-C39 | 교환 요청 → 반품 케이스 생성(`resolution=EXCHANGE`), 원 에스크로 `held→frozen`, 신규 주문 `pending_payment`(`exchange_of_order_id` 설정, `deal_id`·`reservation_id` NULL), 신규 줄에 타임딜을 넣으면 `409 exchange_not_allowed`, 같은 `Idempotency-Key` 재전송은 같은 결과 | L3 |
+| AC-C40 | 신규 > 원: 신규 결제 → 신규 에스크로 `held` → 검수 환불 판정 후 원 환불 F → 순 차액(`priceDiffKrw > 0`)이 구매자 순 지출과 일치. 신규 < 원: 순 차액이 환불됨. 어느 tx 도 두 에스크로를 동시에 잠그지 않음(락 순서 시험, 교착 0) | L3 |
+| AC-C41 | 신규 주문은 `return.inspected` 환불 판정 전에 풀필먼트 웨이브에 들어가지 않고(출고 게이트), `REJECTED` 면 신규 주문 취소·환불과 원 에스크로 `frozen→held`(`release_due_at` 재설정), 발송 기한 초과도 같은 복귀 | L3 |
+| AC-C42 | 부분 교환 후 원 에스크로: `escrow_leg.refunded_amount` 증가·`frozen→held`, 해제 시 정산 입력이 잔여 다리이며 `r ≥ 0`·`net+fee+dust=gross`(AC-C34 속성 시험에 교환 환불 시퀀스 포함) | 속성 L2 + L3 |
+| AC-C43 | 같은 줄에 반품·교환 동시 N 건 → `qty_returned ≤ qty` 유지(성공 합이 `qty` 이하), 교환 취소와 검수 완료 경합에서 환불 정확히 1건 | L3 동시성 |
+| AC-C44 | 분할 배송: 주문 상세가 배송 N건(`shipments[]`, `pendingLines`)을 보이고, 일부만 `delivered` 인 동안 주문은 `shipped`·에스크로 `release_due_at` 미설정, `allDelivered` 에서 `delivered`·기한 설정, 반품 기한은 그 시각부터 5일 | L3 |
 | AC-C26 | 출고 전 취소만 `deal.restocked` 발행(약정 +q 짝), `fulfillment.rejected(OUT_OF_STOCK)` 는 복원 안 함; 같은 이벤트 재전달에도 복원 1회 |
 | AC-C27 | 포인트 결제 주문도 결제 시작 시 스냅샷이 고정되어 정산이 `failed` 가 되지 않음; 정산 `net+fee+dust = gross`, dust ∈ {0,1} |
 | AC-C28 | 딜 게시 후 약정 거절 → `publishing→draft` 복귀 + `deal.publish_rejected`, 약정 없는 딜은 `open` 이 되지 않음 |
@@ -2032,6 +2181,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 5-C | PG 테스트 어댑터(선정 후) + CSP/위젯 | 실제 테스트 결제 왕복 |
 | 5-D | `escrow` 확장(분쟁·`frozen`/`held` 재개·자동 확정 타이머·`ESCROW_TIME_SCALE`) + `settlement`(잔여 다리 입력) + 원장 정산 분개 | AC-C17~C19, AC-C24·C25·C33·C34(정산 부분)·C37·C38 |
 | 5-E | UI(주문·에스크로·관리자), 면책, 압축 시간 시연 | AC-C18 → Phase 5 DoD |
+| 6c-X | **상품 교환(U23)**·분할 배송 노출 — 반품(P3 W5)과 풀필먼트 사가가 선행. `RequestExchange`·`ExchangeReactor`·출고 게이트·`ComposeFulfillmentView` | AC-C39~C44, AC-WM 교환 시험(P3) |
 | 6-4 | `EscrowChainPort` + InMemory + devnet 어댑터 | devnet 왕복 (키 관리 ADR 선행) |
 
 ### 20.3 위험
@@ -2055,6 +2205,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 예약 TTL(포인트 60초/카드 10분) 보정 | 결제 시간 측정 후 |
 | 입장 토큰 버킷 N | k6 로 PG 쓰기 한계 측정 후 |
 | **캡차/가상 대기열 도입 여부 — 사용자 결정**(권장: M1 규모에서는 도입하지 않고 입장 토큰 버킷 + 속도 제한으로 충분한지 부하 시험 후 판단; 영향: 봇 대응력 vs 구현·UX 비용) | 부하 시험 결과 후 사용자 확인 |
+| 교환 신규 결제 방식: 전액 결제 후 환불(채택) vs 원 에스크로 잔여분 이월(미채택, 두 에스크로 동시 잠금 필요) / 출고 게이트 시점(`return.inspected` 채택 vs `return.received`) / 타임딜 신규 줄 허용 여부 | 6c 착수 전 사용자 확인 |
 | KEK/DEK 상향 | Phase 5 착수 |
 | 첫 로그인 지급(POINT 100,000 만 확정; USDC 는 환경별 공급)·재충전 정책(P0 U24). 하위 질문(지갑 없는 라이브 사용자의 USDC)은 **해결(2026-11-05 사용자 결정)**: 지갑 없는 사용자는 USDC 를 받지 않고, 화면에서 지갑 연결을 유도하며, POINT 100,000 으로 살 수 있는 시드 상품을 다수 둔다. 시장 참고가와 지급액의 충돌은 **해결(P0 U27 (c): 지급 100,000 으로 상향, 시드는 참고가 그대로)** | 하위 질문·가격 충돌 모두 해결(2026-11-05) |
 | 총 발행 상한 `supply_cap`(U25: 실질 무제한)·교환 한도(U26: 무제한) | 확정(2026-11-05) |

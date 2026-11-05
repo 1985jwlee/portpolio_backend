@@ -1,5 +1,5 @@
 # ADR-044: 배송사 어댑터와 추적 모델
-- 상태: **Proposed** (사용자 확정 대기)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1)
 - 날짜: 2026-11-04
 - 근거: Phase 6 WMS 항목(ADR-016), ADR-015(모의 면책)·020(inbox)·021·023(레이트 제한 수치)·026(PII) / [phases/03-fulfillment.md](../design/phases/03-fulfillment.md) §5.3·§12.5
 - 구현 순서(P0 D24): 6c.
