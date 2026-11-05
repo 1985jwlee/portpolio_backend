@@ -36,7 +36,7 @@
 | 입력 검증 | TypeBox (Elysia 내장 방식) | — | 확정 | 메시지 스키마의 정본은 `packages/protocol`. 별도 설치한 `@sinclair/typebox` 0.34 를 Elysia 라우트에 그대로 쓸 수 있음(실측). `typebox` 1.x 는 Elysia 1.4.30 peer 범위(`< 1`) 밖이라 쓰지 않는다. 스키마에 `discriminator` 옵션은 넣지 않는다(비표준 키). 브라우저는 `Value.Check` 만(약 13.9KB gzip) — `TypeCompiler` 는 22KB 이고 `new Function` 때문에 CSP 위험(미확인) |
 | WebSocket | Elysia 내장(Bun 기반) | — | **관문부 G2** | 백프레셔 `backpressureLimit` 기본 16MB, `idleTimeout` 기본 120초. 다수 연결 장시간 안정성은 근거 부족. 느린 소비자 차단은 설정 위치에 따라 동작이 갈려(Elysia 라우트 옵션 무시) 직접 시험·구현(ADR-022 측정) |
 | 구조 | 모듈러 모놀리스, domain·service·usecase, CQRS, outbox/inbox | — | 확정 | ADR-001·018·019·020·021 |
-| 인증 | **직접 구현**: GitHub OAuth(PKCE S256 + state), 세션은 우리 `identity.session`(토큰 해시 저장) | — | 확정 | Arctic 은 2026-07 deprecated, Better Auth 는 해시 저장 여부 불명 |
+| 인증 | **직접 구현**: GitHub OAuth(`state` + PKCE S256 — GitHub 공식 문서로 지원 확인, 2026-11-05, 06-auth §3), 세션은 우리 `identity.session`(토큰 해시 저장) | — | 확정 | Arctic 은 2026-07 deprecated, Better Auth 는 해시 저장 여부 불명 |
 | 속도 제한 | nginx `limit_req`(접속 주소별) + 앱(세션별) | — | 확정 | 이중. 접속 주소 정규화는 G7 |
 | 설정 | 환경 변수 단일 모듈(`packages/config`)에서 읽고 검증 | — | 확정 | 비밀값은 저장소에 두지 않음 |
 | 로깅 | 구조화 JSON 로그 | — | 스파이크 G5 | 라이브러리는 메트릭과 함께 비교 |

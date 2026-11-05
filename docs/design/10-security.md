@@ -336,7 +336,7 @@ sequenceDiagram
 | 범주 | 위협 | 대응 | 근거 |
 |---|---|---|---|
 | **S**poofing 신원 도용 | 세션 쿠키 탈취 | HttpOnly·Secure·`__Host-`, 토큰 해시 저장, 7일 만료, CSP 로 XSS 억제 | §3, ADR-008 |
-| | OAuth 로그인 CSRF·코드 가로채기 | `state`(+ PKCE S256 은 GitHub 지원 확인 후, 미지원이면 `state` 만), 임시 쿠키 10분 | 06 |
+| | OAuth 로그인 CSRF·코드 가로채기 | `state` + PKCE S256(GitHub 공식 문서로 지원 확인, 2026-11-05), 임시 쿠키 10분 | 06 |
 | | 접속 주소 위조(헤더 주입) | 프록시가 클라이언트 헤더 폐기·정규화 | G14·G7 |
 | **T**ampering 변조 | 남의 글 수정·삭제 | 로그인 + `OwnerPolicy` + 버전 조건 갱신 | AC-004·005, ADR-021 |
 | | 이벤트 위조·중복 처리 | 내부 경로만, inbox 중복 제거, 토큰 fencing | ADR-020·021 |

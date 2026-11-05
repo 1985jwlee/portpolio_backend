@@ -37,9 +37,9 @@
 
 반응의 유일 키·멱등 키 범위가 이 값을 쓴다. **이벤트 봉투의 `ownerKey` 도 이 값 그대로**(`session:<id>`/`user:<id>`)이며, 별도 해시·HMAC 변환을 하지 않는다. 공개 채널 변환에서는 항상 제거된다([05 §1](05-event-catalog.md)). 세션이 삭제되면 `reaction.actor_key` 는 무작위 값으로 교체되어 집계만 남는다(database-schema §11).
 
-## 3. GitHub 로그인 (인가 코드 + state, PKCE 는 지원 확인 후)
+## 3. GitHub 로그인 (인가 코드 + state + PKCE S256)
 
-GitHub **OAuth App**을 쓴다(웹 서버 흐름). **PKCE(S256)는 GitHub OAuth App 의 지원을 확인한 뒤 쓴다(미확인); 미지원이면 `state` 만으로 로그인 CSRF·코드 가로채기를 막는다**(client_secret 이 서버에만 있어 코드 교환은 보호된다). 아래 시퀀스의 `code_challenge`/`code_verifier` 는 지원 확인 시에만 포함한다. 콜백 URL 은 환경별로 다른 앱(운영/개발)을 만든다([02](02-dev-environment.md)).
+GitHub **OAuth App**을 쓴다(웹 서버 흐름). **`state` 와 PKCE(S256)를 함께 쓴다.** GitHub 공식 문서(Authorizing OAuth apps, 2026-11-05 확인)에 따라 OAuth App 이 PKCE 를 지원한다: `code_challenge` 는 43자 SHA-256 해시, `code_challenge_method` 는 `S256` 만 허용(`plain` 미지원), 토큰 교환에 `code_verifier` 가 필요. GitHub 는 `state`·`code_challenge`·`code_verifier` 를 모두 '강력 권장'(필수는 아님)으로 표기한다. 아래 시퀀스의 `code_challenge`/`code_verifier` 를 포함한다. 콜백 URL 은 환경별로 다른 앱(운영/개발)을 만든다([02](02-dev-environment.md)).
 
 **콜백 주소(라이브)**: GitHub OAuth 앱의 Authorization callback URL 은 Funnel 의 고정 주소로 등록한다 — `https://<호스트>.<tailnet 이름>.ts.net/api/auth/github/callback`(자리표시자, 실제 값은 사용자 tailnet 이름에 의존). 이 주소는 설정값 `PUBLIC_ORIGIN` 에서 만들고 쿠키 `__Secure-`/`__Host-`·Origin 검증의 허용 오리진도 같은 호스트다([10 §3](10-security.md)). 주소가 바뀌면(tailnet·호스트 이름 변경) OAuth 앱 설정을 함께 고친다. 개발은 `http://localhost:8080/...`(02 §6).
 

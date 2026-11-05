@@ -878,7 +878,7 @@ flowchart TD
 | 키 | `OAUTH_STATE_SECRET`(32 바이트 이상 권장, 비밀). **01 의 환경변수 표에 없다 — 추가 필요**(§16) |
 | 검증(`open`) | ① 점(.) 으로 분리 ② MAC 재계산 후 `timingSafeEqual` ③ JSON 파싱 ④ `e > now` 아니면 `OAuthStateExpiredError` ⑤ 서명 불일치·형식 오류는 `OAuthStateInvalidError` |
 | 비밀성 | 페이로드는 암호화하지 않는다(서명만). `verifier` 는 쿠키(HttpOnly, 같은 사이트)에 있어 스크립트가 못 읽는다. 쿠키 자체가 노출되는 위협 모델(로컬 악성 소프트웨어)은 범위 밖 |
-| PKCE | `challenge = base64url(SHA-256(verifier))`, 방식 `S256`. **GitHub 가 PKCE 를 지원/요구하는지는 구현 시 공식 문서로 확인(미확인)** — 지원하지 않으면 `state` 만으로 가고 `verifier` 필드는 생략 |
+| PKCE | `challenge = base64url(SHA-256(verifier))`, 방식 `S256`. **GitHub OAuth App 의 PKCE S256 지원은 공식 문서로 확인됨(2026-11-05; `plain` 미지원, 토큰 교환에 `code_verifier` 필요)** |
 
 ```mermaid
 classDiagram
@@ -1463,7 +1463,7 @@ flowchart TD
 | 세션 토큰 탈취 후 재사용 | `HttpOnly`/`Secure`/`SameSite=Lax`, 7일 슬라이딩, 로그아웃 즉시 만료 | §3.2, ID-07 |
 | DB 유출 시 토큰 노출 | 해시만 저장(256 비트 난수의 SHA-256) | §3.1 |
 | 세션 고정 | 로그인 시 새 토큰 발급, 이전 세션 만료 | ID-06 |
-| 로그인 CSRF·코드 가로채기 | `state` + 서명 쿠키(10분) + PKCE(지원 확인 필요) | ID-05·06 |
+| 로그인 CSRF·코드 가로채기 | `state` + 서명 쿠키(10분) + PKCE S256(GitHub 지원 확인됨) | ID-05·06 |
 | 오픈 리다이렉트 | `ReturnToSanitizer`(같은 출처 상대 경로만) | ID-05 |
 | 관리자 권한 상승 | DB 플래그 없음, 숫자 ID 허용목록(설정) | ID-09 |
 | 세션 남용(대량 발급) | nginx `limit_req`, 발급 급증 경보 | ID-01 |
@@ -1496,7 +1496,7 @@ flowchart TD
 | 영어 로케일의 익명 이름 접두(`Guest-`) | 07 구현 시 |
 | `GetMe.locale` 의 출처·저장 여부 | 07/12 확인 |
 | 정리 잡 주기·배치 크기·최대 반복 수 | 측정 후 |
-| GitHub PKCE 지원 여부와 `scope` 없는 요청의 응답 필드 | 구현 초기(G 관문 아님, 교체 가능) |
+| `scope` 없는 요청의 응답 필드(PKCE 지원은 확인됨, 2026-11-05) | 구현 초기(G 관문 아님, 교체 가능) |
 | ~~`timingSafeEqual` 의 Bun 동작~~ | **확인됨(2026-11-04 실측)**: Bun 1.4.4 에서 동작하며 **길이가 다른 버퍼는 예외**(`ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH`)를 던진다 → 비교 전에 길이를 확인하거나 양쪽을 해시한 뒤 비교한다. uuid v7 은 `Bun.randomUUIDv7()` 내장 |
 | `purged:` 접두 형식 확정 | F11 `AnonymizeSessionData` 설계 시 |
 
