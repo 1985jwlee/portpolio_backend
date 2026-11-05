@@ -24,7 +24,7 @@
 | **가명 식별자** | 세션 ID, `actor_key`, `author_session_id`, `user_id` | 7일 후 익명화(ADR-008), 로그·지표 레이블 금지 |
 | **개인 연결** | `user_account.github_id`·`login`·`display_name`, `report.reporter_key` | **평문 유지.** GitHub 공개 프로필 정보이고, `github_id` 는 유일 조회·관리자 허용목록 대조에 쓰인다. 최소 수집(스코프 없음, 이메일 없음)이 보호 |
 | **자유 텍스트** | `guestbook.report.note`(신고자 메모 ≤200자) | **필드 암호화(AES-256-GCM)** |
-| **비밀** | 세션 토큰, OAuth 서명 키, GitHub client secret, DB 비밀번호, 필드 키, 백업 키, **tUSDC 민트 권한 키·devnet 수수료 대납 키**(6d, devnet 전용 — ADR-048 U28; 메인넷 키는 어떤 설정에도 두지 않는다) | 아래 표 |
+| **비밀** | 세션 토큰, OAuth 서명 키, GitHub client secret, DB 비밀번호, 필드 키, 백업 키, **tUSDC 민트 권한 키·devnet 수수료 대납 키**(6d, devnet 전용 — ADR-048 U28; 메인넷 키는 어떤 설정에도 두지 않는다. 수수료 대납 키는 지갑당 횟수·일일 총량 상한, 잔액 경보, 고갈 시 faucet 안내 폴백을 둔다 — U29, ADR-048) | 아래 표 |
 
 ### 층별 보호
 | 층 | 방식 | 세부 |

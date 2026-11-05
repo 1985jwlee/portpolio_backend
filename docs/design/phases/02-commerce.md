@@ -1110,7 +1110,7 @@ classDiagram
 |---|---|
 | 상태 모델 | 오프체인 `escrow` 상태 머신이 **정본**이고 온체인 계정은 그 거울. 온체인 상태는 `status`/`watch` 로 읽어 대조 |
 | 호출 위치 | 온체인 트랜잭션은 **트랜잭션 밖**(선점 → 체인 호출 → 완료), 서명 확인/확정 깊이는 폴링 대사 |
-| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle faucet 과 Coinbase CDP faucet 이 같은 민트로 보낸다(2026-11-05 검색; Circle 문서 developers.circle.com/stablecoins/usdc-contract-addresses). 한도는 제3자 자료 기준 Circle 20 USDC/2시간/주소(Circle 자체 페이지 미확인), Coinbase CDP 1 USDC/요청·10 USDC/24시간(Coinbase 문서) — 6d 착수 전 재확인. 수수료용 SOL 은 Solana faucet. **확정(P0 U28, 2026-11-05): 정산 토큰은 자체 발행 `tUSDC`(devnet 모의 토큰, 메타데이터 이름 'Test USDC (demo)', 화면에도 `tUSDC` 명시)가 기본**이고 설정 `SETTLEMENT_MINT` 로 Circle devnet USDC 에 연결할 수 있다. 지갑 연결이 유도 경로라 외부 faucet 두 곳을 거치면 이탈하므로 사이트가 tUSDC 를 발행하고 수수료를 대납(fee payer)한다. **민트 권한 키·수수료 대납 키는 비밀**(devnet 전용, ADR-026 등재)이고 지갑당 발행 속도·횟수를 제한한다. `SETTLEMENT_MINT` 가 Circle USDC 이면 사이트는 발행하지 않고 사용자가 Circle faucet 으로 받은 것을 쓴다(수수료 대납은 유지 가능). 앞서의 '권고는 Circle USDC, tUSDC 는 폴백'은 개정 이력이다. 지갑은 선택 사항이며 연결한 사용자만 이 경로를 쓴다 |
+| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle faucet 과 Coinbase CDP faucet 이 같은 민트로 보낸다(2026-11-05 검색; Circle 문서 developers.circle.com/stablecoins/usdc-contract-addresses). 한도는 제3자 자료 기준 Circle 20 USDC/2시간/주소(Circle 자체 페이지 미확인), Coinbase CDP 1 USDC/요청·10 USDC/24시간(Coinbase 문서) — 6d 착수 전 재확인. 수수료용 SOL 은 Solana faucet. **확정(P0 U28, 2026-11-05): 정산 토큰은 자체 발행 `tUSDC`(devnet 모의 토큰, 메타데이터 이름 'Test USDC (demo)', 화면에도 `tUSDC` 명시)가 기본**이고 설정 `SETTLEMENT_MINT` 로 Circle devnet USDC 에 연결할 수 있다. 지갑 연결이 유도 경로라 외부 faucet 두 곳을 거치면 이탈하므로 사이트가 tUSDC 를 발행하고 수수료를 대납(fee payer)한다. **민트 권한 키·수수료 대납 키는 비밀**(devnet 전용, ADR-026 등재)이고 지갑당 발행 속도·횟수를 제한한다. **수수료 대납 안전장치(P0 U29 확정, 2026-11-05)**: 지갑당 대납 횟수·일일 총량 상한, 대납 키 SOL 잔액이 기준 이하이면 Discord 경보(게이지 `pf_wallet_fee_payer_balance_lamports` 제안, ADR-027), 잔액이 바닥나면 대납을 멈추고 '사용자 faucet 안내' 화면으로 자동 폴백(지갑 연결·원장 기능은 정상). 사용자 1명당 약 0.003 SOL 은 미검증 추정이며 상한 숫자는 초기값 제안, 6d 착수 시 확정 `SETTLEMENT_MINT` 가 Circle USDC 이면 사이트는 발행하지 않고 사용자가 Circle faucet 으로 받은 것을 쓴다(수수료 대납은 유지 가능). 앞서의 '권고는 Circle USDC, tUSDC 는 폴백'은 개정 이력이다. 지갑은 선택 사항이며 연결한 사용자만 이 경로를 쓴다 |
 | 키 | 서버 서명 키·tUSDC 민트 권한 키·수수료 대납 키는 시크릿 파일, **devnet 키만**. 메인넷 키는 어떤 설정에도 두지 않는다. 키 관리 ADR 이 착수 선행 조건 |
 | 시험 | `InMemoryChainEscrow` 로 전 흐름을 결정적으로 시험하고 devnet 은 통합 시연으로만 |
 | 범위 | 분쟁·부분 해제 온체인화는 범위 밖 |
@@ -2059,7 +2059,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 첫 로그인 지급(POINT 100,000 만 확정; USDC 는 환경별 공급)·재충전 정책(P0 U24). 하위 질문(지갑 없는 라이브 사용자의 USDC)은 **해결(2026-11-05 사용자 결정)**: 지갑 없는 사용자는 USDC 를 받지 않고, 화면에서 지갑 연결을 유도하며, POINT 100,000 으로 살 수 있는 시드 상품을 다수 둔다. 시장 참고가와 지급액의 충돌은 **해결(P0 U27 (c): 지급 100,000 으로 상향, 시드는 참고가 그대로)** | 하위 질문·가격 충돌 모두 해결(2026-11-05) |
 | 총 발행 상한 `supply_cap`(U25: 실질 무제한)·교환 한도(U26: 무제한) | 확정(2026-11-05) |
 | 시드 상품 참고 가격 조사(U27: 방식 확정, 사람이 `seeds/products.*` 에 기록; 참고가 그대로 사용, 지급 POINT 100,000 으로 충돌 해결 — U27 (c), 참고가 대부분 100,000원 이하로 조사) | **Phase 3 착수 시** |
-| 시연 토큰(`tUSDC` 기본 + `SETTLEMENT_MINT` 로 Circle devnet USDC 선택, P0 U28)·U29 | U28 확정(2026-11-05), U29 는 Phase 6d 착수 전 |
+| 시연 토큰(`tUSDC` 기본 + `SETTLEMENT_MINT` 로 Circle devnet USDC 선택, P0 U28)·U29 | U28·U29 확정(2026-11-05); U29 의 상한 숫자·수수료 값은 Phase 6d 착수 전 확정·재확인 |
 | 분쟁 부분 판정, 정산 후 환수 | M1 범위 밖 |
 | 큰 재고 샤딩 | 필요 시 |
 | Redis 단일 노드 가용성(센티넬) | 자원 예산 확인 후 |

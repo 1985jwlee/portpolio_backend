@@ -84,7 +84,7 @@ log_format pf_json escape=json
 - 반응·글 작성 같은 일반 사용자 행위는 감사 로그에 쓰지 않는다(이벤트·`trace_step` 이 담당).
 
 ### 지표·경보
-`pf_audit_records_total{category,action,outcome}`, `pf_ops_last_success_timestamp{job}`, `pf_log_redactions_total`(마스킹 발동 횟수 — 코드가 금지 데이터를 로그에 넘긴 신호). 경보 후보: 아카이브 24시간 이상 미성공, 마스킹 급증, `auth.login_failed` 급증.
+`pf_audit_records_total{category,action,outcome}`, `pf_ops_last_success_timestamp{job}`, `pf_log_redactions_total`(마스킹 발동 횟수 — 코드가 금지 데이터를 로그에 넘긴 신호). 경보 후보: 아카이브 24시간 이상 미성공, 마스킹 급증, `auth.login_failed` 급증. 6d 에서는 `pf_wallet_fee_payer_balance_lamports`(devnet 수수료 대납 키 SOL 잔액 게이지, 제안 — U29, ADR-048) 가 기준 이하이면 Discord 경보(기준값은 6d 착수 시 확정).
 
 ## 후속 결정 (2026-11-04)
 
