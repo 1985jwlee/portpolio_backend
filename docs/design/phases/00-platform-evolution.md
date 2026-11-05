@@ -1,7 +1,9 @@
 # P0. 플랫폼 진화 설계 (Phase 0~6)
 
 M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. 이 문서는 그 위에 **바둑(Phase 1~2) · 상거래(Phase 3·5) · 풀필먼트(Phase 6) · 채팅(Phase 1·6)** 을 올릴 때 **영역마다 따로 정하면 어긋나는 것**을 한 곳에서 정한다.
-네 영역 설계(`01-baduk`, `02-commerce`, `03-fulfillment`, `04-chat`)는 이 문서의 결정 번호(**D1…D23**)를 인용한다.
+네 영역 설계(`01-baduk`, `02-commerce`, `03-fulfillment`, `04-chat`)는 이 문서의 결정 번호(**D1…D24**)를 인용한다.
+
+> **구현 순서 ≠ Phase 번호 (D24).** Phase 번호는 로드맵 식별자로 유지하고, 구현 순서는 **M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e** 이다(바둑이 마지막). 모든 영역 설계는 동결하지 않고 끝까지 완성하며, 각 Phase 착수 전에 설계 재검토 단계(§12.5)를 거친다. 아래 표·절은 Phase 번호로 쓰되 '순서' 열이나 §1.4 로 구현 순서를 읽는다.
 
 - 상태: 이 문서와 ADR-030~047(이 문서는 030~033, 영역 설계는 034~047) 은 **Proposed(사용자 확정 대기)** 이다. 확정 전까지 영역 설계는 D 번호를 "잠정 전제"로 쓴다.
 - 근거: README 로드맵, ADR-001·002·005·006·009~016·017~028, [architecture.md §12](../../domains/architecture.md), [database-schema.md §11](../../domains/database-schema.md).
@@ -14,7 +16,7 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 |---|---|---|---|
 | **D1** | **모듈러 모놀리스를 유지**한다. 분리는 5축 기준(독립 확장·언어/런타임·자원 프로파일·장애 격리·배포 주기) 중 **둘 이상이 강하게 해당할 때만** 한다. 기본값은 "분리 안 함" | 030 | 전부 |
 | **D2** | 분리 판정 결과: **KataGo 분석 워커만 별도 프로세스·이미지**(Phase 2). 나머지(game·chat·deal·order·payment·settlement·fulfillment·support)는 모놀리스 모듈이다. 엔트리포인트 분화는 허용(같은 이미지). 분석 워커는 **별도 이미지 `pf-analysis`**(KataGo 바이너리 포함)이며 DB 쓰기는 `analysis` 스키마와 ledger 쌍 #6(`ConfirmRewardInTx`/`FlagRewardInTx`)뿐이다 | 030 | P1·P2·P3·P4 |
-| **D3** | 룸 실시간(대국·채팅·CS)은 **`ws-gateway` 에 핸들러를 추가**한다(Phase 1). 부하·재시작 격리가 필요하면 Phase 4 에서 `ws-gateway` 를 사이트용/룸용 두 배포 단위로 나눈다(같은 이미지, 인자 `--surface=site|room`) | 032·033 | P1·P4 |
+| **D3** | 룸 실시간(대국·채팅·CS)은 **`ws-gateway` 에 핸들러를 추가**한다. **`/ws/room` 의 첫 사용처는 6a(CS 채팅)** 이고 대국 룸(`game:*`)은 Phase 1 에서 같은 연결에 추가된다. 부하·재시작 격리가 필요하면 룸 연결이 존재하는 시점 이후(6a 이후 재평가)에 `ws-gateway` 를 사이트용/룸용 두 배포 단위로 나눈다(같은 이미지, 인자 `--surface=site|room`) | 032·033 | P1·P4 |
 | **D4** | 이벤트 전달 정본은 **Postgres outbox + inbox**(ADR-005·020)를 유지한다. Redis Streams 는 `EventTransport` 포트(ADR-024)의 **소비자 단위 선택 어댑터**로 두고, **Phase 3 의 타임딜 버스트 측정**으로 채택을 판정한다(ADR-006 의 "Phase 2 착수 전" 시점을 바꾼다) | 031 | P2 |
 | **D5** | Streams 를 쓰는 소비자의 설계: 모듈당 스트림 1개(`pf:evt:<module>`), 소비자 그룹 = inbox 소비자 이름, 전달→inbox 저장→`XACK`, 회수는 `XAUTOCLAIM`, 유실 방어는 `TransportReconciler` | 031 | P2 |
 | **D6** | Redis 는 **Phase 3 에 도입**한다(재고 Lua). **단일 인스턴스 1개**(컨테이너 1개)로 시작하고(`noeviction`, 비스트림 키는 전부 TTL, 키 접두사 규약 `pf:stock:*`·`pf:evt:*`·`pf:rl:*`로 논리 분리), `redis-stock`/`redis-stream` 컨테이너·접속 분리는 Phase 4 에서 장애 영역 분리와 함께 재평가한다 | 031·033 | P2 |
@@ -28,48 +30,55 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 | **D14** | 자원 예산 규칙: 라이브 호스트 RAM 의 **60% 이하**(상시), KataGo 는 **CPU 시간 예산을 따로** 둔다 | 033 | P1·P2 |
 | **D15** | 지표 이름은 `pf_<도메인>_…`, 오류 wire code 는 모듈 접두사 없음, 이벤트 이름은 `<aggregate>.<verb-past>`, 스키마는 `<module>` / `<module>_read` | — | 전부 |
 | **D16** | 모듈 간 동기 의존은 **피호출 층 ≤ 호출자 층**일 때만 허용한다(같은 층 허용, 위 방향은 이벤트·포트 역전; 경계 규칙 B12 제안). **같은 층 호출이 허용되므로 순환은 B5 가 막는다** | 030 | 전부 |
-| **D17** | Phase 4 워크로드 분리 단위: `api`, `ws-gateway(site)`, `ws-gateway(room)`, `worker`, `analysis-worker`, `web`. 롤링은 M1 G8 실측 패턴(readyz 503 → bye/1001 → preStop 5초)을 재사용 | 033 | P1·P4 |
+| **D17** | Phase 4 워크로드 분리 단위: `api`, `ws-gateway`, `worker`, `web`(+ 레플리카·HPA). **`ws-gateway(site)`/`ws-gateway(room)` 분화와 `analysis-worker` 는 `/ws/room`(6a)·KataGo(Phase 2)가 생긴 뒤 해당 시점에 적용**한다(D24). 롤링은 M1 G8 실측 패턴(readyz 503 → bye/1001 → preStop 5초)을 재사용 | 033 | P1·P4 |
 | **D18** | 금전 화면·응답에는 **"모의" 표시**를 항상 둔다(배너 + `X-PF-Mock: 1` 응답 헤더, ADR-015) | — | P2·P3 |
 | **D19** | **presence 는 `realtime` 모듈이 소유**한다(`PresenceCounter` 포트, ADR-024). 도메인(game, chat)은 읽기 포트 `PresenceReader` 로 조회만 하며 **규칙 판정(이탈·`abandoned`)에는 쓰지 않는다**(판정은 game 소유 heartbeat 신호, §6.9) | 032 | P1·P4 |
 | **D20** | **`ledger` 모듈 하나**가 다중 자산(POINT/KRW/USDC) 복식 원장을 소유한다. 스키마 정본은 ADR-040, POINT 자산 규칙과 보상 상태 머신은 ADR-037 (§2.5) | 037·040 | P1·P2 |
 | **D21** | **모듈 간 한 트랜잭션은 `*InTx` 공개 usecase 의 허용 쌍으로만** 한다(경계 규칙 B12, §2.4). 중첩 `uow.run` 금지는 유지한다 | 030 | P1·P2·P4 |
 | **D22** | **이벤트 계약 정본 표는 §8.3 하나**다. 영역 문서의 이벤트 이름·페이로드가 다르면 §8.3 이 이긴다 | — | 전부 |
 | **D23** | **Phase 2 분석 큐는 Postgres inbox 선점**(DB 큐)이다. Redis Streams 판정은 Phase 3(D4) | 031·036 | P1 |
+| **D24** | **구현 순서는 Phase 번호와 분리한다**: M1 → **Phase 3**(타임딜·Redis·`ledger`(POINT·모의 USDC)) → **4** → **5** → **6a**(CS 채팅, 범용 `chat` 코어·`/ws/room` 도입) → **6b**(Passkey) → **6c**(WMS) → **6d**(Solana devnet) → **Phase 1**(바둑 + 대국 채팅 룸) → **Phase 2**(KataGo + 바둑 보상) → **6e**(마작). 근거: 타임딜이 신호 대비 비용이 가장 좋고(초과 판매 0·k6 결과표), 3D 클라이언트·룰 엔진·KataGo 실행 가능성의 위험이 큰 바둑을 뒤로 미룬다. 이력서 제출 가능 시점은 **M1 + Phase 3 + Phase 4 완료**. 선행 공백과 해법은 §1.4 | — | 전부 |
+| **D25** | **모의 통화 경제 (ADR-048)**: 구매자 자산은 **모의 USDC**, 플랫폼 크레딧은 **POINT**. 첫 로그인 지급 = **USDC 10,000 + POINT 1,000**(사용자당 1회). POINT 출처는 지급·**USDC→POINT 단방향 교환**·바둑 보상(마지막). 결제는 **혼합(포인트 우선 차감 후 USDC)**, 환불은 다리별 원래 자산, 정산은 USDC(POINT 몫은 플랫폼 부담 `exp:point_redemption:USDC`) | — | P2 §6.1.1·§8.2.1·§8.5.1, ADR-048 |
+| **D26** | **Solana 지갑은 선택 사항**: 서명 챌린지로 공개키를 연결(`identity.wallet_link`, §7.3)하면 Phase 6d 의 devnet 에스크로 시연을 체험한다. 10,000 USDC 는 원장의 모의 잔액이며 온체인이 아니다. 시연 토큰은 자체 SPL `tUSDC` 기본 + Circle devnet USDC 옵션(U28) | — | ADR-048, P2 §8.7 |
 
 ## 1. 로드맵별 목표 아키텍처 진화
 
-### 1.1 Phase 별 추가분
+### 1.1 Phase 별 추가분 (구현 순서대로)
 
-| Phase | 추가되는 것 | 컨테이너 | 모듈 | 스키마 | 채널 | 인프라·관문 |
-|---|---|---|---|---|---|---|
-| 0 | 모노레포, CI, k3d 최소 배포 | (M1 컨테이너 세트) | — | — | — | G8(통과), Gateway API |
-| **M1** | 사이트 셸·방명록·시각화 | proxy, web, api, ws-gateway, worker, postgres, prometheus, grafana, cloudflared | identity, guestbook, events, realtime, observability | 위 모듈 + `*_read` | `/ws/public`, `/ws/private` | G1~G10 |
-| **1** | 바둑 코어 + 대국 채팅 | (추가 없음 — ws-gateway·api 에 핸들러) | game, chat | `game`, `game_read`, `chat`, `chat_read` | `/ws/room`(`game:*`, `chat:*`) | 룰 엔진 선정(ADR-012), 3D 에셋 서빙 |
-| **2** | KataGo 분석 + 포인트 원장 | **`analysis-worker`**(+ KataGo 바이너리 이미지) | analysis, ledger | `analysis`, `ledger`, `ledger_read` | `/ws/private`(보상 상태 푸시) | CPU 예산(D14), 선점→트랜잭션 밖 분석 |
-| **3** | 타임딜 | **redis** | catalog, deal, order(구매 접수) | `catalog`, `deal`, `order`, 각 `_read` | `/ws/public`(재고 카운트 푸시) | Redis 도입, Streams 판정(D4), k6 |
-| **4** 🎯 | 프로덕션화 | ws-gateway 2분화, HPA 대상 레플리카 | — | — | — | 워크로드 분리, PDB·probe, CD, 에셋 캐시 |
-| **5** | 모의 결제·에스크로·정산·시세 | (추가 없음 — 웹훅은 api 경로) | payment, escrow, settlement, pricefeed | `payment`, `escrow`, `settlement`, `pricefeed` (+`_read`) | `/ws/private`(결제 상태) | KEK/DEK 상향(D13), PG 테스트 모드 |
-| **6** | CS 채팅 → Passkey → WMS → Solana devnet → 마작 | (추가 없음) | support, inventory, fulfillment, (identity 확장), game 규칙 플러그인 | `support`, `inventory`, `fulfillment` (+`_read`), `identity.credential` | `/ws/room`(`cs:*`) | 항목별 독립 DoD |
+| 순서 | Phase | 추가되는 것 | 컨테이너 | 모듈 | 스키마 | 채널 | 인프라·관문 |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | 모노레포, CI, k3d 최소 배포 | (M1 컨테이너 세트) | — | — | — | G8(통과), Gateway API |
+| 1 | **M1** | 사이트 셸·방명록·시각화 | proxy, web, api, ws-gateway, worker, postgres, prometheus, grafana, cloudflared | identity, guestbook, events, realtime, observability | 위 모듈 + `*_read` | `/ws/public`, `/ws/private` | G1~G10 |
+| 2 | **3** | 타임딜 + **`ledger`(POINT) 도입**과 데모 포인트 지급, 포인트 결제(최소 `payment`) | **redis** | catalog, deal, order(구매 접수), **ledger**, payment(포인트 어댑터만) | `catalog`, `deal`, `order`, `ledger`, `payment`(최소), 각 `_read` | `/ws/public`(재고 카운트 푸시), `/ws/private`(구매 결과) | Redis 도입, Streams 판정(D4), k6, B12 쌍 #2·#3·#4(포인트) |
+| 3 | **4** 🎯 | 프로덕션화 | api·ws-gateway(site) 레플리카, HPA 대상 | — | — | — | 워크로드 분리, PDB·probe, CD, 에셋 캐시 (룸 분화는 `/ws/room` 이후 재평가, D17) |
+| 4 | **5** | 모의 카드 결제·에스크로·정산·시세 | (추가 없음 — 웹훅은 api 경로) | payment(카드·웹훅·환불 확장), escrow, settlement, pricefeed | `payment` 확장, `escrow`, `settlement`, `pricefeed` (+`_read`) | `/ws/private`(결제 상태) | KEK/DEK 상향(D13), PG 테스트 모드, B12 쌍 #4(확장)·#5·#7·#8·#9 |
+| 5-a | **6a** | CS 채팅 | (추가 없음) | **chat(코어 첫 도입)**, support | `chat`, `chat_read`, `support`, `support_read` | **`/ws/room` 도입**(`chat:*`, `cs:*`) | `RoomAccessPolicy` 포트(ChatRoomPolicy·CsRoomPolicy), `agent` 역할, B12 쌍 #1 |
+| 5-b | 6b | Passkey | — | identity 확장 | `identity.credential` | — | — |
+| 5-c | 6c | WMS | — | inventory, fulfillment | `inventory`, `fulfillment` (+`_read`) | `/ws/private`(작업자 알림) | `operator` 역할, B12 쌍 #10, **약정(earmark) 활성화**(§1.4) |
+| 5-d | 6d | Solana USDC 에스크로(devnet) | — | escrow 의 체인 어댑터 | — | — | 체인 어댑터 경계(ADR-016) |
+| 6 | **1** | 바둑 코어 + **대국 채팅 룸 종류 추가** | (추가 없음 — ws-gateway·api 에 핸들러) | game, chat(대국 룸 종류) | `game`, `game_read` | `/ws/room`(`game:*`, 대국 채팅 룸) | 룰 엔진 선정(ADR-012), 3D 에셋 서빙, fast lane 측정 |
+| 7 | **2** | KataGo 분석 + **바둑 보상**(포인트 두 번째 출처) | **`analysis-worker`**(+ KataGo 바이너리 이미지) | analysis, ledger 확장(`EligibilityPolicy`·reward) | `analysis`, `ledger` 확장 | `/ws/private`(보상 상태 푸시) | CPU 예산(D14), 선점→트랜잭션 밖 분석, B12 쌍 #6 |
+| 8 | 6e | 마작(`GameRules` 플러그인) | — | game 규칙 플러그인 | — | — | Phase 1 의 게임 프레임 재사용 |
 
-### 1.2 진화 타임라인
+### 1.2 진화 타임라인 (구현 순서)
 
 ```mermaid
 flowchart LR
-    M1["M1<br/>사이트 셸 · 방명록<br/>이벤트 시각화"] --> P1["Phase 1<br/>바둑 코어 + 대국 채팅<br/>/ws/room · game · chat"]
-    P1 --> P2["Phase 2<br/>KataGo 분석 워커<br/>포인트 원장"]
-    P2 --> P3["Phase 3<br/>타임딜 · Redis 도입<br/>Streams 판정"]
+    M1["M1<br/>사이트 셸 · 방명록<br/>이벤트 시각화"] --> P3["Phase 3<br/>타임딜 · Redis 도입<br/>ledger(POINT) · 데모 포인트"]
     P3 --> P4["Phase 4 🎯<br/>프로덕션화<br/>워크로드 분리 · HPA"]
     P4 --> P5["Phase 5<br/>모의 결제 · 에스크로<br/>정산 · 시세 · KEK/DEK"]
-    P5 --> P6a["Phase 6a<br/>CS 채팅"]
+    P5 --> P6a["Phase 6a<br/>CS 채팅<br/>chat 코어 · /ws/room"]
     P6a --> P6b["6b Passkey"]
     P6b --> P6c["6c WMS<br/>풀필먼트"]
     P6c --> P6d["6d Solana devnet<br/>에스크로"]
-    P6d --> P6e["6e 마작<br/>규칙 플러그인"]
+    P6d --> P1["Phase 1<br/>바둑 코어 + 대국 채팅 룸<br/>game"]
+    P1 --> P2["Phase 2<br/>KataGo 분석 워커<br/>바둑 보상"]
+    P2 --> P6e["6e 마작<br/>규칙 플러그인"]
 ```
 
-순서 재검토는 §12 에 있다(WMS 는 주문·재고·결제가 선행, 마작은 Phase 1 의 게임 프레임 재사용이 선행).
+순서 재검토는 §12, 선행 공백과 해법은 §1.4 에 있다(WMS 는 주문·재고·결제가 선행, 마작은 Phase 1 의 게임 프레임 재사용이 선행, 바둑은 `chat` 코어·`/ws/room`·`ledger`·B12 가 이미 있다는 전제).
 
-### 1.3 목표 컨테이너 구성 (Phase 6 최종)
+### 1.3 목표 컨테이너 구성 (Phase 6e 까지 끝난 최종 상태 — 구현 순서와 무관한 도착점)
 
 ```mermaid
 flowchart TB
@@ -107,9 +116,50 @@ flowchart TB
     WRK -.->|"모의 택배 어댑터"| COU["택배 모의 API"]
 ```
 
+### 1.4 구현 순서 변경(D24)의 선행 의존과 공백
+
+바둑(Phase 1~2)을 마지막에 두면 **앞 Phase 가 바둑이 만들어 주던 것을 스스로 마련**해야 하고, 바둑은 **앞 Phase 가 만든 기반 위에서** 시작한다. 공백과 해법을 모았다.
+
+**(1) 단계별 선행 요구**
+
+| 구현 순서 | 선행 구현에 요구하는 것 | 이 단계가 새로 도입하는 기반 |
+|---|---|---|
+| Phase 3 | M1(events·realtime·audit·identity) | Redis, `ledger`(POINT), `catalog`·`deal`·`order`, 최소 `payment`(포인트), B12 의 틀과 쌍 #2·#3·#4 |
+| Phase 4 | Phase 3(서비스가 있어야 분리·HPA 의미) | 워크로드 분리, HPA·PDB·probe, CD |
+| Phase 5 | Phase 3(order·ledger·payment 최소), Phase 4 권장(운영 기반) | `pricefeed`·`escrow`·`settlement`, 카드 어댑터·웹훅, KEK/DEK 상향 |
+| 6a | M1(realtime·identity), Phase 3(주문 연동 context) | **`chat` 코어(방·참가자·메시지·방 카운터)**, **`/ws/room`**, `RoomAccessPolicy` 포트, `support`, `agent` 역할, B12 쌍 #1 |
+| 6b | M1(identity) | `identity.credential` |
+| 6c | Phase 3(deal·order), Phase 5(결제·에스크로 완료 이벤트), 6a(CS 에서 배송 정보 노출은 선택) | `inventory`·`fulfillment`, `operator` 역할, 쌍 #10, 약정 활성화 |
+| 6d | Phase 5(escrow·settlement) | 체인 어댑터 |
+| **Phase 1** | **6a(`chat` 코어·`/ws/room`·룸 포트), Phase 3(B12 틀·`ledger` 는 Phase 2 보상에서 필요)** | `game`, 대국 룸·대국 채팅 룸 종류, `GameRoomPolicy`, fast lane |
+| **Phase 2** | **Phase 1(`game.finished`), Phase 3(`ledger`·POINT 계정)** | `analysis`·`analysis-worker`, `EligibilityPolicy`·reward |
+| 6e | Phase 1(게임 프레임) | 규칙 플러그인 |
+
+**(2) 공백과 해법**
+
+| # | 공백 | 발생 지점 | 해법 | 반영 문서 |
+|---|---|---|---|---|
+| G1 | **포인트·USDC 출처 없음** — 타임딜이 쓸 자산은 원래 바둑 보상이 만든다 | Phase 3 | `ledger` 에 **지급·교환 경로**를 둔다: ① `ClaimWelcomeGrant`(로그인 사용자 **1회**, USDC 10,000 + POINT 1,000, 멱등 키 `grant:welcome:{uid}`) ② `AdminGrant`(관리자, 건당 상한, `grant:admin:{uid}:{requestId}`) ③ `ExchangeUsdcToPoint`(단방향, §8.2.1). 분개는 `exp:demo_grant:{POINT\|USDC}` / `liab:user_{points\|usdc}:{uid}`, 감사 `system.welcome_grant_claimed`·`admin.grant`·`system.points_exchanged`(제안), 지표 `pf_ledger_demo_grant_total{kind,asset}`·`pf_ledger_demo_supply{asset}`, 모든 화면 "모의" 표시. 같은 모듈 안 usecase 라 새 B12 쌍은 없다. **Phase 2 의 바둑 보상은 마지막 출처**(`exp:points_issued`)이며 계정으로 구분해 대사한다 | P2 §9, ADR-037·040·048, P1 §10 |
+| G2 | **`payment` 모듈이 Phase 5 인데 Phase 3 이 원장 결제를 한다** | Phase 3 | Phase 3 에는 **`payment` 최소형**(`LedgerGateway`(포인트 우선 + USDC 혼합) + `payment.payment`·`payment_leg` 표, method=`ledger`, 환불 = 다리별 원장 역분개만)만 둔다. 카드 어댑터·웹훅 inbox·`payment_refund`·견적은 Phase 5 의 **추가 마이그레이션**으로 얹는다(표 변경은 컬럼 추가 중심) | P2 §6·§20 |
+| G3 | **`pricefeed` 스냅샷이 필요하다** — USDC 다리는 환율이 있어야 한다(S16 j: 결제 시작 시 FX 스냅샷 고정) | Phase 3 | Phase 3 에 **최소 `pricefeed`**(고정 환율 소스 `FixedRateSource`, 설정 `DEMO_USDC_KRW_RATE_E8`, 스냅샷 행·견적 API)를 둔다. 따라서 **모든 결제가 처음부터 스냅샷을 갖고 `legacy_demo` 는 폐기**한다(AC-C27 이 Phase 3 부터). Phase 5 는 실제 시세 소스·교차 검증기를 같은 수집기에 **추가**한다 | P2 §8·§20, ADR-041·048 |
+| G4 | **`escrow` 가 없다** | Phase 3 | 결제 분개는 `liab:user_points`·`liab:user_usdc` → `liab:escrow:POINT`·`liab:escrow:USDC` 로 **보류만** 한다(계정은 존재, 모듈은 없음). Phase 5 에서 `escrow` 모듈이 이 보류분의 해제·환불·정산을 맡는다 — **`LegacyDemoOrderClosure` 는 필요 없다**(보류분이 스냅샷을 가진 정상 주문이므로 같은 해제 경로를 탄다) | P2 §7·§9 |
+| G5 | **`inventory`(약정)가 없다** — 딜 게시가 약정 승인을 기다린다 | Phase 3 | 6c 전까지 `PublishDeal` 은 **약정 없이** `draft → scheduled` 로 간다(설정 `INVENTORY_EARMARK=off`, 상태 `publishing` 은 off 일 때 즉시 통과). 6c 에서 `INVENTORY_EARMARK=on` 으로 바꾸고 `deal-earmark-reactor` 를 활성화하며, **진행 중(open/scheduled) 딜은 초기 약정 동기화 잡**으로 맞춘다(닫힌·정산된 딜 제외) | P2 §4·§20, P3 §4.6·§18 |
+| G6 | **주문이 `paid` 에서 멈춘다** — `fulfillment` 가 없다 | Phase 3~5 | 정상이다. `order.paid` 의 소비자가 아직 없을 뿐이고 outbox 는 등록된 소비자에게만 팬아웃한다. 6c 도입 시 `legacy_demo` 주문은 소비하지 않는다(소비자 필터) | P3 §2·§18 |
+| G7 | **`/ws/room` 이 Phase 3~5 에 없다** | Phase 3~5 | 구매 결과·재고 카운트는 기존 `/ws/private`·`/ws/public` 으로 충분하다(M1 채널 불변). `/ws/room` 은 **6a 에서 처음 도입**되고 대국 룸은 Phase 1 에서 같은 연결에 추가된다(D3·D8) | §6, ADR-032 |
+| G8 | **Phase 4 에 `/ws/room`·KataGo 가 없다** | Phase 4 | 분화 대상에서 제외한다. `ws-gateway` 분화는 6a 이후 재평가(D3·D17), `analysis-worker` 는 Phase 2 에 합류한다 | §10.1 |
+| G9 | **`chat` 코어의 첫 사용처가 CS 채팅**이다 | 6a | 방 종류를 `support_ticket` 로 시작하고 대국 룸 종류(`game_players`·`game_spectators`)는 Phase 1 에서 **추가만** 한다(`chat-game-sync` 소비자도 Phase 1). 채팅 DoD 의 대국 채팅 항목은 바둑 Phase 와 함께 완료한다 | P4 §1·§22 |
+| G10 | **CS 에서 배송 정보를 보여 주려면 `fulfillment` 가 필요하다** | 6a(6c 이전) | `OrderContextReader` 가 `shipment: null` 을 돌려주고 UI 는 "배송 정보 없음(준비 중)" 을 표시한다. 6c 도입 때 같은 포트가 배송 추적을 채운다 | P4 §9, P3 |
+| G11 | **B12 쌍이 단계마다 하나씩 활성화된다** | 전 단계 | `modules/tx-pairs.json` 은 전체 표를 담되 쌍마다 `activeFrom`(Phase)을 둔다. 활성화 전 쌍의 `InTx` 임포트는 CI 실패, **원자성 계약 시험(롤백 시 타 모듈 변경도 사라짐)은 쌍이 활성화되는 Phase 에서 추가**한다(§2.4) | §2.4 |
+| G12 | **`agent`·`operator` 역할의 도입 시점이 갈린다** | 6a, 6c | `agent` 는 6a, `operator` 는 6c 에서 `RolePolicy` 에 추가한다. 일반화된 `RolePolicy`·`ActorContext.roles` 는 6a 에서 한 번에 도입한다(§7.1) | §7.1 |
+| G13 | **바둑이 `ledger` 를 새로 만드는 것이 아니라 확장** | Phase 2 | `ledger` 스키마·`PostJournalInTx` 는 Phase 3 에 이미 있다. Phase 2 는 `reward` 상태 머신·`EligibilityPolicy`·`ConfirmRewardInTx`·`FlagRewardInTx` 를 **추가**한다 | §2.5, ADR-037 |
+| G14 | **KataGo 스파이크가 맨 뒤에 있다** — 실행 불가가 늦게 드러날 수 있다 | Phase 2 | 바둑이 마지막이라 위험이 늦게 드러난다. 완화: **KataGo 실행 가능성 스파이크(P1 §18 #8)를 Phase 1 착수 전에 한 번 실행하는 것을 제안**(구현 없이 측정만)하고, 안 되면 Phase 2 를 모의 분석기(`ReplayAnalyzer`)로 대체할지 설계 재검토에서 결정한다 | P1 §9·§18 |
+| G15 | **지갑 연결 시점** — 지갑 없이도 모든 구매가 되어야 하고, 온체인 시연(6d)은 지갑이 있는 사용자만 | Phase 6d | 지갑은 선택이다(D26). `identity.wallet_link` 는 6d 착수 시 추가 마이그레이션(§7.3). 그 전에는 원장 모의 잔액만 쓴다 | §7.3, P2 §8.7 |
+
 ## 2. 모듈 지도 확장
 
 ### 2.1 모듈 표 (제안)
+
+'Phase' 열은 로드맵 Phase 번호이며 구현 순서는 §1.1·D24 를 따른다.
 
 | 모듈 | Phase | 쓰기 스키마 / 읽기 스키마 | 구독 이벤트(소비자) | 발행 이벤트 | 동기 의존(공개 usecase·포트) |
 |---|---|---|---|---|---|
@@ -117,21 +167,21 @@ flowchart TB
 | events | M1 | `events` | — | — | — |
 | observability | M1 | — | — | — | — |
 | guestbook | M1 | `guestbook` / `_read` | — | `entry.*` 등 | identity, events |
-| realtime | M1 (+1) | `realtime` / `realtime_read` | 도메인 변경(브로드캐스터) | — | identity (+ 소유 포트 §6.6) |
-| **game** | 1 | `game` / `game_read` | — | `game.*` | identity, events |
-| **chat** | 1 (+6) | `chat` / `chat_read` | `game.*`(방 수명), `report.*` | `chat.*` | identity, events (`RoomAccessPolicy` 는 **realtime 소유 포트**이고 chat 은 `ChatRoomPolicy` 구현을 조립부에 등록 — §6.6) |
+| realtime | M1 (+6a: 룸 포트·`/ws/room`) | `realtime` / `realtime_read` | 도메인 변경(브로드캐스터) | — | identity (+ 소유 포트 §6.6) |
+| **game** | 1 (구현 순서 6) | `game` / `game_read` | — | `game.*` | identity, events |
+| **chat** | 6a(코어·CS 룸) · 1(대국 룸 종류) | `chat` / `chat_read` | `game.*`(방 수명), `report.*` | `chat.*` | identity, events (`RoomAccessPolicy` 는 **realtime 소유 포트**이고 chat 은 `ChatRoomPolicy` 구현을 조립부에 등록 — §6.6) |
 | **analysis** | 2 | `analysis` | `reward.pending_created`(작업 생성, 색별 reward 와 함께) | `analysis.completed`·`analysis.failed` | game(조회 포트 `GetGameRecord`), events, ledger(`ConfirmRewardInTx`·`FlagRewardInTx`, B12 쌍 #6) |
-| **ledger** | 2 | `ledger` / `_read` | `game.finished`(`EligibilityPolicy` 판정 후 보상 `PENDING` 생성) | `reward.pending_created`·`reward.*`·`ledger.journal_posted` | events (공개 `*InTx`: `PostJournalInTx`·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`, §2.5) |
+| **ledger** | 3(도입, POINT·데모 지급) · 2(바둑 보상) · 5(KRW/USDC) | `ledger` / `_read` | `game.finished`(`EligibilityPolicy` 판정 후 보상 `PENDING` 생성) | `reward.pending_created`·`reward.*`·`ledger.journal_posted` | events (공개 `*InTx`: `PostJournalInTx`·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`, §2.5) |
 | **catalog** | 3 | `catalog` / `_read` | — | `product.*` | identity(관리자) |
 | **deal** | 3 | `deal` / `_read` | `order.*`(확정·취소) | `deal.*` | catalog, events, 포트 `StockReservation`(Redis, ADR-024) |
 | **order** | 3 (+5) | `order` / `_read` | `payment.*`, `deal.*`, `fulfillment.*`·`return.*` | `order.*` | deal(`ConfirmStockInTx`, 쌍 #2), ledger(`PostJournalInTx`, 쌍 #3), 포트 `PaymentRecordPort`·`EscrowHoldPort`(쌍 #4·#5, payment·escrow 가 구현), catalog, identity |
 | **pricefeed** | 5 | `pricefeed` | — | `price.*` | — |
-| **payment** | 5 | `payment` / `_read` (+웹훅 inbox) | `order.*`, `fulfillment.rejected`·`fulfillment.cancelled`·`return.inspected`(소비자 `payment-fulfillment-refunder`) | `payment.*`·`quote.*` | order(조회 `GetPayableOrder`, `MarkRefundedInTx` 쌍 #7), ledger(쌍 #7), escrow(`RefundInTx` 쌍 #7), 포트 `PaymentGateway` |
+| **payment** | 3(포인트 어댑터만) · 5(카드·웹훅·환불) | `payment` / `_read` (+웹훅 inbox) | `order.*`, `fulfillment.rejected`·`fulfillment.cancelled`·`return.inspected`(소비자 `payment-fulfillment-refunder`) | `payment.*`·`quote.*` | order(조회 `GetPayableOrder`, `MarkRefundedInTx` 쌍 #7), ledger(쌍 #7), escrow(`RefundInTx` 쌍 #7), 포트 `PaymentGateway` |
 | **escrow** | 5 | `escrow` / `_read` | `shipment.delivered`, `shipment.delivery_failed`, `order.return_requested`, `payment.refunded` | `escrow.*` | ledger(`PostJournalInTx`, 쌍 #8) |
 | **settlement** | 5 | `settlement` / `_read` | `payment.*`, `escrow.*` | `settlement.*` | pricefeed(견적 조회), ledger(`PostJournalInTx`, 쌍 #9), events |
-| **inventory** | 6 | `inventory` / `_read` | `deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked`(약정) | `inventory.*` | events |
-| **fulfillment** | 6 | `fulfillment` / `_read` | `order.paid`·`order.cancel_requested`·`order.cancelled`·`order.disputed`·`payment.refunded`·`order.return_requested`·`order.address_corrected`, `inventory.*` | `fulfillment.*`·`shipment.*`·`package.*`·`return.*` | order(`GetShippingAddress`, 감사), inventory(`AllocateInTx`·`ReleaseAllocationInTx`·`IssueInTx`·`RecordMovementInTx`, 쌍 #10), 포트 `CarrierAdapter` |
-| **support** | 6 | `support` / `_read` | `chat.*`, `order.*` | `support.ticket_*` | chat(`OpenRoomInTx`·`PostMessageInTx`·`CloseRoomInTx`·`AddParticipantInTx`·`RemoveParticipantInTx`, 쌍 #1), order(조회), identity |
+| **inventory** | 6c | `inventory` / `_read` | `deal.published`·`deal.settled`·`deal.stock_adjusted`·`deal.restocked`(약정) | `inventory.*` | events |
+| **fulfillment** | 6c | `fulfillment` / `_read` | `order.paid`·`order.cancel_requested`·`order.cancelled`·`order.disputed`·`payment.refunded`·`order.return_requested`·`order.address_corrected`, `inventory.*` | `fulfillment.*`·`shipment.*`·`package.*`·`return.*` | order(`GetShippingAddress`, 감사), inventory(`AllocateInTx`·`ReleaseAllocationInTx`·`IssueInTx`·`RecordMovementInTx`, 쌍 #10), 포트 `CarrierAdapter` |
+| **support** | 6a | `support` / `_read` | `chat.*`, `order.*` | `support.ticket_*` | chat(`OpenRoomInTx`·`PostMessageInTx`·`CloseRoomInTx`·`AddParticipantInTx`·`RemoveParticipantInTx`, 쌍 #1), order(조회), identity |
 
 ### 2.2 층과 의존 규칙 (D16)
 
@@ -237,6 +287,18 @@ M1 규약(F16 §8.2)은 "command usecase 만 `uow.run` 을 부르고 중첩을 �
 | 9 | settlement · `ExecuteSettlement` (L5) | ledger · `PostJournalInTx` (L4) | 직접 | 정산 분개 | 5 |
 | 10 | fulfillment · `AcceptOrder`(할당 포함, 단일 tx)·`DispatchShipment`/`HandOverShipments`·피킹·패킹·PUTBACK·반품 입고·재입고 작업 (L5) | inventory · `AllocateInTx`·`ReleaseAllocationInTx`·`IssueInTx`·`RecordMovementInTx` (L4) | 직접 | 할당·이동·출고 원장 + 풀필먼트 상태. 다품목은 `sku_id` 오름차순으로 호출(교착 방지) | 6 |
 
+**도입 순서와 시험 시점 (D24)**: 쌍은 구현 순서대로 하나씩 활성화된다. `modules/tx-pairs.json` 은 전체 표를 담되 쌍마다 `activeFrom` 을 둔다.
+
+| 활성화 | 쌍 | 원자성 계약 시험(롤백 시 타 모듈 변경도 사라짐)을 추가하는 시점 |
+|---|---|---|
+| Phase 3 | #2(order→deal), #3(order→ledger), #4(order→payment, 포인트 어댑터) | Phase 3 (구매 확정 한 트랜잭션) |
+| Phase 5 | #4 확장(카드), #5(escrow), #7(환불), #8(해제), #9(정산) | Phase 5 |
+| 6a | #1(support→chat) | 6a (티켓 전이와 메시지) |
+| 6c | #10(fulfillment→inventory) | 6c (할당·이동·출고) |
+| Phase 2 | #6(analysis→ledger) | Phase 2 (분석 결과와 보상 전이) |
+
+활성화 전 쌍의 `…InTx` 임포트는 `check:arch` 가 실패시킨다. 쌍을 활성화하는 Phase 의 설계 재검토(§12.5)에서 이 표를 다시 확인한다.
+
 **미사용 예약**: 쌍 #11(`AppendRoomLogInTx`, realtime 방 로그 — §6.7 2차 대응)은 **현재 허용 목록에 없다**. 룸 지연 예산 초과가 측정으로 확인될 때만 ADR-030 개정과 함께 추가한다.
 
 **허용하지 않는 것(이벤트로만)**: `game → ledger`(상위 층), `game → chat`, `game → analysis`(대국 종료는 `game.finished` 이벤트로 알린다), `fulfillment → order`(상태는 이벤트로 알림), `inventory → deal`(약정 상한은 이벤트 `inventory.earmark_changed`), `realtime → 도메인`(포트 역전, §6.6).
@@ -269,11 +331,12 @@ sequenceDiagram
 | 항목 | 내용 |
 |---|---|
 | 소유 | `ledger` 모듈 하나. 스키마 정본은 [ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md)(`account`·`journal`·`posting`·`account_balance`), POINT 자산 규칙과 보상(`reward`) 상태 머신은 [ADR-037](../../adr/ADR-037-simulated-points-ledger.md) |
-| 자산 | `POINT`(Phase 2), `KRW`(Phase 5, 모의), `USDC`(Phase 5, 모의/devnet 거울). 분개는 **자산별로** 차변 합 = 대변 합 |
+| 자산 | `POINT`·`USDC`(모의, **Phase 3 에서 도입** — 혼합 결제·첫 로그인 지급·교환), `KRW`(Phase 5, 모의), `USDC`(Phase 5, 모의/devnet 거울). 분개는 **자산별로** 차변 합 = 대변 합 |
 | 불변식 | 추가 전용, 지연 제약 트리거로 자산별 차변=대변, 정정은 역분개(`reversal_of_id`), 멱등 키 유일 |
 | 음수 방지 | **계정 유형별 규칙**: 사용자 계정(`liab:user_*`)은 `min_balance = 0` — 잔액 조건부 갱신(`balance + Δ >= min_balance`); 시스템 계정은 유형별로 정하며 **정본은 ADR-040 의 계정 유형 표**(`exp:*`·`rev:*`·`fx:*` 하한 없음, `liab:escrow:*`·`liab:seller_payable:*`·`asset:*` 규칙 포함) |
-| 공개 `InTx` | `PostJournalInTx(tx, JournalInput)`, `ReverseJournalInTx(tx, journalId, reason)`, `ConfirmRewardInTx(tx, rewardId, expectedVersion)`, `FlagRewardInTx(tx, rewardId, report)` — 시그니처 `(tx: TxContext, …) => Result<…, LedgerError>` |
+| 공개 `InTx` | `PostJournalInTx(tx, JournalInput)`, `ReverseJournalInTx(tx, journalId, reason)`(Phase 3), `ConfirmRewardInTx(tx, rewardId, expectedVersion)`, `FlagRewardInTx(tx, rewardId, report)`(Phase 2) — 시그니처 `(tx: TxContext, …) => Result<…, LedgerError>` |
 | 보상 | `reward` 상태 `PENDING → CONFIRMED / FLAGGED → (수동) CONFIRMED / REVOKED`. **생성은 `ledger` 가 `game.finished` 를 소비해** `EligibilityPolicy`(ledger 소유, 입력은 `game.finished` 페이로드)로 자격을 판정한 뒤 `PENDING` 행을 만들고 `reward.pending_created` 를 발행한다(자격 미달이면 reward 도 분석도 없음). 확정 = `exp:points_issued`(POINT) 차변 / `liab:user_points:{uid}`(POINT) 대변 분개와 같은 트랜잭션. `PENDING`·`FLAGGED` 동안은 잔액 불변이고 **`CONFIRMED` 는 종결**이다. `FLAGGED → REVOKED` 는 PENDING 을 무효화할 뿐 **기장이 없다**(확정 보상의 역분개나 음수 잔액 허용은 없다) |
+| 자산 출처 (D24·D25) | ① **첫 로그인 지급**(Phase 3~): `ClaimWelcomeGrant` — USDC 10,000 + POINT 1,000, 사용자당 1회, `exp:demo_grant:*` / `liab:user_{points\|usdc}:{uid}` ② **관리자 지급** `AdminGrant` ③ **USDC→POINT 단방향 교환** `ExchangeUsdcToPoint`(`exp:points_exchanged:POINT`·`rev:point_exchange:USDC`) ④ **바둑 보상**(Phase 2~, 마지막): `exp:points_issued`. 모두 같은 모듈 안 usecase(새 B12 쌍 없음), 감사·속도 제한·"모의" 표시, 출처는 **계정으로 구분**해 대사한다. 금액·한도는 §16 U24~U27 |
 | 이벤트 | `reward.pending_created`, `reward.confirmed·flagged·revoked`, `ledger.journal_posted`(§8.3) |
 | 모의 표시 | 모든 금액 응답에 `X-PF-Mock: 1`, 화면에 "모의" 배너(D18, ADR-015) |
 
@@ -307,7 +370,7 @@ flowchart TD
 | 후보 | 확장 | 런타임 | 자원 | 격리 | 배포 | 판정 |
 |---|---|---|---|---|---|---|
 | **KataGo 분석 워커** | 강(CPU 바운드) | **강**(C++ 바이너리·모델 파일) | **강**(코어 점유) | 강(폭주 시 사이트 영향) | 약 | **분리(D2)** — 별도 프로세스·이미지. 큐는 DB 선점(Phase 2) |
-| 룸 실시간(대국·채팅) | 중(연결 수) | 없음(TS 가능, M1 실측 통과) | 약 | 중 | 약 | 엔트리포인트 분화(D3) — Phase 4 에 `--surface=room` |
+| 룸 실시간(대국·채팅) | 중(연결 수) | 없음(TS 가능, M1 실측 통과) | 약 | 중 | 약 | 엔트리포인트 분화(D3) — `/ws/room` 이 존재하는 6a 이후 재평가(`--surface=room`, D24) |
 | WMS(풀필먼트) | 약 | 없음 | 약 | 약 | 약 | **모듈 유지** |
 | 채팅 | 중(연결) | 없음 | 약 | 약 | 약 | 모듈 유지 + 룸 채널 |
 | 결제 웹훅 수신 | 약 | 없음 | 약 | 중(폭주 방어) | 약 | **모듈 유지**, `api` 의 `/api/webhooks/*` → inbox 저장 후 202(처리는 비동기) |
@@ -496,6 +559,8 @@ ADR-024 의 `StockReservation` 포트(이 문서 초안의 `StockStore` 와 **�
 
 M1 은 `/ws/public`(모두에게 같은 메시지)과 `/ws/private`(세션 소유자에게만)이다. 바둑·채팅은 **"특정 룸의 참가자/관전자에게만"** 가는 메시지가 필요하다. 룸은 수가 많고 수명이 짧으며(대국 한 판), 권한이 룸마다 다르다.
 
+**도입 시점 (D24)**: `/ws/room` 의 **첫 사용처는 6a(CS 채팅)** 이다 — `chat:*`·`cs:*` 룸으로 시작한다. 이때 `RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper` 포트와 `ChatRoomPolicy`·`CsRoomPolicy` 구현, 방 구독·재개·백프레셔의 일반화(F14 `PublicHub`→`RoomHub`)가 들어간다. **대국 룸(`game:*`)은 Phase 1 에서 같은 연결에 `GameRoomPolicy`·`RoomEventSource`(자체 `game_event` 로그)만 추가**한다. Phase 3~5 의 구매 결과·재고 카운트는 `/ws/private`·`/ws/public` 으로 충분하다.
+
 ### 6.2 선택지
 
 | 안 | 설명 | 장점 | 단점 | 판정 |
@@ -628,7 +693,7 @@ M1 경로는 `명령 tx → outbox → 디스패처 → inbox → 브로드캐�
 
 | 단계 | 방식 |
 |---|---|
-| 예산 | 룸 이벤트 종단 지연 **p95 ≤ 250ms**(제안, **미측정** — Phase 1 부하 시험에서 측정) |
+| 예산 | 룸 이벤트 종단 지연 **p95 ≤ 250ms**(제안, **미측정** — 6a 의 채팅 룸에서 1차 측정, Phase 1 의 대국 룸 부하 시험에서 확정) |
 | 1차 대응 | 디스패처를 NOTIFY 구동(폴링 대기 없음)으로 돌리고, 룸 이벤트용 브로드캐스터 러너를 별도 동시성으로 둔다 |
 | 기본 fast lane (자체 순번 로그를 가진 룸 — 대국) | 명령 tx 가 `pg_notify('room_changed', {room, seq})` 를 추가(커밋 때 전달) → 게이트웨이가 `RoomEventSource.after(room, lastSent)` 로 도메인 로그(`game_event`)를 읽어 push. outbox 는 읽기 모델 투영용으로만 남는다. 모듈 경계 예외 없음(포트 의존 역전) |
 | 2차(**미사용 예약**) | 자체 로그가 없는 룸이 예산을 넘는 일이 **측정으로 확인될 때만**: 그 룸의 명령이 같은 트랜잭션에서 `realtime` 의 `AppendRoomLogInTx(tx, …)` 를 호출한다. 이는 모듈 간 한 트랜잭션이므로 **허용 쌍 #11 을 ADR-030 개정과 함께 먼저 추가**해야 하며 그 전까지는 허용 목록에 없다(R4). 현재 대국은 `game_event` 로, 채팅은 표준 경로로 충분하므로 해당 룸이 없다 |
@@ -670,6 +735,7 @@ fast lane 은 outbox 정본·멱등 규약을 해치지 않는다(대국은 `gam
 | operator | `OPERATOR_GITHUB_IDS` 허용목록(설정) | 창고 작업(피킹·패킹·출고 스캔, 입고 검수), 작업 큐 열람. 재고 조정 승인·강제 취소는 `admin` |
 | admin | `ADMIN_GITHUB_IDS` 허용목록(설정) | 숨김/신고/잠금, 상품·딜 관리, 정산 열람, 창고 관리(조정 승인·예외 해결), 감사 조회 |
 
+- **도입 시점 (D24)**: `RolePolicy`·`ActorContext.roles` 일반화는 **6a**, `agent` 는 6a, `operator` 는 6c 에서 허용목록에 추가한다. 그 전(Phase 3~5)에는 M1 의 `admin` 만 있다(상품·딜·결제 관리).
 - **허용목록 방식 통일**: 세 역할 모두 설정 허용목록이며 DB 에 권한을 두지 않는다(M1 ID-09). 역할 변경은 설정 변경 + 재배포이고, 허용목록 변경은 배포 로그와 감사 `system.config_changed`(제안)로 남긴다. 한 사람이 여러 역할을 가질 수 있다(단일 운영자).
 - **데모 모드**: 방문자가 `operator`/`agent` 화면을 **샌드박스 데이터로** 체험하게 할지는 사용자 결정(§16). 허용하더라도 별도 `demo_` 스키마 데이터와 쓰기 시뮬레이션만 다룬다.
 - **seller 없음**: 단일 판매자이므로 상품·딜·재고 관리는 `admin` 이다. 판매자 포털은 범위 밖(필요 시 Phase 6 이후 별도 ADR).
@@ -679,6 +745,16 @@ fast lane 은 outbox 정본·멱등 규약을 해치지 않는다(대국은 `gam
 ### 7.2 Passkey (D12, Phase 6)
 
 `identity.credential (id, user_id, credential_id UNIQUE, public_key, sign_count, transports, created_at, last_used_at)`. 로그인 후 같은 방식으로 `session` 을 만든다. 계정 연결: 먼저 GitHub 로 로그인한 사용자가 Passkey 를 추가 등록(계정 단위). 복구·분실 정책은 영역 설계 대상이 아니라 Phase 6b 착수 시 ADR 로 남긴다(미결).
+
+### 7.3 Solana 지갑 연결 (선택, D26 · ADR-048 E6)
+
+`identity.wallet_link (id, user_id, public_key UNIQUE, linked_at, unlinked_at)` — **공개키 하나는 한 사용자에게만**(부분 유일), 한 사용자는 활성 지갑 1개(제안). `identity.wallet_challenge (id, user_id, nonce, expires_at, used_at)` — 1회용·5분 만료·사용자 바인딩.
+
+1. `POST /api/me/wallet/challenge` → 서버가 `nonce` 를 만들고 메시지(`portfolio-wallet-link:{origin}:{userId}:{nonce}:{expiresAt}`)를 돌려준다.
+2. 지갑이 메시지를 서명 → `POST /api/me/wallet/link {publicKey, signature}`. 서버는 **Ed25519 서명을 검증**한다(Bun 의 `node:crypto`·WebCrypto 모두 로컬 실측에서 검증 통과·변조 거부 확인). 챌린지를 `used_at` 조건부 갱신으로 소진해 재사용을 막는다.
+3. 해제는 `DELETE /api/me/wallet`(감사 `system.wallet_linked`/`unlinked`). 세션 폐기(`RevokeSessions`)와 독립이다.
+
+지갑이 없어도 모든 기능이 동작한다. 연결 여부는 6d 의 소액 devnet 에스크로 시연에만 영향을 준다. 공개키는 PII 가 아니라 공개 식별자이지만 사용자와 묶이므로 PSD 로 분류한다. 계정 복구·다중 지갑은 6d 착수 시 ADR.
 
 ## 8. 규약 확장과 크로스 도메인 이벤트
 
@@ -744,6 +820,7 @@ flowchart LR
 | **`reward.pending_created`** | ledger | `gameId`, `rewards[{rewardId, ownerKey, color}]` | **analysis**(작업 멱등 생성, `UNIQUE (game_id)`), ledger-projector | `game.finished` 처리와 같은 tx 에서 발행 |
 | `reward.confirmed` · `reward.flagged` · `reward.revoked` | ledger | `rewardId`, 금액(내부), 상태 | ledger-projector | `revoked` 는 PENDING 무효화(기장 없음) |
 | `ledger.journal_posted` | ledger | `journalId`, `kind`, `refType`, `refId` | ledger-projector | (P1 의 `ledger.posted` 폐기) |
+| `ledger.demo_granted` · `ledger.points_exchanged` | ledger | `userId`, `kind`, `asset`, `amount`(교환은 `pointAmount`·`usdcCostMicro`·`snapshotId`) | 프로젝터 | 개인 알림("모의") |
 | `chat.room_opened` · `chat.room_closed` · `chat.room_revealed` · `chat.participant_added` · `chat.participant_removed` · `chat.participant_muted` · `chat.participant_unmuted` · `chat.message_posted` · `chat.message_hidden` · `chat.message_deleted` · `chat.read_marked` | chat | `roomId`, `seq`, … (CS 방은 본문 없음) | chat-projector, chat-broadcaster(realtime 소유), chat-game-sync 는 소비 측(game.*) | 04 §12 |
 | **`chat.message_reported`** | chat | `reportId`, `roomId`, `seq` | chat-projector(관리자 큐) | M1 `report.filed` 와 같은 모양의 모더레이션 흐름 |
 | `support.ticket_opened` · `support.ticket_claimed` · `support.ticket_released` · `support.ticket_first_replied` · `support.ticket_resolved` · `support.ticket_reopened` · `support.ticket_closed` | support | `ticketId`, `roomId`, … | support-projector | chat 은 구독하지 않는다 — 방 개설/종료/참가자 변경은 허용 쌍 #1 의 `…InTx`(같은 tx) |
@@ -804,7 +881,7 @@ flowchart LR
 
 ### 9.3 D13 — KEK/DEK 상향
 
-M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.shipping_address_enc`, Phase 5 의 `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`, Phase 6 의 CS 본문·수취인이 더해지면 ADR-026 의 재검토 조건("ENC 필드 3개 이상")이 발동한다(§9.5 통합표). **Phase 5 착수 전**(카드 결제 어댑터 구현 전)에 다음으로 올린다.
+M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.shipping_address_enc`, Phase 5 의 `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(여기서 4개), 이후 6a 의 CS 본문·6c 의 수취인이 더해지면 ADR-026 의 재검토 조건("ENC 필드 3개 이상")이 발동한다(§9.5 통합표). **Phase 5 착수 전**(카드 결제 어댑터 구현 전)에 다음으로 올린다.
 
 | 항목 | 설계 |
 |---|---|
@@ -829,11 +906,11 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.shipping_
 | 2 | `order.shipping_address_enc` (수령인·전화·주소 JSON 한 덩어리) | order | 3 | ENC | 배송 완료/취소 후 **30일** 뒤 암호문 삭제(익명화), 주문 자체는 보관 | 예 |
 | 3 | `payment.provider_payment_key_enc` | payment | 5 | ENC | 결제 보관 정책(금융 기록) | 예 |
 | 4 | `escrow_dispute.reason_enc` | escrow | 5 | ENC | 분쟁 종결 후 보관(제안 1년) | 예 |
-| 5 | `fulfillment.fulfillment_order.recipient_enc` | fulfillment | 6 | ENC | 배송 완료 + 반품 기한 후 **30일** 익명화(§9.6) | 예 |
-| 6 | `chat.message.body_enc` + 읽기 사본 `chat_read.message_view.body_enc` (CS 방만) | chat | 6 | ENC | CS **1년**(제안, 법적 의무는 법무 검토 필요·미확인) | 예 |
-| 7 | `chat.report.snapshot_enc` (CS 방 신고 스냅샷) | chat | 6 | ENC | 신고 종결 후 90일(제안) | 예 |
+| 5 | `fulfillment.fulfillment_order.recipient_enc` | fulfillment | 6c | ENC | 배송 완료 + 반품 기한 후 **30일** 익명화(§9.6) | 예 |
+| 6 | `chat.message.body_enc` + 읽기 사본 `chat_read.message_view.body_enc` (CS 방만) | chat | 6a | ENC | CS **1년**(제안, 법적 의무는 법무 검토 필요·미확인) | 예 |
+| 7 | `chat.report.snapshot_enc` (CS 방 신고 스냅샷) | chat | 6a | ENC | 신고 종결 후 90일(제안) | 예 |
 
-**합계: 7개 논리 필드(8개 컬럼 — #6 의 읽기 사본 컬럼 포함)** — 상향 조건(3개 이상) 충족. Phase 3 에서 2개가 되고, Phase 5 착수 전에 4개가 되기 전 상향한다(§9.3). `rotate-field-keys --field` 는 위 표의 `(테이블.컬럼)` 이름을 레지스트리로 갖는다. 읽기 사본(#6)은 투영기가 **암호문 그대로 복사**하며 복호화하지 않는다. ws-gateway 에는 키가 없다(알림-only).
+**합계: 7개 논리 필드(8개 컬럼 — #6 의 읽기 사본 컬럼 포함)** — 상향 조건(3개 이상) 충족. 구현 순서(D24)로는 Phase 3 에서 2개(#1·#2), **Phase 5 에서 4개(#3·#4 추가)가 되기 전에 KEK/DEK 로 상향**하고(§9.3), 이후 6a 에서 #6·#7, 6c 에서 #5 가 **이미 상향된 v2 체계에 그대로 추가**된다. `rotate-field-keys --field` 는 위 표의 `(테이블.컬럼)` 이름을 레지스트리로 갖는다. 읽기 사본(#6)은 투영기가 **암호문 그대로 복사**하며 복호화하지 않는다. ws-gateway 에는 키가 없다(알림-only).
 
 ### 9.6 개인정보(PII) 이벤트·사본 지침 (ADR-026 확장)
 
@@ -852,10 +929,10 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.shipping_
 | 워크로드 | 스케일 | probe | PDB(제안) | 종료 |
 |---|---|---|---|---|
 | `api` | 무상태, HPA(CPU 60%, 최소 2) | readyz | minAvailable 1 | 진행 요청 완료 후 |
-| `ws-gateway site` | 연결 수 기준 수동/HPA(사용자 지정 지표는 미확인) | readyz | minAvailable 1 | readyz 503 → `bye`/1001 → preStop 5초 (M1 G8: 새 연결 실패 0/1156 vs preStop 없음 26/837) |
-| `ws-gateway room` | 위와 같음 | readyz | minAvailable 1 | 같음 + 룸 재구독은 `resume` |
+| `ws-gateway` (Phase 4 시점) | 연결 수 기준 수동/HPA(사용자 지정 지표는 미확인) | readyz | minAvailable 1 | readyz 503 → `bye`/1001 → preStop 5초 (M1 G8: 새 연결 실패 0/1156 vs preStop 없음 26/837) |
+| `ws-gateway room` (6a 이후 재평가) | 위와 같음 | readyz | minAvailable 1 | 같음 + 룸 재구독은 `resume`. **`/ws/room` 이 도입되는 6a 이후**에 사이트용/룸용 분화 필요성을 측정으로 판단한다(D17) |
 | `worker` | 디스패처 리더 1(어드바이저리 락), 러너는 늘릴 수 있음 | healthz | — | 임대 반납 |
-| `analysis-worker` | 큐 길이·CPU 기준, 동시성 **1**(ADR-033, 늘리려면 CPU 예산 재산정) | healthz | — | 진행 분석 취소(토큰 미완료 → 임대 만료 후 재선점) |
+| `analysis-worker` (Phase 2 에 합류) | 큐 길이·CPU 기준, 동시성 **1**(ADR-033, 늘리려면 CPU 예산 재산정) | healthz | — | 진행 분석 취소(토큰 미완료 → 임대 만료 후 재선점) |
 | `web` | 동적 렌더(CSP nonce, G3) 라 CPU 기준 | readyz | minAvailable 1 | SIGTERM 143 |
 
 - k3d 검증(G8)과 live Compose 는 **같은 이미지**(ADR-002). HPA·PDB 는 k3d 에서만 검증된다.
@@ -887,17 +964,20 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.shipping_
 | k3d 노드 | 약 1.25GiB | M1 G8 측정(검증 때만, 라이브와 동시 상주 아님) |
 | analysis-worker (KataGo) | **미확인** — 모델·스레드에 따라 약 0.5–3GiB(추정 범위). 컨테이너 한도는 P1 의 2GiB(제안)가 아니라 **S0 스파이크(실측) 후** 정한다(범위 상단 3GiB 와 어긋남) | P1 이 모델 선정 후 측정 |
 
-### 11.2 Phase 별 합산 (라이브 Compose, 상시)
+### 11.2 Phase 별 합산 (라이브 Compose, 상시) — 구현 순서 누적
 
-| 구성 | 합(추정) | 16GB 호스트 대비 | 24GB 호스트 대비 |
-|---|---|---|---|
-| M1 (§11.1 구성요소 하한/상한 합: nginx 7.5 + web 164 + api 60–90 + ws 36–90 + worker 60 + postgres 200–400 + prometheus 150–300 + grafana 440 + cloudflared 30 MiB = 1,148–1,582 MiB) | 약 1.12–1.54GiB | 약 7–10% | 약 5–6% |
-| + Phase 1 (추가 컨테이너 없음, 룸 연결 최대 +20MiB) | 약 1.14–1.56GiB | 약 7–10% | 약 5–7% |
-| + Phase 2 (+ analysis-worker 1.5GiB 가정) | 약 2.6–3.1GiB | 약 17–19% | 약 11–13% |
-| + Phase 3 (+ redis, 상한 256MiB 로 계산) | 약 2.9–3.3GiB | 약 18–21% | 약 12–14% |
-| + Phase 4 (레플리카: api×2, ws×2 → +200–300MiB) | 약 3.1–3.6GiB | 약 19–23% | 약 13–15% |
-| + Phase 5·6 (추가 컨테이너 없음, 모듈 메모리 +50–100MiB) | 약 3.1–3.7GiB | 약 20–23% | 약 13–15% |
+| 순서 | 구성 | 합(추정) | 16GB 호스트 대비 | 24GB 호스트 대비 |
+|---|---|---|---|---|
+| 1 | M1 (§11.1 구성요소 하한/상한 합: nginx 7.5 + web 164 + api 60–90 + ws 36–90 + worker 60 + postgres 200–400 + prometheus 150–300 + grafana 440 + cloudflared 30 MiB = 1,148–1,582 MiB) | 약 1.12–1.54GiB | 약 7–10% | 약 5–6% |
+| 2 | + Phase 3 (+ redis, 상한 256MiB 로 계산, 모듈 +30–50MiB) | 약 1.40–1.84GiB | 약 9–12% | 약 6–8% |
+| 3 | + Phase 4 (레플리카: api×2, ws×2 → +200–300MiB) | 약 1.60–2.14GiB | 약 10–13% | 약 7–9% |
+| 4 | + Phase 5 (추가 컨테이너 없음, 모듈 +30–50MiB) | 약 1.63–2.19GiB | 약 10–14% | 약 7–9% |
+| 5 | + 6a~6d (추가 컨테이너 없음, 모듈 +50–100MiB, 룸 연결 최대 +20MiB) | 약 1.70–2.31GiB | 약 11–14% | 약 7–10% |
+| 6 | + Phase 1 (추가 컨테이너 없음, 대국 모듈 +20MiB) | 약 1.72–2.33GiB | 약 11–15% | 약 7–10% |
+| 7 | + Phase 2 (+ analysis-worker 1.5GiB 가정) | 약 3.22–3.83GiB | 약 20–24% | 약 13–16% |
+| 8 | + 6e (추가 컨테이너 없음, +10MiB) | 약 3.23–3.84GiB | 약 20–24% | 약 13–16% |
 
+- **도착점(최종 상태)은 구현 순서와 무관**하게 약 3.2–3.8GiB(추정)다. 순서가 바뀌면 **중간 값만** 달라진다 — 이력서 제출 가능 시점(M1+Phase 3+4)에는 약 1.6–2.1GiB 로, KataGo(1.5GiB 가정)가 합류하기 전이라 **중간 자원 부담이 가장 낮다**. 구성요소를 직접 더해 다시 계산했다(이전 표의 최종 3.1–3.7GiB 와의 차이는 모듈 증가분 추정치 반올림이다).
 - **D14 규칙**: 상시 합 ≤ 호스트 RAM 의 60%(16GB 면 9.6GiB). 위 추정은 여유가 크다. 가장 큰 불확실성은 **KataGo 와 Grafana(440MiB)** 다.
 - 집 PC 의 WSL2 는 메모리 상한이 별도로 있을 수 있다(미확인). Oracle 24GB 는 Always Free 정책 변동 가능성이 있어 가입 시점에 확인한다(미확인).
 - **CPU 예산이 메모리보다 먼저 걸린다**: 이 개발 머신은 6코어. KataGo 는 CPU 바운드이므로 `analysis-worker` 는 스레드 수·동시성 1·낮은 우선순위(`nice`)·방문 수 상한을 두고, 라이브 사이트(api·ws)의 코어를 침범하지 않게 `cpuset`/limits 로 분리한다(제안). 분석 큐 적체는 허용하되 대국 서비스 지연은 허용하지 않는다.
@@ -918,23 +998,30 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 모의 금전의 오해 | 법·신뢰 문제 | D18 표시, README 면책(ADR-015) |
 | 스코프 팽창(Phase 5·6) | 일정 | 항목별 독립 DoD, 중단 가능(ADR-016) |
 | 룸 이벤트 지연 | 체감 품질 | D10 예산 측정 → fast lane |
-| 설계 대 구현 괴리 | 문서 낡음 | 단계 착수 전 ADR Accepted, 단계 종료 시 문서 동기 |
+| 설계 대 구현 괴리 | 문서 낡음 | 단계 착수 전 ADR Accepted, 단계 종료 시 문서 동기, **착수 전 설계 재검토(§12.5)** |
+| 바둑을 마지막에 구현해 위험(KataGo 실행 가능성·룰 엔진·3D)이 늦게 드러남 | 마지막 단계에서 설계 수정 | KataGo 스파이크를 Phase 1 착수 전에 앞당기고(G14), 룰 엔진 시험 세트·차분 퍼징은 Phase 1 첫 작업으로, 늦게 드러나는 실패는 모의 분석기·2D 클라이언트 폴백으로 DoD 를 지킨다 |
+| 앞 Phase 가 바둑 없이 쓰는 임시 경로(데모 포인트, 약정 off, 포인트 결제만)가 영구화 | 두 경로 유지 비용 | 임시 경로마다 종료 조건을 명시(§1.4 G1~G6), 해당 Phase 의 설계 재검토에서 점검 |
 
-### 12.2 순서 재검토
+### 12.2 순서 재검토 (D24 반영)
 
-- **Phase 6 순서**(CS 채팅 → Passkey → WMS → Solana → 마작)는 유지하되 의존을 확인한다: CS 채팅은 chat(Phase 1)+order(Phase 3/5) 선행, **WMS 는 주문·재고·결제(Phase 3·5) 선행**이라 5 이후가 맞고, Solana 에스크로는 payment/settlement 선행, **마작은 Phase 1 의 게임 프레임이 `GameRules` 플러그인 구조일 때만 저비용**이다 → P1 에 "규칙 플러그인 경계"를 요구한다.
-- **Redis 를 Phase 2 가 아니라 Phase 3 에** 도입한다(D6). Phase 2 의 분석 큐는 DB 선점으로 충분하다.
+- **구현 순서**: M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e. 로드맵 번호는 유지한다(§1.4 의 선행 의존·공백·해법).
+- **6a~6d 의 내부 순서**(CS 채팅 → Passkey → WMS → Solana)는 유지하되 의존을 확인한다: CS 채팅은 `order`(Phase 3)가 선행(배송 정보는 6c 이후 채워짐, G10), **WMS 는 주문·재고·결제(Phase 3·5) 선행**이라 5 이후가 맞고, Solana 에스크로는 payment/settlement 선행이다.
+- **마작(6e)은 Phase 1 의 게임 프레임이 `GameRules` 플러그인 구조일 때만 저비용**이다 → P1 에 "규칙 엔진 포트"(`RuleEngine`)를 두어 마작이 그 위에 올라가게 한다.
+- **Redis 는 Phase 2 가 아니라 Phase 3 에** 도입한다(D6). 구현 순서가 바뀌어도 Phase 3 이 먼저이므로 변함없고, Phase 2 의 분석 큐는 DB 선점이다(D23).
+- **`ledger` 는 Phase 3 에서 도입**한다(G1). 바둑 보상(Phase 2)은 도입된 원장 위의 두 번째 포인트 출처다.
+- **`chat` 코어·`/ws/room` 은 6a 에서 도입**한다(G9). 대국 채팅은 Phase 1 에서 방 종류만 추가한다.
 
-### 12.3 Phase 별 DoD 와 아키텍처 선행조건
+### 12.3 Phase 별 DoD 와 아키텍처 선행조건 (구현 순서)
 
-| Phase | README DoD | 선행 아키텍처 조건 | 검증 후보 |
-|---|---|---|---|
-| 1 | 두 브라우저 3D 대국, 복구, 관전 동기화 (+ **대국 채팅: 복구·중복 방지·관전자 비공개**, P4 DoD 후보 — README 반영은 README 소유자) | `/ws/room`, 룸 로그/스냅샷, 룰 엔진 선정, 채팅 전달 모델(ADR-045) | 룸 재접속 시험, 룰 시험 세트, 채팅 재개·중복 시험 |
-| 2 | 종료 → 분석 → 보상 확정 end-to-end | `analysis` 선점/토큰, `ledger` 복식 | 분석 중 워커 kill → 재선점, 보상 상태 전이 |
-| 3 | 초과 판매 0 + k6 결과 | Redis 도입(단일 인스턴스), `StockReservation`, reconcile 잡, (Streams 판정) | 동시 예약 시험, Redis 유실 시험 |
-| 4 | README+영상만으로 이해 가능 | 워크로드 분리, HPA/PDB, 롤링 소켓 재접속 | k3d 롤링 시험, 관측 대시보드 |
-| 5 | 결제→에스크로→정산 재현, 환율 고정 기록 | PG 어댑터, 웹훅 inbox, KEK/DEK | 웹훅 중복/역순, 견적 만료 |
-| 6 | 항목별 독립 | support/fulfillment/credential | 항목별 |
+| 순서 | Phase | README DoD | 선행 아키텍처 조건 | 검증 후보 |
+|---|---|---|---|---|
+| 2 | 3 | 초과 판매 0 + k6 결과 | Redis 도입(단일 인스턴스), `StockReservation`, reconcile 잡, (Streams 판정), `ledger`(POINT)·데모 지급, B12 틀·쌍 #2~#4 | 동시 예약 시험, Redis 유실 시험, 구매 확정 원자성 계약 시험 |
+| 3 | 4 | README+영상만으로 이해 가능 | 워크로드 분리, HPA/PDB, 롤링 소켓 재접속 | k3d 롤링 시험, 관측 대시보드 |
+| 4 | 5 | 결제→에스크로→정산 재현, 환율 고정 기록 | PG 어댑터, 웹훅 inbox, KEK/DEK, 실제 시세 소스·교차 검증기 추가(G3) | 웹훅 중복/역순, 견적 만료 |
+| 5 | 6 (6a~6d) | 항목별 독립(6a: 고객 티켓→상담원 선점→해결, 본문 평문 없음 등) | 6a: `chat` 코어·`/ws/room`·룸 포트·`agent`, 6c: `operator`·약정 활성화 | 항목별 |
+| 6 | 1 | 두 브라우저 3D 대국, 복구, 관전 동기화 (+ **대국 채팅: 복구·중복 방지·관전자 비공개** — 채팅 코어는 6a 에서 이미 검증됨) | `/ws/room` 에 `game:*` 추가, 룸 로그/스냅샷, 룰 엔진 선정, `GameRoomPolicy`, 대국 룸 종류 | 룸 재접속 시험, 룰 시험 세트, 채팅 재개·중복 시험(대국 룸 종류) |
+| 7 | 2 | 종료 → 분석 → 보상 확정 end-to-end | `analysis` 선점/토큰, `ledger` 보상 상태 머신(원장은 Phase 3 에 있음) | 분석 중 워커 kill → 재선점, 보상 상태 전이 |
+| 8 | 6e | 항목별 독립 | `GameRules` 플러그인 | 규칙 시험 세트 |
 
 ### 12.4 통합 M1 변경 요청 표 (영역 설계 P0~P4 → M1 정본 문서)
 
@@ -942,21 +1029,21 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 
 | # | 대상 | 요청 내용 | 출처 | 시점 |
 |---|---|---|---|---|
-| 1 | design/04, ADR-018 | 세 번째 연결 `/ws/room`, 봉투 `ch:'room'`·`rm`, 인바운드 허용 목록(`hello`·`room.join`·`room.leave`·`ping`·`typing`), 휘발성 `room.presence`·`room.typing`, "WS 는 읽기 전용" 원칙에 룸 구독 제어 예외 명시 | P0·P1·P4 | Phase 1 |
-| 2 | F14 | `PublicHub` → 방별 `RoomHub` 일반화(포트 `RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper`·`RoomEventSource`), `SendQueue`·4408·`bye` 재사용, NOTIFY `room_changed` 구독, presence 소유(§6.9) | P0·P1·P4 | Phase 1 |
-| 3 | design/03 §1.1 | 속도 제한 등급 추가: `write.game`, 채팅 7종(P4 §6.1), `write.purchase`·`write.checkout`·`write.refund`, 웹훅 | P1·P2·P4 | Phase 1·3 |
-| 4 | design/03, 00 §4.3, F16 | 오류 wire code 추가(`illegal_move`·`not_your_turn`·`game_over`·…, CAS 경합 패배는 M1 `version_conflict` 재사용(`stale` 신규 코드 폐기), 결제·재고 코드 P2 §13.4, 채팅 코드), 접두사 없음 규칙 유지 | P1·P2·P4 | Phase 1·3 |
-| 5 | design/01 B12, F16 §8.2, ADR-019 | 경계 규칙 **B12**(§2.4: 층 규칙 + `*InTx` 허용 쌍, `layers.json`·`tx-pairs.json`, `check:arch` 규칙 (a)~(d)), `TxContext` 를 받는 `InTx` 공개 함수 개념과 "중첩 `uow.run` 금지는 유지" 문구 | P0·P2·P4 | Phase 1(틀), 3(쌍 확장) |
-| 6 | F16 가드 | `RequireRole(agent\|operator\|admin)`, `RequireParticipant`, `WebhookGuard`, `StepUpGuard`(Phase 6) | P1·P2·P3·P4 | Phase 1·5·6 |
-| 7 | F10(ID-09), design/01 env | `AdminPolicy` 일반화 → `RolePolicy`: `AGENT_GITHUB_IDS`·`OPERATOR_GITHUB_IDS`·`ADMIN_GITHUB_IDS`, `ActorContext.roles` | P0·P3·P4 | Phase 6 |
+| 1 | design/04, ADR-018 | 세 번째 연결 `/ws/room`, 봉투 `ch:'room'`·`rm`, 인바운드 허용 목록(`hello`·`room.join`·`room.leave`·`ping`·`typing`), 휘발성 `room.presence`·`room.typing`, "WS 는 읽기 전용" 원칙에 룸 구독 제어 예외 명시 | P0·P1·P4 | 6a (`/ws/room` 첫 사용) |
+| 2 | F14 | `PublicHub` → 방별 `RoomHub` 일반화(포트 `RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper`·`RoomEventSource`), `SendQueue`·4408·`bye` 재사용, NOTIFY `room_changed` 구독, presence 소유(§6.9) | P0·P1·P4 | 6a |
+| 3 | design/03 §1.1 | 속도 제한 등급 추가: `write.game`, 채팅 7종(P4 §6.1), `write.purchase`·`write.checkout`·`write.refund`, 웹훅 | P1·P2·P4 | Phase 3·6a·1 |
+| 4 | design/03, 00 §4.3, F16 | 오류 wire code 추가(`illegal_move`·`not_your_turn`·`game_over`·…, CAS 경합 패배는 M1 `version_conflict` 재사용(`stale` 신규 코드 폐기), 결제·재고 코드 P2 §13.4, 채팅 코드), 접두사 없음 규칙 유지 | P1·P2·P4 | Phase 3·6a·1 |
+| 5 | design/01 B12, F16 §8.2, ADR-019 | 경계 규칙 **B12**(§2.4: 층 규칙 + `*InTx` 허용 쌍, `layers.json`·`tx-pairs.json`, `check:arch` 규칙 (a)~(d)), `TxContext` 를 받는 `InTx` 공개 함수 개념과 "중첩 `uow.run` 금지는 유지" 문구 | P0·P2·P4 | Phase 3(틀·쌍 #2~#4), 이후 쌍 추가 시 |
+| 6 | F16 가드 | `RequireRole(agent\|operator\|admin)`, `RequireParticipant`, `WebhookGuard`, `StepUpGuard`(Phase 6) | P1·P2·P3·P4 | Phase 3·5·6a·1 |
+| 7 | F10(ID-09), design/01 env | `AdminPolicy` 일반화 → `RolePolicy`: `AGENT_GITHUB_IDS`·`OPERATOR_GITHUB_IDS`·`ADMIN_GITHUB_IDS`, `ActorContext.roles` | P0·P3·P4 | 6a(agent)·6c(operator) |
 | 8 | ADR-027, database-schema 감사 | 감사 `actor_role` 에 `agent`·`operator` 추가(category 는 `admin`/`system`/`auth` 유지 — 새 category 없음), action 추가(`admin.reward_*`, `system.ledger_audit_ran`, `admin.deal_created`, `admin.stock_adjusted`, `admin.refund_issued`, `system.stock_reconciled`, `system.shipping_address_read`, `admin.support_conversation_opened`(actor_role=agent), `admin.support_conversation_opened`, 창고 action 등). 열람 감사 단위는 열람 세션당 1회 | P1~P4 | 각 Phase |
 | 9 | database-schema §9 | "이벤트 없는 읽기 모델 삭제 예외"에 채팅 보관 정리·`hold` 규칙 추가, `RetentionRule` 등록 목록(채팅, `carrier_event` 90일, `pick_scan` 90일, 수취인·배송지 익명화 30일, `reservation` 30일, `payment_event` 90일 등) | P2·P3·P4 | 각 Phase |
 | 10 | database-schema §9.1, ADR-026, `rotate-field-keys` | 컬럼 등급 등록, ENC 통합표(§9.5) 필드를 회전 대상에 등록, KEK/DEK 상향(§9.3) | 전부 | Phase 3~5 |
 | 11 | design/01 env, design/02 | `AGENT_/OPERATOR_GITHUB_IDS`, `CHAT_*` 한도, **단일 Redis 접속 `REDIS_URL`**(키 접두사로 용도 분리, D6; `REDIS_STOCK_URL`/`REDIS_STREAM_URL` 분리는 Phase 4 재평가 후), PG·웹훅 서명 시크릿, `KEK_KEYS_FILE` | P2·P3·P4 | Phase 3~6 |
 | 12 | F17 nginx | `pf_purchase`·`pf_webhook`·`/ws/room` 연결 zone, 웹훅 경로 분리, 결제 라우트 분리 | P2·P3 | Phase 3·5 |
-| 13 | design/02 compose | **단일 `redis` 컨테이너**(`maxmemory 256mb`, `noeviction`, AOF everysec, 비스트림 키 전부 TTL — D6; `redis-stock`/`redis-stream` 분리는 Phase 4 재평가), `analysis-worker`(KataGo, 별도 이미지 `pf-analysis`) 컨테이너 | P1·P2 | Phase 2·3 |
+| 13 | design/02 compose | **단일 `redis` 컨테이너**(`maxmemory 256mb`, `noeviction`, AOF everysec, 비스트림 키 전부 TTL — D6; `redis-stock`/`redis-stream` 분리는 Phase 4 재평가), `analysis-worker`(KataGo, 별도 이미지 `pf-analysis`) 컨테이너 | P1·P2 | Phase 3·2 |
 | 14 | F17 지표·경보 | 영역별 `pf_*` 지표와 경보(P1 §16.1, P2 §18, P3 §15, P4) | P1~P4 | 각 Phase |
-| 15 | design/10 CSP, design/12 콘텐츠 | PG 도메인·결제 라우트 CSP, three.js 에셋, 모의 면책 변수·약관/환불 문구, 개인정보 안내 확장(채팅·배송지) | P1·P2 | Phase 1·3 |
+| 15 | design/10 CSP, design/12 콘텐츠 | PG 도메인·결제 라우트 CSP, three.js 에셋, 모의 면책 변수·약관/환불 문구, 개인정보 안내 확장(채팅·배송지) | P1·P2 | Phase 3·1 |
 | 16 | design/13 런북 | 새 자산: PG 키·웹훅 서명 키·devnet 키·KEK·모델 파일 | P0 | Phase 5 |
 | 17 | tech-stack | three.js/R3F, KataGo, `@sabaki/sgf`, Redis/Valkey 이미지 고정(Phase 3 시작) | P0·P1 | 각 Phase |
 | 18 | ADR-023 | 분석 워커는 **ADR-021 의 토큰 조건 임대 연장(heartbeat)을 적용**한다(ADR-023 의 "임대 연장 없음"은 M1 짧은 핸들러 기준 문구이므로 "오래 걸리는 분석 워커는 ADR-021 연장 사용" 한 줄 보강). 연장 간격 = 임대/3, ADR-023 의 `임대 ≥ p99×10` 규칙은 **연장 간격**에 적용(총 작업 시간이 아님) | P1 | Phase 2 |
@@ -964,13 +1051,26 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 20 | ADR-006 | 확정 시 `Superseded by ADR-031` | P0 | Phase 3 판정 후 |
 | 21 | architecture §12, database-schema §11, README | Phase 표·모듈 지도·스키마 윤곽을 본 문서로 동기(이번 작업에서 포인터만 반영) | 전부 | 각 Phase |
 | 22 | F00 | 기능 접두사 BD·LG·AN·CT·OD·PY·ES·ST·WM·CH·SP 등록 | 전부 | 각 Phase |
-| 23 | design/11 | Phase 1 이후 작업 분할은 영역 설계 확정 후 별도 문서 | P0 | Phase 1 직전 |
+| 23 | design/11 | Phase 1 이후 작업 분할은 영역 설계 확정 후 별도 문서 | P0 | 각 Phase 착수 전 설계 재검토(§12.5) |
 | 24 | database-schema §1·§9 (CQRS 예외 목록) | **예외 E1 등재**: `game_event` 는 방 로그이므로 ws-gateway 의 `RoomEventSource.after`, query usecase `SyncGame`, `GET /api/games/{id}/events` 가 쓰기 스키마 `game_event` 를 읽는다(스냅샷의 쓰기 모델 읽기와 함께 문서화된 예외). ADR-018 5번 규칙에도 한 줄 | P1 | Phase 1 |
 | 25 | ADR-009 | `game.review.requested`·"분석 요청과 보상 생성은 같은 트랜잭션"을 **개정(Superseded 부분)** — 보상 생성은 `ledger` 가 `game.finished` 소비, 분석 작업은 `reward.pending_created` 소비(P0 §8.3) | P1 | Phase 2 |
-| 26 | F14, design/04 | 룸 구독 속도 한도 정본(초당 5회, `4429`)을 M1 04 §1 의 클라이언트 메시지 한도(초당 10건)와 구분해 서술, `RoomAccessPolicy` 소유는 realtime | P0·P1·P4 | Phase 1 |
+| 26 | F14, design/04 | 룸 구독 속도 한도 정본(초당 5회, `4429`)을 M1 04 §1 의 클라이언트 메시지 한도(초당 10건)와 구분해 서술, `RoomAccessPolicy` 소유는 realtime | P0·P1·P4 | 6a |
 | 27 | design/03 §1.1·§4 | 대국 명령 REST 계약 일체(`POST /api/games/{id}/moves`·`passes`·`resign`·`dead-stones`·`score-confirmations`·`resume-requests`·`resume-accept`·`heartbeat`)와 오류 코드 `game_over`·`resume_limit`·`no_pending_request`·`illegal_move`·`not_your_turn`(CAS 경합 패배는 `version_conflict` 재사용) | P1 | Phase 1 |
-| 28 | database-schema §1·§9 (CQRS 예외 목록) | **예외 E2 등재**: ws-gateway 의 `RoomSnapshotProvider`/`RoomEventSource` 구현(chat)이 읽기 모델 지연에 대비해 쓰기 모델 `chat.room.last_seq` 로 `head` 를 읽는다(구독 먼저 등록 → head → 읽기 모델 대기·재시도, 04 §4) | P4 | Phase 1 |
-| 29 | F10(ID-10), database-schema §9·§9.1 | `AnonymizeSessionData` 등록 대상에 `game.game_player`, `chat.participant`·`message.sender_key`·`report.reporter_key` 의 세션 행위자 키 추가 | P1·P4 | Phase 1 |
+| 28 | database-schema §1·§9 (CQRS 예외 목록) | **예외 E2 등재**: ws-gateway 의 `RoomSnapshotProvider`/`RoomEventSource` 구현(chat)이 읽기 모델 지연에 대비해 쓰기 모델 `chat.room.last_seq` 로 `head` 를 읽는다(구독 먼저 등록 → head → 읽기 모델 대기·재시도, 04 §4) | P4 | 6a |
+| 29 | F10(ID-10), database-schema §9·§9.1 | `AnonymizeSessionData` 등록 대상에 `game.game_player`, `chat.participant`·`message.sender_key`·`report.reporter_key` 의 세션 행위자 키 추가 | P1·P4 | 6a(chat)·1(game) |
+| 30 | M1 로그인 직후 훅(웹앱) | 로그인 성공 뒤 웹앱이 `POST /api/ledger/welcome-grant` 를 **1회 자동 호출**(M1 코드 변경 없음, Phase 3 웹앱 쪽 변경) — M1 명세는 건드리지 않는다 |
+| 31 | database-schema §9·§9.1, F10 | 지갑 공개키·챌린지가 PSD 로 분류되고 `AnonymizeSessionData`/계정 삭제 대상에 `identity.wallet_link` 가 포함된다(6d) |
+
+### 12.5 운영 규칙 — Phase 착수 전 "설계 재검토" (동결이 아니라 갱신 절차)
+
+모든 영역의 설계를 끝까지 완성해 두되, **설계는 구현으로 증명되기 전까지 가설**이다. 그래서 각 Phase 착수 전에 아래 단계를 거친다.
+
+1. **앞 Phase 에서 배운 것 반영**: 실측값(지연·자원·처리량), 바뀐 가정, 실패한 가설을 해당 Phase 설계와 ADR 에 반영한다. 번호·구조는 유지하고 서술과 수치를 갱신한다.
+2. **독립 검토**: 해당 Phase 설계에 대해 앞선 구현과의 정합을 독립 검토자(결론을 주지 않은 상태)로 한 번 점검하고, 확인된 모순만 고친다.
+3. **ADR 확정**: 해당 Phase 의 Proposed ADR 을 Accepted 로 올릴지 사용자가 결정한다(U1).
+4. **스파이크**: 설계가 의존하는 미확인(외부 서비스, 성능, 실행 가능성)을 구현 전에 측정한다(예: PG 가입 조건·웹훅 서명, KataGo 성능, Passkey 라이브러리).
+5. **작업 분할**: `design/11` 형식으로 해당 Phase 의 작업을 쪼갠다(§13).
+6. 완료 후 **문서 동기**: 구현에서 달라진 점을 이 문서·영역 설계·README 에 반영한다.
 
 ## 13. 문서·ADR 갱신 계획
 
@@ -983,10 +1083,10 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | ADR-024 | 기존 포트 `StockReservation` 의 연산(`restock` 포함)과 도입 시점(Phase 3)·단일 인스턴스 규칙 참조 |
 | `database-schema.md §11` | 이 문서·영역 설계의 스키마 윤곽으로 교체, `realtime_read.room_log`·`room_seq`, `security.data_key` 추가 |
 | `architecture.md §12` | Phase 표를 §1.1 로 교체, 모듈 지도에 L 층 규칙 |
-| `README.md` 로드맵 | Phase 2 의 Redis 도입 문구 정정(Phase 3), 영역 설계 링크 |
+| `README.md` 로드맵 | **구현 순서 열**, 이력서 제출 가능 시점(M1+Phase 3+4), 설계 재검토 운영 규칙 (반영됨) |
 | `design/01` 경계 규칙 | B12 층 규칙, 룸 fast lane 예외 |
 | `design/04` | `/ws/room` 절, 봉투 `rm` 필드 |
-| `design/11` | Phase 1 이후 작업 분할은 영역 설계 확정 후 별도 문서 |
+| `design/11` | Phase 별 작업 분할은 **각 Phase 착수 전 설계 재검토(§12.5) 때 별도 문서**로 |
 | `design/13` | 새 자산(PG 키, 서명 키, KEK) 런북 추가 |
 | `tech-stack.md` | Redis/Valkey 결정 시점, KataGo, three.js 항목 |
 
@@ -1005,7 +1105,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 |---|---|
 | Redis vs Valkey 이미지 고정 | Phase 3 시작 |
 | Streams 채택 여부(D4) | Phase 3 부하 시험 후 |
-| 룸 이벤트 지연 실측과 fast lane 필요 여부(D10) | Phase 1 부하 시험 |
+| 룸 이벤트 지연 실측(채팅 룸 1차, 대국 룸 확정)과 fast lane 필요 여부(D10) | 6a(1차) · Phase 1 부하 시험(확정) |
 | KataGo 모델·스레드·메모리 | P1 설계 + 측정 |
 | HPA 사용자 지정 지표(연결 수) 방식 | Phase 4 |
 | Passkey 복구·분실 정책 | Phase 6b 착수 시 ADR |
@@ -1013,6 +1113,8 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | seller 포털 필요 여부 | Phase 6 이후 |
 | `escrow`·`inventory` 모듈의 층 배치 확정(L5/L4) | 구현 착수 시(§2.1 은 제안) |
 | 승격 가능한 허용 쌍 추가(B12 #11…) | ADR-030 개정 |
+| 첫 로그인 지급 금액·총 발행 상한·재충전·교환 한도·지갑 토큰(U24~U29) | 사용자 결정 |
+| `ws-gateway` 사이트용/룸용 분화 필요성 | 6a 이후 측정 |
 | 선택한 Redis 이미지 고정 후 인스턴스 분리(`redis-stock`/`redis-stream`) 재평가 | Phase 4 |
 | 방 로그 모델: 자체 로그 룸(대국·채팅) 외에 `room_log` 가 필요한 룸이 생기는지 | 새 룸 종류가 생길 때(현재 해당 없음) |
 
@@ -1045,4 +1147,25 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | U21 | **익명 플레이어 허용 확인**(P1 §10 은 비레이팅 대국 허용, P4 는 '플레이어 로그인 권장'): 플레이어 로그인 필수 여부, 관전자 익명 허용 | 로그인 필수 / 익명 비레이팅 허용 | 익명 비레이팅 허용(뮤트 우회 위험을 위험표에 기록) | 진입 장벽 vs 모더레이션 |
 | U22 | **분석 INCONCLUSIVE 처리**(P1/ADR-037): 2단계 후에도 결론이 안 나면 | CLEAN 취급(확정) / 수동 검토 큐 | CLEAN 취급(보수적 박탈 회피, 지표·감사 기록) | 보상 무결성 vs 운영 부담 |
 | U23 | **교환(반품+신규 주문) UX와 분할 배송의 구매자 노출**(P3, W4·W5) | 단순화(반품 후 재주문) / 교환 흐름 구현 | 반품 후 재주문 | P2·P3 UI 범위 |
+| U24 | **첫 로그인 지급 정책**(G1·D25): USDC 10,000 + POINT 1,000(사용자 결정 반영 — USDC 10,000 해석은 확인 대기), 사용자당 1회, **재충전 없음** 제안, 관리자 지급 건당 상한 | 그대로 / 금액 조정 / 월 재충전 | 제안값 | Phase 3 시연 흐름, 어뷰징 방어 |
+| U25 | **총 발행 상한**(G1): 데모 지급 누적 총량 상한과 경보 | USDC 1억 / POINT 1천만(제안) | 제안값 | 가입 농사 방어, 경보 기준 |
+| U26 | **교환 한도**: `ExchangeUsdcToPoint` 건당·일일 한도(`write.exchange` 등급) | 건당 10,000 POINT·일 100,000(제안) | 제안값 | 차익·남용 |
+| U27 | **상품 가격 규모**: 10,000 USDC ≈ 환율 기준 수천만 원이라 시드 상품 가격을 이 규모에 맞출지, 지급액을 줄일지 | 가격 상향 / 지급 하향 | 시드 가격 설계 시 | 시연 현실감 |
+| U28 | **온체인 시연 토큰**(6d): 자체 SPL `tUSDC` vs Circle devnet USDC(요청당 10 USDC·24시간 1회 한도) | tUSDC 기본(제안) / Circle USDC | 6d 착수 전 | 방문자 시연 마찰 |
+| U29 | **devnet 수수료(SOL) 부담**: 플랫폼 대납 vs 사용자 파우셋 | 대납 검토(제안) | 6d 착수 전 | 시연 마찰, 키 관리 |
 
+### 16.1 결정 시점 (구현 순서 기준)
+
+| 필요한 시점 | 결정 |
+|---|---|
+| **지금(M1 착수 전)** | **M1 명세 확정**, U1(ADR 확정 방식), U2(B12 승인 — Phase 3 에서 처음 필요) |
+| **Phase 3 착수 전** | U8(Redis vs Valkey), U9(Streams, 측정 후), U18(포인트:원 비율), U19(캡차·대기열, 부하 시험 후), U24(데모 포인트 지급) |
+| Phase 4 | HPA 사용자 지정 지표 방식(§15) |
+| **Phase 5 착수 전** | U6(PG 선정), U10(에스크로 기한), U14(KEK/DEK 상향), U15(모의 면책·약관 문구), U7 의 결제·택배 이벤트 보관 |
+| 6a 착수 전 | U16(Web Push), U17(금칙어 정책), U20(seller 포털) |
+| 6c 착수 전 | U3(데모 모드 샌드박스), U4(익명화 기한), U5(택배사 연동), U23(교환 UX) |
+| 6d·6e | U13(진행 여부 — 경계는 설계 유지) |
+| **Phase 1 착수 전(가장 뒤)** | U11(바둑 규칙 범위), U21(익명 플레이어), U7 의 대국 채팅 보관 |
+| Phase 2 착수 전 | U12(KataGo 실행 방식, 스파이크 후), U22(INCONCLUSIVE 처리) |
+
+바둑 관련 결정은 뒤로, 타임딜·결제·PG 선정은 앞으로 당겨졌다. 위 시점은 각 Phase 의 설계 재검토(§12.5)에서 다시 확인한다.

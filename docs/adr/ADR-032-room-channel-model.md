@@ -8,6 +8,7 @@
 바둑·채팅은 "특정 룸 참가자·관전자에게만" 가는 메시지가 필요하다. M1 의 `/ws/public`(모두 동일)과 `/ws/private`(세션 소유자 전용)로는 표현할 수 없다.
 
 ## 결정
+0. **도입 시점(구현 순서 D24)**: `/ws/room` 의 **첫 사용처는 6a(CS 채팅)** 이고 대국 룸(`game:*`)은 Phase 1(바둑, 구현 순서 마지막)에서 같은 연결에 추가된다. Phase 3~5 는 `/ws/public`·`/ws/private` 만 쓴다.
 1. **세 번째 연결 `/ws/room`** 을 추가한다. 세션 필수(익명 포함), 한 연결에 여러 룸을 `room.join` 으로 구독한다(연결당 최대 8, 제안). 룸 키는 `<type>:<uuid>`(`game:`·`chat:`·`cs:`), 구독 속도는 초당 5회(초과 시 `4429`, 정본 값).
 2. **WebSocket 은 push 전용을 유지한다.** 쓰기(착수·채팅·신고)는 멱등 키가 있는 REST 이고 결과가 룸 채널로 push 된다(ADR-018). 인바운드 허용은 `hello`·`room.join`·`room.leave`·`ping`·휘발성 `typing` 뿐이다.
 3. 룸 순번·재개: **도메인이 자체 순번 로그를 가진 룸**은 그 순번이 방 순번이다 — (a) 대국은 `game_event`(push 는 fast lane `room_changed`), (b) 채팅은 `chat` 메시지 표(명령 쪽 방 카운터, ADR-045; push 는 표준 경로 outbox → chat-broadcaster → NOTIFY). 둘 다 재생은 `RoomEventSource` 이고 `room_log` 에는 쓰지 않는다. **`room_log (room_key, seq)` + `room_seq`**(M1 `change_log` 의 일반화)는 **자체 로그가 없는 룸 종류용 예약**(현재 해당 없음)이다. 이력이 없으면 **도메인이 만든 스냅샷**으로 복구한다(정본은 도메인 표).

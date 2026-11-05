@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04
 - 근거: ADR-009(사후 분석)·006(전달 계층)·021(선점·임대)·024(Redis 이음새)·023(백오프) / KataGo 공식 문서 조사(2026-11-04)
+- 구현 순서(P0 D24): Phase 2 — Phase 1 다음. 선행: Phase 1(`game.finished`), Phase 3(`ledger`). KataGo 실행 가능성 스파이크는 Phase 1 착수 전에 앞당겨 실행하는 것을 제안한다(P0 §1.4 G14).
 - 관련 문서: [phases/01-baduk.md](../design/phases/01-baduk.md) §9
 
 ## 맥락

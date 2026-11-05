@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04
 - 근거: ADR-016(에스크로 초안·자동 확정 기한 미결), ADR-011(정산 통화) / Phase 5 DoD
+- 구현 순서(P0 D24): `ledger`(POINT·모의 USDC)는 Phase 3, KRW·`escrow`·`settlement` 는 Phase 5. `legacy_demo` 는 폐기되어 종결 작업이 필요 없다(P0 §1.4 G3·G4). 혼합 결제의 다리별 에스크로·정산 분개는 [ADR-048](ADR-048-mock-currency-and-mixed-payment.md).
 - 관련 문서: [design/phases/02-commerce.md](../design/phases/02-commerce.md) §7~§9, [phases/00 §2.4~2.5](../design/phases/00-platform-evolution.md)
 - **원장 소유**: `ledger` 모듈은 하나이고 **이 ADR 이 스키마 정본**이다(P0 D20). 바둑 보상은 [ADR-037](ADR-037-simulated-points-ledger.md)이 같은 원장의 `POINT` 자산 규칙과 `reward` 상태 머신으로 정의한다. 다른 모듈은 `ledger` 의 공개 `*InTx`(`PostJournalInTx`·`ReverseJournalInTx`·`ConfirmRewardInTx`·`FlagRewardInTx`)만 쓴다(B12).
 

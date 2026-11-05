@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04
 - 근거: ADR-010(재고 정합성)의 상세화와 한 군데 조정 / Phase 3 DoD(초과 판매 0 + 부하 결과) / 로컬 사전 시험(Redis 8.10.3·PostgreSQL 18, 2026-11-04)
+- 구현 순서(P0 D24): Phase 3 (순서 2). `inventory` 약정은 6c 전까지 꺼져 있다(`INVENTORY_EARMARK=off`, P0 §1.4 G5). 결제 TTL 의 `method` 는 `ledger`/`card_test`(ADR-048).
 - 관련 문서: [design/phases/02-commerce.md](../design/phases/02-commerce.md) §3~§4, ADR-005·020·021·024·025
 
 ## 맥락

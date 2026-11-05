@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기. ADR-026 재검토 조건 "개인정보를 수집하게 될 때"에 해당)
 - 날짜: 2026-11-04
 - 근거: ADR-008(보관·개인정보)·026(데이터 보호)·027(감사)·028(사고 대응) / README Phase 1·6 / design/04-ws-protocol
+- 구현 순서(P0 D24): CS 채팅 보호는 6a, 대국 채팅 보관은 Phase 1.
 - 관련 문서: [phases/04-chat](../design/phases/04-chat.md) §7, [database-schema.md §9.1](../domains/database-schema.md)
 
 ## 맥락

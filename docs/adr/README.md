@@ -9,6 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-04 | [ADR-048](ADR-048-mock-currency-and-mixed-payment.md) | 모의 통화(USDC·POINT): 첫 로그인 지급, 단방향 교환, 혼합 결제, 선택적 지갑 | Proposed |
 | 2026-11-04 | [ADR-047](ADR-047-chat-data-protection-retention.md) | 채팅 데이터 보호·보관: 방 종류별 등급, CS 본문 암호화 | Proposed |
 | 2026-11-04 | [ADR-046](ADR-046-cs-ticket-and-agent-assignment.md) | CS 티켓과 상담원 배정: 상태 머신, CAS+임대 | Proposed |
 | 2026-11-04 | [ADR-045](ADR-045-chat-message-delivery.md) | 채팅 메시지 전달: REST 쓰기, 방별 순번, 멱등, 재개 | Proposed |

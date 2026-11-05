@@ -523,15 +523,18 @@ flowchart LR
 
 ## 11. 후속 Phase 윤곽 (확정 아님)
 
+> **구현 순서(P0 D24)**: M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e. 아래 표의 Phase 번호는 식별자이며 순서가 아니다. 특히 `ledger`(원장)는 Phase 3 에서 모의 USDC·POINT 지급/교환과 함께 먼저 도입되고, `chat` 코어는 6a 에서 먼저 생긴다. 착수 전 설계 재검토(P0 §12.5)에서 윤곽을 다시 확인한다.
+
 영역별 설계가 스키마 윤곽의 정본이다([phases/00](../design/phases/00-platform-evolution.md) §2·§9, 01~04). 아래는 모듈↔스키마 요약이며 컬럼 전수는 구현 시 이 문서 §4~§9.1 형식으로 반영한다.
 
 | Phase | 스키마(쓰기 / 읽기) | 핵심 제약 | 상세 |
 |---|---|---|---|
 | 1 | `game` / `game_read`, `chat` / `chat_read` | `game_event` 대국별 `seq` 추가 전용, `UNIQUE (game_id, move_id)`, `chat.room.last_seq` 조건부 UPDATE 로 방별 순번, `UNIQUE (room, sender, client_msg_id)` | [P1](../design/phases/01-baduk.md) §11, [P4](../design/phases/04-chat.md) §11 |
 | 2 | `analysis`, `ledger` / `ledger_read` | `analysis_job` `UNIQUE (game_id)` + 선점/임대, 원장 `journal`/`posting` 추가 전용·자산별 차변=대변(지연 제약 트리거), `reward` `UNIQUE (game_id, user_id)` | [P1](../design/phases/01-baduk.md) §10~11, ADR-037·040 |
-| 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
-| 5 | `pricefeed`, `payment`, `escrow`, `settlement` (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
+| 3 | `catalog`, `deal` / `deal_read`, `order` / `order_read` | `deal.stock` `confirmed ≤ total` CHECK, 예약 상태 CAS, `order.shipping_address_enc`(ENC), 같은 Phase 에 `ledger`(`ledger.grant` `UNIQUE (user_id, kind)`)·`payment`(`payment_leg` `UNIQUE (payment_id, asset)`)·최소 `pricefeed` 스냅샷 도입(ADR-048) | [P2](../design/phases/02-commerce.md) §10 |
+| 5 | `pricefeed`(실제 소스), `payment`(카드·환불 확장), `escrow`(`escrow_leg`), `settlement`(`funded_*`, `point_redemption_micro`) (+`_read`), 웹훅 `inbox_message` | 사용된 시세 스냅샷 id 고정, 에스크로 `held→released/disputed/refunded` CAS, `payment.provider_payment_key_enc`·`escrow_dispute.reason_enc`(ENC) | [P2](../design/phases/02-commerce.md) §10 |
 | 6 | `inventory`, `fulfillment`, `support` (+`_read`) | `sku_position` CHECK `allocated + earmarked ≤ available`, 물리 재고 이동 원장 추가 전용, `recipient_enc`·CS `body_enc`(ENC) | [P3](../design/phases/03-fulfillment.md) §10, [P4](../design/phases/04-chat.md) §11 |
+| 6d | `identity.wallet_link`(공개키 `UNIQUE`), `identity.wallet_challenge`(1회용) | 서명 챌린지 소진 조건부 UPDATE, 공개키는 PSD | [P0](../design/phases/00-platform-evolution.md) §7.3 |
 | 공통 | `security.data_key`(Phase 5 KEK/DEK 상향), `realtime_read.room_log`·`room_seq` | 봉투 `v2.<dekId>.…` | [P0](../design/phases/00-platform-evolution.md) §9.3·§6 |
 
 ENC 필드 통합표와 보관 기간은 [phases/00 §9.5](../design/phases/00-platform-evolution.md).

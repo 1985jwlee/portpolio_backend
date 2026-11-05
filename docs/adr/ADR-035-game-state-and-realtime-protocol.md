@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04 (REST 명령 모델로 개정)
 - 근거: 로드맵 Phase 1 DoD / ADR-009(판정은 서버 즉시)·014(재접속·무중단)·018(CQRS, WS push)·021(CAS·버전)·023(NOTIFY 깨우기)·025(쓰기는 tx)·032(room 채널, P0)·045(채팅 전달: WS 는 push 전용) / M1 G1·G2·G4 실측
+- 구현 순서(P0 D24): Phase 1 — 6a 가 도입한 `chat` 코어·`/ws/room` 위에 대국 룸(`game:*`)을 추가한다. 선행: 6a.
 - 관련 문서: [phases/01-baduk.md](../design/phases/01-baduk.md) §5, [phases/00 D8·D10](../design/phases/00-platform-evolution.md)
 
 ## 맥락

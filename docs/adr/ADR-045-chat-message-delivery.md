@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기. 설계 문서 [phases/04-chat](../design/phases/04-chat.md))
 - 날짜: 2026-11-04
 - 근거: README 로드맵 Phase 1(대국 채팅)·Phase 6(CS 채팅) / ADR-014(재접속)·018(CQRS)·020(inbox)·021(동시성)·025(쓰기는 트랜잭션) / design/04(WS 프로토콜)·F14(realtime)
+- 구현 순서(P0 D24): `chat` 코어는 **6a(CS 채팅)에서 먼저 도입**되고 대국 채팅 룸 종류는 Phase 1 에서 추가된다(P0 §1.4 G9).
 - 관련 문서: [phases/04-chat](../design/phases/04-chat.md) §4·§5·§13
 
 ## 맥락

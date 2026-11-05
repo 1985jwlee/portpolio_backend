@@ -3,6 +3,8 @@
 로드맵 Phase 1(바둑 실시간 코어)과 Phase 2(KataGo 워커 + 모의 포인트 원장)의 아키텍처 설계다. 상태는 **제안(Proposed)** 이며 근거 ADR 은 [ADR-034](../../adr/ADR-034-baduk-rules-engine.md) · [035](../../adr/ADR-035-game-state-and-realtime-protocol.md) · [036](../../adr/ADR-036-katago-analysis-worker.md) · [037](../../adr/ADR-037-simulated-points-ledger.md) 이다(모두 사용자 확정 대기).
 M1 의 규약(모듈러 모놀리스, CQRS, domain·service·usecase, outbox·inbox, CAS·임대·낙관적 버전, 모든 쓰기는 트랜잭션, 데이터 보호 등급, 감사, `pf_` 지표)을 그대로 따른다. 기존 문서와 어긋나는 점은 §17 에 모았다.
 
+> **구현 순서: 마지막 (P0 D24).** 이 문서의 Phase 1·2 는 로드맵 번호일 뿐 구현은 **M1 → 3 → 4 → 5 → 6a~6d 다음**에 한다(Phase 1 이 6번째, Phase 2 가 7번째, 이어서 6e 마작). 따라서 이 문서는 아래 기반이 **이미 존재한다는 전제**로 쓰였다 — ① `chat` 코어와 `/ws/room`·룸 포트(`RoomAccessPolicy` 등, 6a) ② `ledger`·POINT 계정·데모 포인트 지급(Phase 3) ③ B12 `InTx` 틀과 `tx-pairs.json`(Phase 3) ④ Redis(Phase 3, 이 문서는 쓰지 않음) ⑤ `agent`/`RolePolicy` 일반화(6a). 이 문서가 **추가하는 것**은 `game` 모듈, 대국 룸 종류(`game:*`, 대국 채팅 룸), `GameRoomPolicy`·`RoomEventSource`, 바둑 보상(`EligibilityPolicy`·reward)과 `analysis` 이다. 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
+
 > **공통 결정(P0 정본 반영, 2026-11-04 조정)**: 모듈러 모놀리스 유지 · KataGo 워커는 첫 서비스 분리 · **이벤트 전달은 Postgres outbox + inbox 이고 Phase 2 의 분석 큐는 Postgres inbox 선점(DB 큐)이다 — Redis Streams 판정은 Phase 3**(P0 D4·D6·D23) · 실시간은 `/ws/public`·`/ws/private` 에 더해 **room 범위 연결 `/ws/room`**(인증 필수, 한 연결에 여러 room) · **WebSocket 은 push 전용, 대국 명령은 REST**(P0 D8·채팅 ADR-045) · **모듈 간 한 트랜잭션은 `*InTx` 허용 쌍만**(P0 §2.4, 경계 규칙 B12) · **원장은 `ledger` 모듈 하나**(P0 §2.5, ADR-040/037) · 이벤트 이름은 P0 §8.3 정본 표를 따른다.
 > 외부 조사 근거는 2026-11-04 에 확인한 공식 저장소·npm 메타데이터이며, 확인하지 못한 값은 **미확인** 으로 표기했다. ADR-015 에 따라 이 저장소 밖의 다른 프로젝트 코드는 참고하지 않았다.
 
@@ -14,7 +16,7 @@ M1 의 규약(모듈러 모놀리스, CQRS, domain·service·usecase, outbox·in
 |---|---|---|---|
 | Phase 1-A | 서버·프로토콜: 룰 라이브러리, 룸·대국·관전, 재접속, 채팅, SGF | 서버가 규칙·시계·승패를 권위로 판정, 두 클라이언트가 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화 | §3~8, §11~13 |
 | Phase 1-B | three.js 3D 클라이언트 | **두 브라우저에서 3D 대국 완료**, 새로고침·끊김 후 복구, 관전자 동기화 | §7 |
-| Phase 2 | KataGo 워커 + 모의 포인트 원장(보상 `PENDING → CONFIRMED/FLAGGED`) | **대국 종료 → 비동기 분석 → 보상 확정 end-to-end**, 실패·재시도 확인 | §9~10 |
+| Phase 2 | KataGo 워커 + 바둑 보상(모의 포인트 원장은 **Phase 3 에서 도입**, 여기서는 보상 `PENDING → CONFIRMED/FLAGGED` 추가) | **대국 종료 → 비동기 분석 → 보상 확정 end-to-end**, 실패·재시도 확인 | §9~10 |
 
 범위 밖: 레이팅 시스템(Glicko 등), 토너먼트, 마작(Phase 6), 대국 중 물리적 AI 힌트, 모바일 네이티브 앱(웹 전용). 채팅 상세는 [04-chat](04-chat.md) 가 정본이고 이 문서는 대국 방과의 접점만 다룬다.
 
@@ -77,7 +79,7 @@ flowchart TB
 | 모듈 | 쓰기 스키마 | 읽기 스키마 | 소비자 / 프로젝터 | 의존할 수 있는 것 |
 |---|---|---|---|---|
 | `game` | `game` | `game_read` | `game-projector` | `identity`(세션·사용자), `events`(outbox·audit 포트), `realtime`(읽기 `GetRoomPresence` — **표시 전용**, L2), `baduk-rules`(패키지) — **`chat`·`ledger` 는 임포트하지 않는다**(방 개설은 `chat` 이 `game.started` 를 구독, 보상은 `ledger` 가 `game.finished` 를 구독). 이탈 판정 신호는 `game` 이 소유한다(§8, 플레이어 heartbeat) |
-| `ledger` | `ledger` | `ledger_read` | `ledger-projector`, `reward-settler`(`game.finished` 구독 → **`EligibilityPolicy` 판정**(ledger 소유) → 통과 시 `reward PENDING` 생성 → `reward.pending_created` 발행) | `identity`, `events` (공개 `InTx`: P0 §2.5) |
+| `ledger` (**Phase 3 에서 이미 도입 — 여기서는 바둑 보상 추가분**) | `ledger` | `ledger_read` | `ledger-projector`, `reward-settler`(`game.finished` 구독 → **`EligibilityPolicy` 판정**(ledger 소유) → 통과 시 `reward PENDING` 생성 → `reward.pending_created` 발행) | `identity`, `events` (공개 `InTx`: P0 §2.5) |
 | `analysis` | `analysis` | — | `analysis-job-creator`(`reward.pending_created` 구독 → `analysis_job` 멱등 생성), `analysis-runner`(KataGo 워커, 작업 선점) | `game`(공개 조회 포트: 기보), `ledger`(`ConfirmRewardInTx`·`FlagRewardInTx`, B12 쌍 #6), `events` |
 | 패키지 `baduk-rules` | — | — | — | 아무것도 임포트하지 않음(순수, kernel 만) |
 
@@ -999,7 +1001,9 @@ classDiagram
 
 ---
 
-## 10. 모의 포인트 원장 (Phase 2, ADR-037)
+## 10. 모의 포인트 원장 — 바둑 보상 (Phase 2, ADR-037; 원장 자체는 Phase 3 도입)
+
+> **구현 순서 (D24)**: `ledger` 모듈·POINT 계정·`liab:user_points:{uid}` 는 **Phase 3 에서 이미 도입**되어 있고 첫 포인트 출처는 **첫 로그인 지급(POINT 1,000 + 모의 USDC 10,000)·USDC→POINT 교환**(`exp:demo_grant:POINT`, P0 §1.4 G1·ADR-048)이다. 이 절의 바둑 보상은 구현 순서상 **마지막 출처**(`exp:points_issued`)이며 출처들은 계정으로 구분해 대사한다.
 
 > **모든 화면·API·문서에 "모의 포인트, 실제 가치 없음" 을 표기한다**(ADR-015). 환전·출금·거래 기능은 없다.
 
@@ -1260,14 +1264,16 @@ classDiagram
 
 | ID | 기능 | 트리거 | 단계 |
 |---|---|---|---|
-| LG-01 | 계정 개설(지갑) | 최초 보상/조회 | P2 |
+| LG-01 | 계정 개설(지갑) | 최초 지급/보상/조회 | P3 (원장 도입 시) |
 | LG-02 | 자격 판정(`EligibilityPolicy`)·보상 생성(PENDING)·`reward.pending_created` 발행 | `game.finished` 소비 | P2 |
 | LG-03 | 보상 확정·기장 | 분석 CLEAN / 수동 | P2 |
 | LG-04 | 보상 FLAGGED 전이 | 분석 SUSPECT | P2 |
 | LG-05 | 보상 박탈(REVOKED) | 관리자 | P2 |
-| LG-06 | 잔액·내역 조회 | `GET /api/me/points` | P2 |
-| LG-07 | 원장 정합성 점검 | worker 주기 | P2 |
-| LG-08 | 모의 면책 표기 | UI·API | P2 |
+| LG-06 | 잔액·내역 조회 | `GET /api/me/points` | P3 |
+| LG-07 | 원장 정합성 점검 | worker 주기 | P3 (보상 항목은 P2 에서 추가) |
+| LG-08 | 모의 면책 표기 | UI·API | P3 |
+| LG-09 | 관리자 지급(`AdminGrant`, POINT·USDC) | 관리자 | P3 (P2 문서 §9 와 같은 기능) |
+| LG-10 | 첫 로그인 지급 받기(`ClaimWelcomeGrant`)·USDC→POINT 교환(`ExchangeUsdcToPoint`) | 로그인 사용자 | P3 |
 
 ---
 
@@ -1387,7 +1393,7 @@ classDiagram
 | `04-ws-protocol.md` | 세 번째 연결 `/ws/room` 절 추가. **"WS 는 읽기 전용" 원칙은 유지**하고 인바운드는 `hello`·`room.join`·`room.leave`·`ping`(+채팅 `typing`)만 허용 | P0 ADR-032, 채팅 ADR-045 와 정합 |
 | `03-api-contract.md` | 대국 명령·조회 엔드포인트(§5.2), 속도 제한 등급 `write.game`, 오류 코드(`illegal_move`·`not_your_turn`·`game_over`·`not_player`·`not_scoring`·`mark_mismatch`·`resume_limit`·`no_pending_request`; CAS 경합은 M1 `version_conflict` 재사용) 추가, `heartbeat`·`resume-accept` 엔드포인트 | 쓰기는 `api` 한 경로 |
 | `features/14-realtime.md` | `PublicHub` 를 방별 구독자 집합이 있는 `RoomHub` 로 일반화하되 **P0 ADR-032 의 포트**(`RoomAccessPolicy`·`RoomSnapshotProvider`·`RoomMessageMapper`·`RoomEventSource`) 방식을 따른다. `SendQueue`·4408·`bye` 재사용 | 팬아웃 구조 동일, 도메인 의존 역전 |
-| `ws-gateway` | **변경 없음(읽기·push 전용 유지)**. 새 NOTIFY 채널 `room_changed` 구독과 조립부에서 `game` 포트 등록만 추가, DB 쓰기·명령 호출 없음 | M1 04·F14 의 읽기 전용 모델 보존 |
+| `ws-gateway` | **변경 없음(읽기·push 전용 유지)**. 룸 포트·`/ws/room`·`RoomHub` 는 6a 에서 이미 도입되어 있고, 여기서는 NOTIFY 채널 `room_changed` 구독과 조립부의 `GameRoomPolicy`·`RoomEventSource` 등록만 추가, DB 쓰기·명령 호출 없음 | M1 04·F14 의 읽기 전용 모델 보존 |
 | `api` | 대국 명령 라우트와 가드(`RequireParticipant`), 수신 시각 `receivedAt` 확정 미들웨어 추가 | §5.2, §5.9 |
 | `events` | `game.finished` 구독 레지스트리에 `ledger`·`chat` 소비자, `reward.pending_created` 에 `analysis` 소비자 등록. 전달 계층 전환(Streams)은 **P0 D4: Phase 3 에서 판정**하므로 Phase 2 의 분석 큐는 **Postgres inbox 선점**이다(§2.2·§9 는 이에 맞춰 조정 완료) | 분석 큐 |
 | `identity` | **변경 불필요**: 자격 판정은 `ledger` 의 `EligibilityPolicy` 가 `game.finished` 페이로드(로그인 여부 포함)로 한다 | §10.3 |
@@ -1397,23 +1403,25 @@ classDiagram
 | `10-security` / `ADR-023` | `/ws/room` 속도 제한 값 추가. 분석 임대 연장은 **ADR-021 의 적용**이라 ADR-023 변경은 문구 명확화(10배 규칙은 연장 간격에 적용)뿐 | §8, §9.3 |
 | 지표 | F17 카탈로그에 §16.1 추가 | |
 | 감사 | `admin.reward_*`, `system.ledger_audit_ran` | ADR-027 |
-| 비용 | 컨테이너 +1(katago-worker). Redis 는 P0 D6 에 따라 Phase 3 도입 | ADR-024 도입 조건 |
+| 비용 | 컨테이너 +1(katago-worker, **Phase 2 에서 합류 — 구현 순서 7**). Redis 는 P0 D6 에 따라 Phase 3 도입 | ADR-024 도입 조건 |
 
 ---
 
 ## 18. 단계별 구현 순서와 위험
 
+**전체 구현 순서에서의 위치 (D24)**: 이 절의 작업은 6a~6d 가 끝난 뒤에 시작한다. 착수 전 **설계 재검토**(P0 §12.5: 앞 Phase 에서 배운 것 반영, 독립 검토, ADR 확정)를 먼저 하고, KataGo 실행 가능성 스파이크(아래 #8)는 **Phase 1 착수 전에 앞당겨 실행하는 것을 제안**한다(P0 §1.4 G14). 표의 "기존 기반"은 앞 단계가 이미 만든 것이다.
+
 | 순서 | 작업 | 완료 기준 | 위험 |
 |---|---|---|---|
 | 1 | `baduk-rules` 패키지 + 시험 세트 + 차분 퍼징 | AC-BD-09 | 규칙 해석 오류 → 시험이 방어선 |
 | 2 | `game` 모듈: 도전·대국·**REST 명령 라우트**·착수·CAS·`game_event`·`pg_notify room_changed` | AC-BD-01·02·05·06 | 핫 행 경합 지표 |
-| 3 | `/ws/room` 게이트웨이(**읽기·push 전용**): `room.join`/event/clock + 룸 포트 구현 + `RoomEventSource` | AC-BD-03·04·07·16 | P0 ADR-032 와의 정합, 연결 수 |
+| 3 | `/ws/room` 에 **대국 룸 추가**(룸 포트·허브·재개는 6a 에서 이미 존재): `GameRoomPolicy` + `RoomEventSource` + `room.join`(game)/event/clock | AC-BD-03·04·07·16 | P0 ADR-032 와의 정합, 연결 수 |
 | 4 | 시간 제어·`TimeoutSweeper`·종국·계가 합의 | AC-BD-06·08 | 지연 허용치 미결 |
 | 5 | 로비·`game_read` 투영·SGF | | |
 | 6 | 3D 클라이언트(R3F) + 2D 폴백 | Phase 1-B DoD | 번들·성능 예산 |
 | 7 | 악용 방어·속도 제한·관측 + 지연 측정(§5.10) + `lagGrace` 시험 | AC-BD-15·17·18 | 지연 예산 초과 시 원인 분리 |
-| 8 | **Phase 2 스파이크**: KataGo CPU 성능·규칙 문자열·모델 | 결정(ADR-036 확정) | CPU 에서 비현실적일 수 있음 |
-| 9 | `ledger`: 복식 원장·`EligibilityPolicy`·보상 `PENDING`/상태 머신·`reward.pending_created`·점검 잡 | AC-BD-12·13·14 | 모의 표기 누락 |
+| 8 | **Phase 2 스파이크**: KataGo CPU 성능·규칙 문자열·모델 (**Phase 1 착수 전에 앞당김 제안**) | 결정(ADR-036 확정) | CPU 에서 비현실적일 수 있음 |
+| 9 | `ledger` **확장**(원장·POINT 는 Phase 3 에 존재): `EligibilityPolicy`·보상 `PENDING`/상태 머신·`reward.pending_created`·점검 잡의 보상 항목 | AC-BD-12·13·14 | 모의 표기 누락 |
 | 10 | `analysis` 모듈·워커·DB 큐(Redis 없음, `reward.pending_created` 구독, 임대 연장은 ADR-021) | AC-BD-10·11 | 분석 전에 reward 가 존재해야 함(순서 의존) |
 | 11 | 의심도 지표·수동 검토 화면 | | 임계값은 데이터 후 |
 

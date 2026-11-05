@@ -5,6 +5,8 @@
 - 전제: M1 의 기반 규약을 그대로 따른다 — 모듈러 모놀리스(ADR-001), CQRS 논리 분리와 `usecase → service → domain`(ADR-018·019), outbox/inbox(ADR-005·020), 선점·임대·낙관적 버전(ADR-021), **모든 쓰기는 트랜잭션**과 Drizzle 빌더 기본(ADR-025), 데이터 보호 등급(ADR-026), 감사 로그(ADR-027), 사고 대응(ADR-028), Redis 이음새(ADR-024).
 - 근거 문서: ADR-010(재고), ADR-011(정산 통화), ADR-015(모의 면책), ADR-016(결제·확장), [database-schema.md §11](../../domains/database-schema.md), [architecture.md §12](../../domains/architecture.md), [design/00](../00-system-overview.md), [F13](../features/13-events-pipeline.md).
 
+> **구현 순서 (P0 D24).** 이 문서의 **Phase 3 은 구현 순서 2번째**(M1 다음, 바둑보다 먼저)이고 Phase 5 는 4번째다. 그 결과 **Phase 3 은 바둑 보상 없이 단독으로 닫혀야** 한다. 선행 공백과 해법은 P0 §1.4 에 있고 이 문서에 반영한 것은 다음과 같다 — ① 포인트 출처는 **첫 로그인 지급(모의 USDC 10,000 + POINT 1,000, `ClaimWelcomeGrant`)·관리자 지급·USDC→POINT 단방향 교환**이고 바둑 보상은 Phase 2 에서 붙는 마지막 출처(ADR-048) ② Phase 3 의 `payment` 는 **원장 결제 어댑터(포인트 우선 + USDC 혼합)만의 최소형**, 카드·웹훅·환불 확장은 Phase 5 ③ Phase 3 에도 **최소 `pricefeed`(고정 환율 소스 `FixedRateSource`)** 가 있어 모든 결제가 스냅샷을 갖는다(P0 G3 개정, `legacy_demo` 는 폐기) ④ Phase 3 에는 `escrow` 가 없으므로 포인트 결제 분개는 `liab:escrow:POINT` 로 보류만 한다 ⑤ `inventory` 약정은 6c 까지 꺼져 있다(`INVENTORY_EARMARK=off`, 딜 게시는 `publishing` 을 즉시 통과) ⑥ `/ws/room` 이 없어도 구매 결과·재고 카운트는 `/ws/private`·`/ws/public` 으로 충분하다. 착수 전에는 설계 재검토(P0 §12.5)를 거친다.
+
 > **면책 (ADR-015).** 이 문서의 모든 결제·정산·포인트·에스크로는 **모의(시뮬레이션) 또는 테스트넷**이다. 실제 금전이 오가지 않는다. 결제 관련 화면과 README 상단에 이를 표기하고, 카드번호·계좌번호는 어디에도 저장하지 않는다.
 
 > **확인 수준 표기.** 이 문서의 외부 서비스 서술은 2026-11-04 에 한 웹 검색의 요약에 근거한다. 공식 문서 원문을 읽은 것이 아니므로 모두 **착수 시 재확인** 대상이다. "(미확인)"은 근거를 찾지 못한 것, "(제안)"은 이 문서가 정한 초기값이다.
@@ -100,6 +102,7 @@ flowchart TB
 | `order` | `order` | `order_read` | 주문 집합체, **구매 확정 오케스트레이션**(§4.7), 상태 머신 | 포트만(아래) |
 | `payment` | `payment` | `payment_read` | 결제 집합체, PG 어댑터, 웹훅 inbox, 환불, 견적 | `pricefeed` 공개 조회, `order` 공개 조회 |
 | `escrow` | `escrow` | `escrow_read` | 에스크로 집합체, 분쟁, 자동 확정 | `payment`/`order` 이벤트(inbox) |
+| `escrow_leg` | `id`, `escrow_id`, `asset`(`POINT`/`USDC`), `amount`, `refunded_amount` | `UNIQUE (escrow_id, asset)`, `CHECK (refunded_amount BETWEEN 0 AND amount)` | SYS (혼합 결제 다리별 보류, ADR-048) |
 | `settlement` | `settlement` | `settlement_read` | 판매자 정산 실행(USDC 환산), 정산 내역 | `escrow` 이벤트(inbox), `ledger` |
 | `pricefeed` | `pricefeed` | — | 시세 스냅샷 수집·검증·보류 | — |
 | `ledger` | `ledger` | `ledger_read` | 복식 원장(다중 자산 POINT/KRW/USDC). 스키마 정본은 §9, 보상 규칙은 P1 §10(P0 §2.5) | — |
@@ -162,6 +165,7 @@ stateDiagram-v2
 ```
 
 - `publishing` 은 **약정 승인을 기다리는 중간 상태**다. 게시 요청 트랜잭션이 `draft→publishing` 으로 바꾸고 `deal.published`(= 약정 요청, P3 가 소비)를 발행한다. 풀필먼트의 `inventory.earmark_changed` 를 받으면 `scheduled`, `inventory.earmark_rejected` 면 `draft` 로 **되돌린다**(`deal.publish_rejected` 발행, 관리자에게 사유 표시). `scheduled` 는 약정이 승인된 뒤에만 도달하므로 **약정 없는 딜이 열리지 않는다**.
+- **약정 꺼짐 모드 (구현 순서 D24)**: `inventory`(6c)가 생기기 전까지는 `INVENTORY_EARMARK=off` 이고, 이때 `PublishDeal` 은 약정 요청 없이 `draft→publishing→scheduled` 를 **같은 트랜잭션에서 통과**한다(`deal.scheduled` 즉시 발행). 6c 에서 `on` 으로 바꾸면 위 약정 승인 흐름이 활성화되고, **진행 중(open/scheduled) 딜은 초기 약정 동기화 잡**으로 맞춘다(닫힘·정산 딜 제외, P0 §1.4 G5).
 - `rebuilding` 은 §4.5 의 Redis 재구성 동안만 거치는 상태이며 구매는 `UNAVAILABLE` 로 차단된다(재구성 전 상태 `open`/`sold_out` 으로 복귀).
 - `closed → settled` 에서 **약정 잔여분을 해제**한다(§12.1): 해제량 = `total − confirmed`(= 판매되지 않은 수량만). 판매된 수량의 약정은 `order.paid` 소비(AcceptOrder)가 이미 또는 곧 소비한다.
 - `sold_out` 은 **파생 표시 상태**에 가깝다. 예약이 만료되면 수량이 돌아와 다시 `open` 이 된다(마지막 1개를 두고 결제를 놓친 사람 때문에 영구 품절로 보이면 안 된다).
@@ -524,7 +528,7 @@ classDiagram
         +cancel(payment, amount, idemKey) CancelResult
         +verifyWebhook(rawBody, headers) VerifiedEvent
     }
-    class PointsGateway
+    class LedgerGateway
     class CardTestGateway {
         <<abstract>>
     }
@@ -532,7 +536,7 @@ classDiagram
     class PortOneTestGateway
     class FakeGateway
     class UsdcEscrowGateway
-    PaymentGateway <|.. PointsGateway
+    PaymentGateway <|.. LedgerGateway
     PaymentGateway <|.. CardTestGateway
     CardTestGateway <|-- TossTestGateway
     CardTestGateway <|-- PortOneTestGateway
@@ -542,10 +546,23 @@ classDiagram
 
 | 구현 | 단계 | 비고 |
 |---|---|---|
-| `PointsGateway` | Phase 3 | 외부 호출 없음. `prepare`/`approve` 가 원장 차감(`ledger.PostJournalInTx`)으로 동기 완료 |
+| `LedgerGateway` | Phase 3 | 외부 호출 없음. `prepare`/`approve` 가 **다리별** 원장 차감(`ledger.PostJournalInTx` — POINT 다리 + USDC 다리, §6.1.1)으로 동기 완료 |
 | `FakeGateway` | Phase 3~5 시험 | 결정적 성공/실패/지연/중복 웹훅을 주입하는 **시험용 PG**. 계약 시험의 기준 구현 |
 | `TossTestGateway` / `PortOneTestGateway` | Phase 5 | PG 선정은 착수 시 확정(§6.2). 둘은 `CardTestGateway` 공통 흐름(위젯 → 승인 → 웹훅)을 공유 |
 | `UsdcEscrowGateway` | Phase 6-4 | 온체인 에스크로 경계(§8.7) |
+
+#### 6.1.1 결제 다리(leg)와 혼합 결제 (ADR-048)
+
+`method=ledger`(구 `points`)는 **다리 두 개까지**를 갖는다. 카드(테스트) 결제는 KRW 단일 다리이며 포인트와 섞지 않는다.
+
+| 다리 | 자산 | 계산 | 원장 |
+|---|---|---|---|
+| POINT | POINT | `P = usePoints ? min(포인트 잔액, T) : 0` (T = 주문 KRW 합계, 1 POINT = 1 KRW) | `liab:user_points:{u}` → `liab:escrow:POINT` |
+| USDC | USDC(micro) | `R = T − P`, `u = floor(R × 10¹⁴ / rate_e8)` (결제 시작 시 고정한 스냅샷, §8.2.1) | `liab:user_usdc:{u}` → `liab:escrow:USDC` |
+
+- **포인트 우선 차감**: UI 토글 `usePoints`(기본 켜짐)로 끌 수 있다. `P = 0` 이면 USDC 단일 다리, `R = 0` 이면 POINT 단일 다리다.
+- **원자성**: `ConfirmPurchase` 의 한 트랜잭션이 두 분개를 함께 기장한다. 어느 쪽 `account_balance` 조건부 갱신이 `min_balance` 에서 거절되면 **전체 롤백**(`insufficient_funds`, 예약은 유지되어 TTL 안에 다시 시도할 수 있다).
+- **계획 고정**: `InitiatePayment` 가 `payment_leg` 계획 행(자산, 수량, KRW 가치)을 만든다. 승인 시점의 잔액 변동으로 계획이 바뀌지 않으며, 잔액이 모자라면 실패하고 사용자가 다시 시작한다.
 
 ### 6.2 PG 후보 조사 (2026-11-04 웹 검색 요약, 모두 재확인 필요)
 
@@ -703,6 +720,23 @@ flowchart TD
 | 포인트 결제 | 포인트 환불은 원장 역분개만(외부 호출 없음) |
 | 재고 복원 | **출고 전 취소**(`fulfillment.cancelled`, 구매자 취소 사유)이고 딜이 `open`/`sold_out`(종료 전)일 때만, **deal 의 소비자 `deal-restock-reactor` 가 환불과 독립적으로**(환불 성공 여부와 무관) `deal.restocked {dealId, qty, reason:'cancel'}` 를 발행하고 Redis `restock.lua`(avail +q, 개인 보유 −q, 멱등 키 `restock:<orderId>`)와 PG(`stock.confirmed −q`, `user_purchase.qty −q`)를 갱신한다. **`fulfillment.rejected(OUT_OF_STOCK)` 는 복원하지 않는다**(물리 재고가 없는데 판매 가능 수량을 늘리면 안 됨). 약정은 복원 시 `+q` 로 짝지어 돌려준다(`deal.restocked` 를 inventory 가 소비, P3). 반품·분쟁 환불은 재고를 복원하지 않는다(물리 입고는 풀필먼트 `return.received` 가 관리) |
 
+
+#### 6.6.1 다리별 환불 규칙 (ADR-048 E4)
+
+혼합 결제의 환불은 **원래 자산으로, 다리별로** 한다. 새 환율로 재환산하지 않는다.
+
+```
+환불 F(KRW), 남은 환불 가능액 T_rem, 다리 잔여 KRW 가치 P_rem(POINT)·R_rem(USDC)
+pk      = min(P_rem, floor(F × P_rem / T_rem))          // POINT 다리 몫 (KRW=POINT)
+rk      = F − pk                                         // 나머지는 USDC 다리 몫 (R_rem 초과분은 POINT 로 이월)
+USDC 환불 수량 = floor(R_done_after × u / R) − (이미 환불한 USDC 수량)   // 누적 기준 증분
+```
+
+- **누적 기준**인 이유: 건별로 내림하면 여러 번 환불할 때 낸 수량보다 적게 돌려주거나(내림 누적), 반대로 넘겨 줄 수 있다. 누적 비례로 계산하면 **전액 환불 시 낸 수량이 정확히 돌아오고, 어떤 순서의 부분 환불에서도 합이 낸 수량을 넘지 않는다.**
+- 멱등 키는 다리별로 `refund:<paymentId>:<eventId>:<asset>` 이다. 환불 행은 `payment_refund_leg`(자산, 수량, KRW 가치)를 갖는다.
+- 에스크로 `held` 상태에서만 환불한다(§6.6 의 표). 정산 후 환수는 범위 밖이다.
+- **검산**: 순수 정수 모델 29.9만 단계(주문 10만 건)에서 다리별 환불 합이 낸 금액을 넘은 경우 0건, 전액 환불 시 불일치 0건(ADR-048 검산 표).
+
 ### 6.7 늦은 결제 (예약 만료 후 승인)
 
 카드 결제는 예약 TTL 을 넘겨 승인될 수 있다. 정책은 **"재고가 남았으면 새 예약으로 구매를 살리고, 없으면 자동 환불"** 이다. **만료된 예약을 되살리지 않는다**(종결 상태 불변, I3·I4 예외 없음).
@@ -817,8 +851,8 @@ flowchart TD
 | 자산 | 단위 | 타입 | 비고 |
 |---|---|---|---|
 | `KRW` | 원 | `bigint` | 모의 현금성 금액(카드 테스트 결제) |
-| `POINT` | 포인트 | `bigint` | 바둑 보상 등으로 얻는 모의 재화. **1 POINT = 1 KRW 가치로 간주(제안, 설정 `POINT_KRW_RATE`)** |
-| `USDC` | micro-USDC(10⁻⁶) | `bigint` | 정산 통화. Solana USDC 소수 자릿수(6)와 같다 |
+| `POINT` | 포인트 | `bigint` | 플랫폼 크레딧(모의) — **첫 로그인 지급 1,000**(`exp:demo_grant:POINT`), 관리자 지급, **USDC→POINT 단방향 교환**(`exp:points_exchanged:POINT`), Phase 2 이후 바둑 보상(`exp:points_issued`)으로 얻는다. POINT→USDC 환전은 없다. **1 POINT = 1 KRW 가치(제안, 설정 `POINT_KRW_RATE`)** |
+| `USDC` | micro-USDC(10⁻⁶) | `bigint` | 구매자 **모의 보유 자산**(첫 로그인 지급 10,000 USDC)이자 정산 통화. Solana USDC 소수 자릿수(6)와 같다. 원장의 모의 잔액이며 온체인이 아니다 |
 
 - 환율은 `numeric(20,8)` 으로 저장하고, 계산은 **정수 연산**(환율 × 10⁸ 을 `bigint` 로)으로만 한다. 부동소수점을 금액 계산에 쓰지 않는다.
 
@@ -846,6 +880,21 @@ dustMicro  = grossMicro - netMicro - feeMicro                            // 반�
 - **분포(시험 확인)**: `krw ∈ [1천, 500만]`, `rate ∈ [800, 2500]`, `fee_bps ∈ {0,100,250,333}` 20만 건 무작위에서 dust 는 0 이 약 62%, 1 이 약 38% 였고 2 이상은 0건, `gross = net + fee + dust` 위반 0건이다. dust 가 거의 항상 0 이어서 `rounding_dust` 계정이 무의미하다는 우려(AC-C16 이 공허해지는 문제)는 이 정의에서는 성립하지 않는다 — 38% 에서 실제 값이 생기므로 시험이 의미를 가진다.
 
 속성 시험(property test): ① 모든 입력에서 결과 ≥ 0 ② `net ≤ gross`, `fee ≤ gross` ③ `net + fee + dust = gross` 이고 `dust ∈ {0,1}` ④ 환율 단조성(환율이 오르면 gross 비증가) ⑤ `krw > 92,233` 인 큰 금액에서도 BigInt/numeric 계산이 오버플로 없이 일치(64비트 정수 구현과의 차분 시험으로 **오버플로 지점 검출**).
+
+
+#### 8.2.1 구매자 USDC 다리와 교환 환산 (ADR-048)
+
+```
+buyerUsdcMicro(R)   = floor( R × 10^14 / rate_e8 )          // 구매자 USDC 다리 (R = T − P, KRW)
+sellerGrossMicro(T) = floor( T × 10^14 / rate_e8 )          // 정산 총액(위 grossMicro 와 같다)
+pointRedemption r   = sellerGrossMicro(T) − buyerUsdcMicro(T − P)   // 플랫폼 부담, 항상 ≥ 0
+exchangeCost(K)     = ceil ( K × 10^14 / rate_e8 )          // 포인트 K 를 사는 데 드는 USDC (올림)
+```
+
+- 구매자 다리는 **내림**(정산 총액과 방향을 맞춰 `r ≥ 0` 보장), 교환은 **올림**이다. 교환 후 포인트로 사는 비용 `ceil(K·c)` 가 직접 USDC 로 K 원어치를 내는 비용 `floor(K·c)` 이상이므로 **교환 경로가 더 싸지 않다**(차익 없음, 차이 ≤ 1 micro-USDC).
+- 두 스냅샷이 다르면(교환 시점 ≠ 결제 시작 시점) 환율 변동에 따른 차익이 생길 수 있으므로, 교환은 **즉시 사용 가능한 POINT** 로 취급할 뿐 가치 보증이 아니다. 교환 한도(`write.exchange` 등급)로 규모를 제한한다.
+- **검산 예시** (ADR-048): ① 포인트만 `T=50,000`, `rate_e8=138,765,432,100`, `fee_bps=250` → `r=36,032,028`, net 35,131,227 + fee 900,800 + dust 1 = 36,032,028 ② 혼합 `T=1,000,000`, `P=300,000`, 1,400 KRW/USDC, `fee_bps=100` → `u=500,000,000`, `r=214,285,714`, gross 714,285,714 = net 707,142,857 + fee 7,142,857 + dust 0.
+- 속성 시험: 무작위 20만 건에서 자산별 차변≠대변 0건, `r<0` 0건, 교환이 직접 결제보다 싼 경우 0건.
 
 ### 8.3 시세 수집 (`PriceFeedCollector`)
 
@@ -945,6 +994,20 @@ sequenceDiagram
 | 실패 | 환산 입력 이상(스냅샷 없음·음수)이면 `failed` + 경보, 수동 재시도 CLI. 모든 결제가 스냅샷을 가지므로 정상 경로에서 "스냅샷 없음"은 일어나지 않는다(이전 설계의 포인트 결제 정산 영구 실패 결함 해소) |
 | 모의 지급 | `settled` 는 "판매자 USDC 지급채무 확정"이며 실제 이체는 없다. 지급 완료 표시는 `payout_marked` 별도 행위(관리자, 모의) |
 
+
+#### 8.5.1 혼합 결제의 정산 분개 (ADR-048 E5)
+
+에스크로는 다리별로 보류하고(`liab:escrow:POINT`·`liab:escrow:USDC`) 해제 시 **판매자 정산은 USDC** 이다. POINT 다리의 가치는 결제 시작 스냅샷으로 환산해 플랫폼이 부담한다.
+
+| 단계 | 분개 (차변 / 대변) |
+|---|---|
+| 해제: POINT 다리 소각 | `liab:escrow:POINT` P / `fx:clearing:POINT` P |
+| 정산(USDC 자산) | `liab:escrow:USDC` u + `exp:point_redemption:USDC` r / `liab:seller_payable:{s}:USDC` net + `rev:platform_fee:USDC` fee + `rev:rounding_dust:USDC` dust |
+
+- 차변 합 `u + r = gross` = 대변 합 `net + fee + dust` 이므로 **USDC 자산에서 항상 균형**이고, POINT 자산은 별도로 균형이다(자산별 분개, 다중 자산 복식).
+- 포인트만 결제(`u=0`)면 USDC 차변은 `exp:point_redemption:USDC` 하나이고, USDC만 결제(`P=0`)면 `r=0` 이다.
+- `settlement` 행은 `funded_usdc_micro`(= u), `funded_point_krw`(= P), `point_redemption_micro`(= r) 를 갖고 `CHECK (funded_usdc_micro + point_redemption_micro = usdc_gross_micro)` 가 같은 식을 강제한다.
+
 ### 8.6 시세 이상 시 동작 요약
 
 | 상황 | 결제/견적 | 정산 |
@@ -977,7 +1040,7 @@ classDiagram
 |---|---|
 | 상태 모델 | 오프체인 `escrow` 상태 머신이 **정본**이고 온체인 계정은 그 거울. 온체인 상태는 `status`/`watch` 로 읽어 대조 |
 | 호출 위치 | 온체인 트랜잭션은 **트랜잭션 밖**(선점 → 체인 호출 → 완료), 서명 확인/확정 깊이는 폴링 대사 |
-| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle 공개 faucet(계정 불필요, 한도는 이차 출처 기준 20 USDC/2시간 — 재확인 필요), 수수료용 SOL 은 Solana faucet |
+| 네트워크 | **devnet 한정**. USDC devnet 민트 주소 `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`(Circle 문서에서 확인한 값), 테스트 USDC 는 Circle 공개 faucet(**요청당 10 USDC, 토큰·테스트넷당 24시간 1회**; 개발자 콘솔은 요청당 20 USDC, 계정당 24시간 10회 — Circle 공식 문서 기준, 구현 시 재확인), 수수료용 SOL 은 Solana faucet. 방문자가 직접 받기에는 한도가 작으므로 **시연 토큰은 자체 SPL 테스트 토큰(`tUSDC`) 기본 + Circle devnet USDC 옵션**(ADR-048 U28). 지갑은 선택 사항이며 연결한 사용자만 이 경로를 쓴다 |
 | 키 | 서버 서명 키는 시크릿 파일, **devnet 키만**. 메인넷 키는 어떤 설정에도 두지 않는다. 키 관리 ADR 이 착수 선행 조건 |
 | 시험 | `InMemoryChainEscrow` 로 전 흐름을 결정적으로 시험하고 devnet 은 통합 시연으로만 |
 | 범위 | 분쟁·부분 해제 온체인화는 범위 밖 |
@@ -1010,8 +1073,12 @@ classDiagram
 | 계정 코드 | 유형 | 자산 | 의미 |
 |---|---|---|---|
 | `liab:user_points:{uid}` | 부채 | POINT | 사용자 보유 포인트 |
-| `exp:points_issued` | 비용 | POINT | 보상으로 발행한 포인트(P1) |
-| `liab:escrow:POINT` / `liab:escrow:KRW` | 부채 | POINT / KRW | 에스크로로 보류 중인 대금 |
+| `liab:user_usdc:{uid}` | 부채 | USDC | 사용자 **모의** USDC 잔액(첫 로그인 10,000 USDC, 결제·교환으로 감소) |
+| `exp:demo_grant:POINT` · `exp:demo_grant:USDC` | 비용 | POINT · USDC | 데모 지급(첫 로그인 `ClaimWelcomeGrant`·관리자 `AdminGrant`)으로 발행한 모의 자산 |
+| `exp:points_exchanged:POINT` · `rev:point_exchange:USDC` | 비용 · 수익 | POINT · USDC | USDC→POINT 교환(발행한 포인트 · 소비된 USDC) |
+| `exp:point_redemption:USDC` | 비용 | USDC | 정산 시 POINT 다리 몫을 USDC 로 환산해 플랫폼이 부담한 값(§8.5.1) |
+| `exp:points_issued` | 비용 | POINT | 보상으로 발행한 포인트(P1, Phase 2~) |
+| `liab:escrow:POINT` / `liab:escrow:USDC` / `liab:escrow:KRW` | 부채 | POINT / USDC / KRW | 에스크로로 보류 중인 대금(다리별) |
 | `asset:pg_receivable:KRW` | 자산 | KRW | PG 로부터 받을 승인 대금(모의) |
 | `fx:clearing:KRW` / `fx:clearing:USDC` | 자산 | KRW / USDC | 통화 환산 청산(자산별로 분리해 각각 균형) |
 | `liab:seller_payable:{sid}:USDC` | 부채 | USDC | 판매자에게 줄 정산 대금 |
@@ -1020,24 +1087,27 @@ classDiagram
 
 | 계정 | `min_balance` | 이유 |
 |---|---|---|
-| `liab:user_points:{uid}` | **0** | 사용자 포인트는 음수가 될 수 없다(포인트 결제 차감이 조건부 갱신으로 거절됨) |
-| `liab:escrow:POINT` · `liab:escrow:KRW` | **0** | 보류 중 대금 합. 해제·환불이 보류액을 넘을 수 없다 |
+| `liab:user_points:{uid}` · `liab:user_usdc:{uid}` | **0** | 사용자 보유 자산은 음수가 될 수 없다(결제·교환 차감이 조건부 갱신으로 거절됨) |
+| `liab:escrow:POINT` · `liab:escrow:USDC` · `liab:escrow:KRW` | **0** | 보류 중 대금 합. 해제·환불이 보류액을 넘을 수 없다 |
 | `liab:seller_payable:{sid}:USDC` | **0** | 지급채무. 모의 지급 표시가 채무를 넘을 수 없다 |
 | `asset:pg_receivable:KRW` | **0** | PG 로부터 받을 대금. 취소가 승인액을 넘을 수 없다 |
 | `fx:clearing:{KRW\|POINT\|USDC}` | NULL(하한 없음) | 환산 청산 계정은 단계 사이에서 일시적으로 반대 방향 잔액이 생길 수 있다 |
-| `exp:points_issued` · `rev:platform_fee:USDC` · `rev:rounding_dust:USDC` | NULL(하한 없음) | 비용·수익 누적 계정(차변/대변 한쪽으로만 쌓이지만 역분개 때 줄 수 있어 하한을 두지 않음) |
+| `exp:points_issued` · `exp:demo_grant:*` · `exp:points_exchanged:POINT` · `rev:point_exchange:USDC` · `exp:point_redemption:USDC` · `rev:platform_fee:USDC` · `rev:rounding_dust:USDC` | NULL(하한 없음) | 비용·수익 누적 계정(차변/대변 한쪽으로만 쌓이지만 역분개 때 줄 수 있어 하한을 두지 않음) |
 | `asset:payout_marked:USDC` | NULL(하한 없음) | 모의 지급 표시 누계 |
 
 - **음수 잔액 허용(부채)이라는 서술은 없다.** 포인트 보상이 `PENDING` 일 때는 기장이 없고 `CONFIRMED` 가 되어야 `liab:user_points` 에 들어가므로(P1 §10, ADR-037) 사후 박탈 역분개로 사용자 잔액이 음수가 되는 경로 자체가 없다.
 
 | 사건 | 분개 (차변 / 대변) |
 |---|---|
-| 보상 확정 (P1) | `exp:points_issued`(POINT) / `liab:user_points:{u}`(POINT) |
-| 포인트 결제 | `liab:user_points:{u}` / `liab:escrow:POINT` |
+| 첫 로그인 지급 (Phase 3) | POINT 분개 `exp:demo_grant:POINT` / `liab:user_points:{u}` 1,000 + USDC 분개 `exp:demo_grant:USDC` / `liab:user_usdc:{u}` 10,000×10⁶ — 멱등 키 `grant:welcome:{uid}`(사용자당 1회). 관리자 지급은 `grant:admin:{uid}:{requestId}` |
+| USDC→POINT 교환 | USDC 분개 `liab:user_usdc:{u}` / `rev:point_exchange:USDC` x, POINT 분개 `exp:points_exchanged:POINT` / `liab:user_points:{u}` K — 반대 방향은 없다 |
+| 보상 확정 (P1, Phase 2) | `exp:points_issued`(POINT) / `liab:user_points:{u}`(POINT) |
+| 결제 확정(POINT 다리) | `liab:user_points:{u}` / `liab:escrow:POINT` |
+| 결제 확정(USDC 다리) | `liab:user_usdc:{u}` / `liab:escrow:USDC` |
 | 카드 승인(모의) | `asset:pg_receivable:KRW` / `liab:escrow:KRW` |
 | 환불(보류 중) | 위 분개의 **역분개** |
-| 해제 → 정산 1단계 | `liab:escrow:{KRW\|POINT}` / `fx:clearing:{KRW\|POINT}` |
-| 정산 2단계 | `fx:clearing:USDC`(gross) / `liab:seller_payable:{s}:USDC`(net) + `rev:platform_fee:USDC`(fee) + `rev:rounding_dust:USDC`(dust ∈ {0,1}) — 대변 합 = 차변(§8.2) |
+| 해제 → 정산 1단계 | `liab:escrow:{KRW\|POINT}` / `fx:clearing:{KRW\|POINT}` (USDC 다리는 정산 2단계에서 직접 차변, §8.5.1) |
+| 정산 2단계 | `liab:escrow:USDC`(u, 혼합·USDC) + `exp:point_redemption:USDC`(r) 또는 카드 경로의 `fx:clearing:USDC`(gross) / `liab:seller_payable:{s}:USDC`(net) + `rev:platform_fee:USDC`(fee) + `rev:rounding_dust:USDC`(dust ∈ {0,1}) — 대변 합 = 차변(§8.2) |
 | 모의 지급 표시 | `liab:seller_payable:{s}:USDC` / `asset:payout_marked:USDC` |
 
 ### 9.3 대사 질의 (점검 잡 `LedgerReconciler`, 일 1회 + 요청 시)
@@ -1098,8 +1168,10 @@ classDiagram
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
 | `quote` | `id`, `order_id`, `user_id`, `krw_amount`, `snapshot_id`, `usdc_micro_ref`, `expires_at`, `status`(`open`/`used`/`expired`), `version` | `(order_id, status)`, 사용은 `UPDATE … WHERE status='open' AND expires_at > $now` | PSD·SYS |
-| `payment` | `id`, `order_id`, `method`(`points`/`card_test`/`usdc_escrow`), `provider`, `provider_payment_key_enc`, `amount_krw`, `quote_id`, `snapshot_id`(고정), `status`(`initiated`/`awaiting_approval`/`approving`/`approved`/`unknown`/`refund_pending`/`refunding`/`partially_refunded`/`refunded`/`failed`/`expired`, §6.3), `refunded_total`, `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at`, `version`, `approved_at` | **부분 유일 `UNIQUE (order_id) WHERE status IN ('initiated','awaiting_approval','approving','approved','unknown','refund_pending','refunding','partially_refunded')`**, `(status, lease_until)`, `CHECK (refunded_total BETWEEN 0 AND amount_krw)` | PSD·SYS·**ENC**(`provider_payment_key_enc`) |
+| `payment` | `id`, `order_id`, `method`(`ledger`/`card_test`/`usdc_escrow`), `provider`, `provider_payment_key_enc`, `amount_krw`, `quote_id`, `snapshot_id`(고정), `status`(`initiated`/`awaiting_approval`/`approving`/`approved`/`unknown`/`refund_pending`/`refunding`/`partially_refunded`/`refunded`/`failed`/`expired`, §6.3), `refunded_total`, `claim_token`, `claimed_by`, `lease_until`, `attempts`, `next_attempt_at`, `version`, `approved_at` | **부분 유일 `UNIQUE (order_id) WHERE status IN ('initiated','awaiting_approval','approving','approved','unknown','refund_pending','refunding','partially_refunded')`**, `(status, lease_until)`, `CHECK (refunded_total BETWEEN 0 AND amount_krw)` | PSD·SYS·**ENC**(`provider_payment_key_enc`) |
 | `payment_refund` | `id`, `payment_id`, `amount_krw`, `reason`(`rejected_stock`/`late_sold_out`/`cancel`/`fulfillment_rejected`/`return`/`admin`), `status`(`pending`/`completed`/`failed`/`unknown`), `provider_ref`, `cause_event_id` NULL, `idempotency_key` | **`UNIQUE (idempotency_key)`**(이벤트 기원 환불은 `refund:<paymentId>:<eventId>`), `(status) WHERE status IN ('pending','unknown')` | SYS |
+| `payment_leg` | `id`, `payment_id`, `asset`(`POINT`/`USDC`), `amount`(POINT 또는 micro-USDC), `krw_value`, `plan_seq` | `UNIQUE (payment_id, asset)`, `CHECK (amount > 0)`, 합계 `SUM(krw_value) = payment.amount_krw` (애플리케이션+대사) | PSD·SYS (ADR-048) |
+| `payment_refund_leg` | `id`, `refund_id`, `asset`, `amount`, `krw_value` | `UNIQUE (refund_id, asset)`, 누적 `SUM(amount) ≤ payment_leg.amount` (대사) | PSD·SYS |
 | `payment_event` | `id`, `payment_id`, `source`(`api`/`webhook`/`reconcile`), `provider_status`, `parsed`(jsonb, 최소 필드), `observed_at` | 추가 전용. **원본 payload 는 저장하지 않는다**(PII 가능) | SYS |
 | `inbox_message` | 소비자 `payment-webhook-handler` (웹훅 수신), `payment-order-reactor`, **`payment-fulfillment-refunder`**(`fulfillment.rejected`·`cancelled`, `return.inspected`) | 7일 | SYS |
 | `request_key` | 공통 | — | — |
@@ -1117,7 +1189,7 @@ classDiagram
 | 테이블 | 핵심 컬럼 | 제약·인덱스 | 등급 |
 |---|---|---|---|
 | `seller` | `id`, `name`, `fee_bps`, `status` | 시드 | PUB |
-| `settlement` | `id`, `escrow_id`, `seller_id`, `krw_amount`, `snapshot_id`, `rate_e8`, `usdc_gross_micro`, `fee_micro`, `net_micro`, `dust_micro`, `status`(`pending`/`processing`/`settled`/`failed`), `journal_id`, `claim_token`…, `version` | **`UNIQUE (escrow_id)`**, `CHECK (net_micro + fee_micro + dust_micro = usdc_gross_micro)` | SYS |
+| `settlement` | `id`, `escrow_id`, `seller_id`, `krw_amount`, `snapshot_id`, `rate_e8`, `usdc_gross_micro`, `funded_usdc_micro`, `funded_point_krw`, `point_redemption_micro`, `fee_micro`, `net_micro`, `dust_micro`, `status`(`pending`/`processing`/`settled`/`failed`), `journal_id`, `claim_token`…, `version` | **`UNIQUE (escrow_id)`**, `CHECK (net_micro + fee_micro + dust_micro = usdc_gross_micro)` | SYS |
 | `inbox_message` | 소비자 `settlement-escrow-reactor` | 7일 | SYS |
 
 ### 10.8 `ledger` (단일 원장 모듈, 정본은 §9)
@@ -1169,7 +1241,7 @@ classDiagram
 | `order.return_requested` | `RequestReturn`(반품 기한 5일 이내) | `orderId`, `returnId`, `lines`, `reason` | **풀필먼트**, **`escrow-order-reactor`**(해제 동결) | 개인 알림 |
 | `order.address_corrected` | `CorrectShippingAddress` | `orderId`, `shippingAddressRef`(새 rev) | **풀필먼트** | 없음 |
 | `order.cancelled` / `order.expired` / `order.completed` / `order.disputed` | 각 usecase | `orderId`, `reason` | 풀필먼트(취소 시), 프로젝터 | 개인 알림 |
-| `payment.initiated` / `.approved` / `.failed` / `.unknown` / `.refund_pending` / `.refunded` | 결제 usecase | `paymentId`, `orderId`, `method`, `amountKrw`, `status`, `snapshotId`, (`refundReason`) | 프로젝터, `payment-order-reactor` | 개인 알림 |
+| `payment.initiated` / `.approved` / `.failed` / `.unknown` / `.refund_pending` / `.refunded` | 결제 usecase | `paymentId`, `orderId`, `method`, `amountKrw`, `legs`(`[{asset, amount, krwValue}]`), `status`, `snapshotId`, (`refundReason`) | 프로젝터, `payment-order-reactor` | 개인 알림 |
 | `payment.amount_mismatch` | 웹훅 처리 | `paymentId`, `expectedKrw`, `observedKrw` | 감사/경보 | 없음 |
 | `quote.issued` / `quote.used` | 견적 usecase | `quoteId`, `snapshotId`, `expiresAt` | 프로젝터 | 없음 |
 | `escrow.held` / `.disputed` / `.released` / `.refunded` | 에스크로 usecase | `escrowId`, `orderId`, `amount`, `currency`, (`resolution`) | `settlement-escrow-reactor`, 프로젝터, 알림 | 개인 알림 |
@@ -1517,7 +1589,7 @@ classDiagram
 
 | ID | 기능 | 트리거 | 주요 클래스 | 쓰기 테이블 | 단계 |
 |---|---|---|---|---|---|
-| PY-01 | **포인트 결제** | `POST /api/orders/{id}/payments` (method=points) | `PointsGateway`, `InitiatePayment` | `payment.payment`, `ledger.*` + OD-03 | P3 |
+| PY-01 | **원장 결제(포인트 우선 + USDC 혼합)** | `POST /api/orders/{id}/payments` (method=ledger, `usePoints`) | `LedgerGateway`, `InitiatePayment` | `payment.payment`, `ledger.*` + OD-03 | P3 |
 | PY-02 | 결제 시작(카드: 견적 사용 + 스냅샷 고정 / 포인트: 최신 accepted 스냅샷 서버 고정) | 위 | `InitiatePayment` | `payment.payment`, `payment.quote` | P3(스냅샷 고정)·P5(견적) |
 | PY-03 | PG 승인 호출 | `POST /api/payments/{id}/approve` | `ApprovePayment`, `PaymentGateway` | `payment.payment` | P5 |
 | PY-04 | 웹훅 수신(저장만) | `POST /api/webhooks/pg/{provider}` | `PaymentWebhookReceiver`, `WebhookGuard` | `payment.inbox_message` | P5 |
@@ -1562,6 +1634,11 @@ classDiagram
 | ST-10 | 포인트 잔액·내역 조회 | `GET /api/me/points` | `GetPointBalance`, `ListStatement` | 읽기 | P3 |
 | ST-11 | 온체인 에스크로 어댑터 | Phase 6-4 | `EscrowChainPort` | — | P6 |
 | ST-12 | 정산 재시도 CLI | 관리자 | `RetrySettlement` | `settlement` | P5 |
+| ST-13 | 관리자 지급(POINT·USDC, 데모) | 관리자 | `AdminGrant` | `ledger.*` (같은 모듈) | P3 |
+| ST-14 | 첫 로그인 지급 받기(USDC 10,000 + POINT 1,000) | 로그인 사용자, 사용자당 1회 | `ClaimWelcomeGrant` | `ledger.*` | P3 |
+| ST-15 | USDC→POINT 교환(단방향) | 로그인 사용자 | `ExchangeUsdcToPoint` | `ledger.*`, `pricefeed` 견적 | P3 |
+| ST-16 | 잔액 조회(POINT·USDC) | 로그인 사용자 | `GetBalances` | `ledger_read.*` | P3 |
+| ST-15 | Phase 3 데모 주문 종결 | Phase 5 착수 마이그레이션 | `LegacyDemoOrderClosure`(제안) | `order`, `ledger.*` | P5 |
 
 ### 14.6 UI
 
@@ -1733,6 +1810,9 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | `pf_quote_total` | counter | `outcome`(`issued`/`rejected_stale`/`used`/`expired`) | 견적 |
 | `pf_ledger_unbalanced_journals` | gauge | — | **0 이어야 함** |
 | `pf_ledger_trial_balance_nonzero` | gauge | `asset` | **0 이어야 함** |
+| `pf_ledger_demo_grant_total` | counter | `kind`,`asset` | 데모 지급(첫 로그인·관리자) 건수 |
+| `pf_ledger_demo_supply` | gauge | `asset` | 데모로 발행한 누적 총량(상한 대비 경보) |
+| `pf_ledger_exchange_total` | counter | — | USDC→POINT 교환 건수 |
 
 ### 18.2 경보 후보 (Discord, ADR-027 후속)
 
@@ -1752,7 +1832,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 |---|---|---|
 | admin | `deal_created`, `deal_published`, `deal_closed`, `dispute_resolved`, `payment_refunded`, `price_snapshot_override` | 관리자 행위 |
 | admin | `settlement_retried`, `product_changed` | |
-| system | `redis_stock_rebuilt`, `payment_reconciled`, `ledger_reconciled`, `late_payment_refunded`, `shipping_address_read` | 시스템·내부 열람 |
+| system | `redis_stock_rebuilt`, `payment_reconciled`, `ledger_reconciled`, `late_payment_refunded`, `welcome_grant_claimed`, `points_exchanged`, `wallet_linked`, `shipping_address_read` | 시스템·내부 열람 |
 | auth | (없음) | |
 
 ---
@@ -1792,6 +1872,13 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | AC-C27 | 포인트 결제 주문도 결제 시작 시 스냅샷이 고정되어 정산이 `failed` 가 되지 않음; 정산 `net+fee+dust = gross`, dust ∈ {0,1} |
 | AC-C28 | 딜 게시 후 약정 거절 → `publishing→draft` 복귀 + `deal.publish_rejected`, 약정 없는 딜은 `open` 이 되지 않음 |
 | AC-C29 | 딜 `settled` 시 약정 해제량 = `total − confirmed`, 결제는 확정됐으나 `order.paid` 가 아직 소비되지 않은 주문의 약정은 건드리지 않음 |
+| AC-C30 | 첫 로그인 지급: `ClaimWelcomeGrant` 는 사용자당 1회(멱등 키 `grant:welcome:{uid}`, 재호출은 같은 응답 재생)이고 POINT·USDC 두 분개가 각각 차변=대변이며 감사 기록이 남는다. 바둑 보상 없이 혼합 결제 구매가 끝까지 시연된다 |
+| AC-C31 | 혼합 결제: 포인트 우선 차감 후 나머지를 USDC 로 낸다. 한 다리라도 잔액이 모자라면 전체 롤백되고 어느 계정도 음수가 되지 않는다 |
+| AC-C32 | 교환: USDC→POINT 만 존재하며 `exchangeCost` 는 올림이고, 교환 후 포인트 결제가 직접 USDC 결제보다 싼 경우가 무작위 20만 건에서 0건이다 |
+| AC-C33 | 정산 균형: 혼합 결제의 USDC 분개는 `u + r = net + fee + dust` 이고 `r ≥ 0`, POINT 분개는 별도로 균형이다(자산별 시산표 0) |
+| AC-C34 | 다리별 환불: 낸 자산으로 돌려주고, 부분 환불 어떤 순서에서도 다리별 합이 낸 수량을 넘지 않으며 전액 환불은 낸 수량과 일치한다 |
+| AC-C35 | 지급 총량: 총 발행 상한을 넘는 신규 지급은 거절되고 경보가 난다. 모든 화면에 "모의" 표시가 있다 |
+| AC-C36 | 지갑 연결(선택): 서명 챌린지는 1회용·5분 만료·사용자 바인딩이며 재사용·다른 사용자 서명이 거절된다. 지갑 없이 모든 구매가 가능하다 |
 
 ### 19.2 계층
 
@@ -1800,7 +1887,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 단위 | 상태 머신 `TransitionTable`, `Converter`(속성 시험 — `krw > 92,233` 큰 금액 차분 시험으로 64비트 오버플로 검출), `PurchaseLimitPolicy`, `OrderNumberGenerator` | L2 |
 | Lua | `reserve/confirm/release` 를 실제 Redis 로(경합·멱등) — 이 설계가 이미 사전 시험(§4.6) | L3 |
 | PG 통합 | 하드 게이트·CAS·부분 유일 인덱스·원장 균형 트리거 | L3 |
-| 계약 | `PaymentGateway` 공통 시험 스위트: `FakeGateway`·`PointsGateway`·`Toss/PortOne` 가 같은 시나리오 통과(승인·거절·타임아웃·중복·역전) | L3 |
+| 계약 | `PaymentGateway` 공통 시험 스위트: `FakeGateway`·`LedgerGateway`·`Toss/PortOne` 가 같은 시나리오 통과(승인·거절·타임아웃·중복·역전) | L3 |
 | 카오스 | §4.9 L6~L8, 웹훅 중복·유실, PG 타임아웃, 시세 소스 장애 | L3 |
 | 부하 | k6 L1~L10 | L3~L4 |
 | E2E | Playwright: 구매 흐름, 품절, 만료, 결제 실패, 분쟁 | L3 |
@@ -1831,17 +1918,20 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 
 ### 20.2 구현 순서
 
+> 구현 순서(P0 D24): 3-A~3-D 가 **전체 2번째**, 5-A~5-E 가 **4번째**, 6-4 가 **5번째 묶음(6d)** 이다. 3-C 에 데모 포인트 지급(ST-13·14)과 최소 `payment`(포인트)가 들어간다.
+
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | 3-A | `catalog`·`deal` 조회, 딜 스케줄러, 관리자 생성 | 딜 목록/상세, 오픈/마감 자동 전이 |
 | 3-B | Redis(재고 영역) + Lua 4종 + `ReserveStock` + 만료 스윕 + 재구성 + 대조 | AC-C02~C07, 사전 Lua 시험 자산 이관 |
-| 3-C | `ledger` 연동(포인트) + `order` + `ConfirmPurchase`(트랜잭션 참여 포트) | AC-C01(소규모), AC-C08 |
+| 3-C | `ledger` 도입(POINT·**데모 지급**) + 최소 `payment`(포인트) + `order` + `ConfirmPurchase`(트랜잭션 참여 포트, 쌍 #2·#3·#4) | AC-C01(소규모), AC-C08, **AC-C30** |
 | 3-D | k6 L1~L10, 카오스, 결과표 | **AC-C01 대규모, 초과 판매 0, 결과표** → Phase 3 DoD |
 | 5-A | `pricefeed` 수집·검증·견적 | AC-C13~C15 |
 | 5-B | `PaymentGateway` 포트 + `FakeGateway` + 웹훅 inbox + 대사 | AC-C09~C11 |
 | 5-C | PG 테스트 어댑터(선정 후) + CSP/위젯 | 실제 테스트 결제 왕복 |
 | 5-D | `escrow` + `settlement` + 원장 정산 분개 | AC-C17~C19 |
 | 5-E | UI(주문·에스크로·관리자), 면책, 압축 시간 시연 | AC-C18 → Phase 5 DoD |
+| 5-F | (폐기 — ADR-048 E8) Phase 3 에도 최소 `pricefeed` 가 있어 `legacy_demo` 주문이 생기지 않는다. 결제 스냅샷 필수 제약은 Phase 3 부터 적용 | AC-C27 이 처음부터 적용됨 |
 | 6-4 | `EscrowChainPort` + InMemory + devnet 어댑터 | devnet 왕복 (키 관리 ADR 선행) |
 
 ### 20.3 위험
@@ -1866,6 +1956,8 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | 입장 토큰 버킷 N | k6 로 PG 쓰기 한계 측정 후 |
 | **캡차/가상 대기열 도입 여부 — 사용자 결정**(권장: M1 규모에서는 도입하지 않고 입장 토큰 버킷 + 속도 제한으로 충분한지 부하 시험 후 판단; 영향: 봇 대응력 vs 구현·UX 비용) | 부하 시험 결과 후 사용자 확인 |
 | KEK/DEK 상향 | Phase 5 착수 |
+| 첫 로그인 지급 금액(USDC 10,000 + POINT 1,000 — 사용자 결정 반영)·총 발행 상한·재충전 정책(P0 U24~U27) | 확인 대기 |
+| 시연 토큰(자체 `tUSDC` vs Circle devnet USDC, P0 U28) | Phase 6d 착수 전 |
 | 분쟁 부분 판정, 정산 후 환수 | M1 범위 밖 |
 | 큰 재고 샤딩 | 필요 시 |
 | Redis 단일 노드 가용성(센티넬) | 자원 예산 확인 후 |
@@ -1882,6 +1974,7 @@ README 상단, 딜 상세·결제·주문 화면 상단 배너, 정산 내역 �
 | [ADR-039](../../adr/ADR-039-payment-adapter-and-webhook-idempotency.md) | 결제 어댑터와 웹훅 멱등 | 포트, 상태 머신, 승인은 tx 밖, 웹훅 inbox + 권위 재조회, 대사, 늦은 결제, PG 선정 기준 |
 | [ADR-040](../../adr/ADR-040-escrow-settlement-and-ledger.md) | 에스크로·정산 상태 머신과 복식 원장 | ADR-016 미결(자동 확정 기한) 해소 제안, 분쟁, 정산 환산·반올림, 원장 계정 체계 |
 | [ADR-041](../../adr/ADR-041-price-feed-and-quote.md) | 시세 피드와 견적 | 소스 후보, 교차 검증, 보류 기준, 견적 TTL·고정, fail-closed |
+| [ADR-048](../../adr/ADR-048-mock-currency-and-mixed-payment.md) | 모의 통화(USDC·POINT)·혼합 결제 | 첫 로그인 지급, 단방향 교환, 포인트 우선 혼합 결제, 다리별 환불·정산, 선택적 지갑 |
 
 ### 20.6 다른 영역에 대한 요청
 

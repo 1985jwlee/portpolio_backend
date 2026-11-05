@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기)
 - 날짜: 2026-11-04
 - 근거: ADR-009(보상 상태)·017(DB 규약)·021(동시성)·025(쓰기는 tx)·026(데이터 보호)·015(모의 면책)
+- 구현 순서(P0 D24·D25): `ledger` 는 **Phase 3 에서 도입**된다(첫 로그인 지급·USDC→POINT 교환이 첫 포인트 출처, P0 §1.4 G1·[ADR-048](ADR-048-mock-currency-and-mixed-payment.md)). 이 ADR 의 바둑 보상은 구현 순서상 **마지막 출처**이며 `exp:points_issued` 계정으로 구분한다.
 - **원장 정본**: 스키마(`account`·`journal`·`posting`·`account_balance`, 다중 자산, 지연 제약 트리거)는 [ADR-040](ADR-040-escrow-settlement-and-ledger.md)이 소유한다. 이 ADR 은 그 위의 **POINT 자산 규칙과 보상(`reward`) 상태 머신**만 정한다(P0 D20, [phases/00 §2.5](../design/phases/00-platform-evolution.md)).
 - 관련 문서: [phases/01-baduk.md](../design/phases/01-baduk.md) §10~11
 

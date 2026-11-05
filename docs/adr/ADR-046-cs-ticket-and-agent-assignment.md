@@ -2,6 +2,7 @@
 - 상태: **Proposed** (사용자 확정 대기. Phase 6 항목)
 - 날짜: 2026-11-04
 - 근거: README 로드맵 Phase 6(CS 채팅) / ADR-016(확장은 독립 DoD) / ADR-021(상태 선점·임대·낙관적 버전) / ADR-028(역할·감사)
+- 구현 순서(P0 D24): 6a.
 - 관련 문서: [phases/04-chat](../design/phases/04-chat.md) §3.4·§15·§16
 
 ## 맥락
