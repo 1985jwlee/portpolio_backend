@@ -17,7 +17,7 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 | **D1** | **모듈러 모놀리스를 유지**한다. 분리는 5축 기준(독립 확장·언어/런타임·자원 프로파일·장애 격리·배포 주기) 중 **둘 이상이 강하게 해당할 때만** 한다. 기본값은 "분리 안 함" | 030 | 전부 |
 | **D2** | 분리 판정 결과: **KataGo 분석 워커만 별도 프로세스·이미지**(Phase 2). 나머지(game·chat·deal·order·payment·settlement·fulfillment·support)는 모놀리스 모듈이다. 엔트리포인트 분화는 허용(같은 이미지). 분석 워커는 **별도 이미지 `pf-analysis`**(KataGo 바이너리 포함)이며 DB 쓰기는 `analysis` 스키마, ledger 전이(쌍 #6: `ConfirmRewardInTx`/`FlagRewardInTx`), `events.outbox_event`(+inbox), 감사(audit)뿐이다 | 030 | P1·P2·P3·P4 |
 | **D3** | 룸 실시간(대국·채팅·CS)은 **`ws-gateway` 에 핸들러를 추가**한다. **`/ws/room` 의 첫 사용처는 6a(CS 채팅)** 이고 대국 룸(`game:*`)은 Phase 1 에서 같은 연결에 추가된다. 부하·재시작 격리가 필요하면 룸 연결이 존재하는 시점 이후(6a 이후 재평가)에 `ws-gateway` 를 사이트용/룸용 두 배포 단위로 나눈다(같은 이미지, 인자 `--surface=site|room`) | 032·033 | P1·P4 |
-| **D4** | 이벤트 전달 정본은 **Postgres outbox + inbox**(ADR-005·020)를 유지한다. Redis Streams 는 `EventTransport` 포트(ADR-024)의 **소비자 단위 선택 어댑터**로 두고, **Phase 3 의 타임딜 버스트 측정**으로 채택을 판정한다(ADR-006 의 "Phase 2 착수 전" 시점을 바꾼다) | 031 | P2 |
+| **D4** | 이벤트 전달 정본은 **Postgres outbox + inbox**(ADR-005·020)를 유지한다. Redis Streams 는 `EventTransport` 포트(ADR-024)의 **소비자 단위 선택 어댑터**로 두고, **Phase 3 의 타임딜 버스트 측정**으로 채택을 판정한다(ADR-006 의 "Phase 2 착수 전" 시점을 바꾼다; ADR-006 은 031 로 대체됨) | 031 | P2 |
 | **D5** | Streams 를 쓰는 소비자의 설계: 모듈당 스트림 1개(`pf:evt:<module>`), 소비자 그룹 = inbox 소비자 이름, 전달→inbox 저장→`XACK`, 회수는 `XAUTOCLAIM`, 유실 방어는 `TransportReconciler` | 031 | P2 |
 | **D6** | Redis 는 **Phase 3 에 도입**한다(재고 Lua). **단일 인스턴스 1개**(컨테이너 1개)로 시작하고(`noeviction`, 비스트림 키는 전부 TTL, 키 접두사 규약 `pf:stock:*`·`pf:evt:*`·`pf:rl:*`로 논리 분리), `redis-stock`/`redis-stream` 컨테이너·접속 분리는 Phase 4 에서 장애 영역 분리와 함께 재평가한다 | 031·033 | P2 |
 | **D7** | Redis 에 있는 모든 것은 **Postgres 에서 재구성 가능**해야 한다(정본은 항상 Postgres, ADR-010·021). 재구성 절차가 없는 용도에는 Redis 를 쓰지 않는다 | 031 | P2·P4 |
@@ -393,7 +393,7 @@ flowchart TD
 - KataGo 분석 워커의 코드는 **같은 모노레포**에 두고(래퍼·큐 소비·결과 기록), KataGo 바이너리/모델은 별도 이미지 레이어다. "서비스 분리"는 프로세스·이미지·자원 한도의 분리이지 레포 분리가 아니다.
 - 이 분리가 **이 프로젝트의 첫 번째 실제 서비스 분리**이며, "모놀리스로 시작해 필요가 증명된 지점만 분리했다"는 서사의 근거가 된다.
 
-## 4. 이벤트 전달 계층 (ADR-031 — ADR-006 후속 제안)
+## 4. 이벤트 전달 계층 (ADR-031 — ADR-006 을 대체)
 
 ### 4.1 왜 시점을 바꾸는가
 
@@ -1073,7 +1073,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 17 | tech-stack | three.js/R3F, KataGo, `@sabaki/sgf`, Redis/Valkey 이미지 고정(Phase 3 시작) | P0·P1 | 각 Phase |
 | 18 | ADR-023 | 분석 워커는 **ADR-021 의 토큰 조건 임대 연장(heartbeat)을 적용**한다(ADR-023 의 "임대 연장 없음"은 M1 짧은 핸들러 기준 문구이므로 "오래 걸리는 분석 워커는 ADR-021 연장 사용" 한 줄 보강). 연장 간격 = 임대/3, ADR-023 의 `임대 ≥ p99×10` 규칙은 **연장 간격**에 적용(총 작업 시간이 아님) | P1 | Phase 2 |
 | 19 | ADR-024 | 이미 있는 포트 `StockReservation` 의 연산 구체화(`reserve`·`release`·`confirm`·`restock`·`peek`)와 도입 시점(Phase 3), 단일 인스턴스 규칙 참조 | P0 | Phase 3 |
-| 20 | ADR-006 | 확정 시 `Superseded by ADR-031` | P0 | Phase 3 판정 후 |
+| 20 | ADR-006 | `Superseded by ADR-031` 표시 완료(2026-11-05) | P0 | 완료 |
 | 21 | architecture §12, database-schema §11, README | Phase 표·모듈 지도·스키마 윤곽을 본 문서로 동기(이번 작업에서 포인터만 반영) | 전부 | 각 Phase |
 | 22 | F00 | 기능 접두사 BD·LG·AN·CT·OD·PY·ES·ST·WM·CH·SP 등록 | 전부 | 각 Phase |
 | 23 | design/11 | Phase 1 이후 작업 분할은 영역 설계 확정 후 별도 문서 | P0 | 각 Phase 착수 전 설계 재검토(§12.5) |
@@ -1104,7 +1104,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 대상 | 내용 |
 |---|---|
 | `docs/adr/README.md` | ADR-030~033 색인 추가(현재 Accepted) |
-| ADR-006 | 확정 시 `Superseded by ADR-031` 표시 |
+| ADR-006 | `Superseded by ADR-031` 표시 완료(2026-11-05) |
 | ADR-024 | 기존 포트 `StockReservation` 의 연산(`restock` 포함)과 도입 시점(Phase 3)·단일 인스턴스 규칙 참조 |
 | `database-schema.md §11` | 이 문서·영역 설계의 스키마 윤곽으로 교체, `realtime_read.room_log`·`room_seq`(예약, 현재 미사용), `security.data_key` 추가 |
 | `architecture.md §12` | Phase 표를 §1.1 로 교체, 모듈 지도에 L 층 규칙 |
@@ -1192,7 +1192,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | **Phase 5 착수 전** | U6(토스페이먼츠 가입 조건·웹훅 서명 공식 문서 재확인, 안 맞으면 모의 PG), U14(KEK/DEK v2 상향 실행), U30(반품 기한 5일 반영), U7 의 결제 이벤트 보관 |
 | 6a 착수 전 | U3(`demo_` 샌드박스 구현), U16(앱 내 읽지 않음 표시), **U17(마스킹 — 설계 반영 별도 작업 진행 중)**, U7 의 CS 본문·신고 스냅샷 보관 |
 | 6c 착수 전 | U5(택배사 모의만), **U23(교환 흐름 — 설계 반영 별도 작업 진행 중)**, U7 의 택배 이벤트 보관 |
-| 6d 착수 전 | U29(상한 숫자·수수료 값만 재확인), U13(6d 진행 확정) |
+| 6d 착수 전 | **6d 전용 ADR 작성**(온체인 범위·오프체인 동기화·키 관리·실패 거동, ADR-016 선행 조건), U29(상한 숫자·수수료 값만 재확인), U13(6d 진행 확정) |
 | 6e | U13(마작 보류 — 재개 시 별도 판단) |
 | **Phase 1 착수 전(바둑 계열)** | **U11(중국식+일본식+무르기 — 설계 반영 별도 작업 진행 중)**, **U21(플레이어 로그인 필수 — 설계 반영 별도 작업 진행 중)**, U7 의 대국 채팅 보관 |
 | Phase 2 착수 전 | U12(KataGo 코어 2~3개 저우선순위 — 구형 Xeon 이라 스파이크 재측정), U22(INCONCLUSIVE 는 CLEAN 취급 + 지표·감사 기록) |

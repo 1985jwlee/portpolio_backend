@@ -26,7 +26,7 @@
 | 2026-11-04 | [ADR-034](ADR-034-baduk-rules-engine.md) | 바둑 룰 엔진: 공유 TS 패키지 직접 구현, 라이브러리는 차분 시험 기준 (ADR-012 선정 절차 수행) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-033](ADR-033-resource-budget-and-deploy-units.md) | 자원 예산과 배포 단위: 상시 60% 이하, CPU 예산 분리 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-032](ADR-032-room-channel-model.md) | 룸 실시간 채널: /ws/room 세 번째 연결, push 전용 | Accepted (2026-11-05) |
-| 2026-11-04 | [ADR-031](ADR-031-event-transport-streams.md) | 이벤트 전달 계층: Postgres 정본, Redis Streams 는 Phase 3 에서 판정 (확정 시 ADR-006 대체) | Accepted (2026-11-05) |
+| 2026-11-04 | [ADR-031](ADR-031-event-transport-streams.md) | 이벤트 전달 계층: Postgres 정본, Redis Streams 는 Phase 3 에서 판정 (ADR-006 대체) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-030](ADR-030-service-boundary-criteria.md) | 서비스 경계 기준: 모놀리스 유지, 5축 판정, KataGo 만 분리 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-029](ADR-029-license-and-content-rights.md) | 라이선스: 코드·설계 문서는 MIT, 개인 콘텐츠는 저작권 유보(CONTENT-LICENSE) | Accepted |
 | 2026-11-04 | [ADR-028](ADR-028-incident-response.md) | 보안사고 대응: 심각도 S1~S3, 증거 보존 우선, 비상 스위치 사다리, 자산별 런북, 비밀 스캔·회전 리허설 | Accepted |
@@ -41,17 +41,17 @@
 | 2026-11-03 | [ADR-019](ADR-019-layered-architecture.md) | 모듈 내부 구조: domain · service · usecase (usecase → service → domain) | Accepted |
 | 2026-11-03 | [ADR-018](ADR-018-cqrs.md) | CQRS: 명령/조회 모델 분리, 읽기 모델은 프로젝션 테이블 | Accepted |
 | 2026-11-03 | [ADR-017](ADR-017-database-conventions.md) | DB 규약: 모듈별 쓰기/읽기 스키마, 스키마 간 FK 없음, inbox·선점 컬럼·version | Accepted |
-| 2026-11-03 | [ADR-016](ADR-016-payments-and-extensions.md) | 결제·정산(모의)과 Phase 6 확장은 순서대로, 독립 DoD 로 | Proposed |
+| 2026-11-03 | [ADR-016](ADR-016-payments-and-extensions.md) | 결제·정산(모의)과 Phase 6 확장은 순서대로, 독립 DoD 로 | Accepted (부분 대체: 결제·에스크로·시세·원장·6a·6c 는 ADR-039~041·032·042~047) |
 | 2026-11-03 | [ADR-015](ADR-015-positioning-and-scope-rules.md) | 타깃 서사, 모의 면책, 외부 참고 금지·비공개 범위 | Accepted |
 | 2026-11-03 | [ADR-014](ADR-014-deployment-and-zero-downtime.md) | CD, probe, 롤링 배포 중 소켓 재접속·세션 복구, 에셋 캐시 | Accepted |
 | 2026-11-03 | [ADR-013](ADR-013-milestone-scope-and-numbers.md) | M1 을 전부 한 번에 내되, 성능 수치는 측정 후에만 쓴다 | Accepted |
-| 2026-11-03 | [ADR-012](ADR-012-go-rule-library.md) | 바둑 룰은 라이브러리로 쓰고 선정은 Phase 1 에서 한다 | Proposed |
+| 2026-11-03 | [ADR-012](ADR-012-go-rule-library.md) | 바둑 룰은 라이브러리로 쓰고 선정은 Phase 1 에서 한다 | Accepted (부분 대체: 라이브러리 사용 결정은 ADR-034, 어댑터·시험 세트는 유효) |
 | 2026-11-03 | [ADR-011](ADR-011-settlement-currency-usdc.md) | 정산 통화는 USDC, 시세는 스냅샷 + 견적 유효시간 | Accepted |
 | 2026-11-03 | [ADR-010](ADR-010-stock-consistency.md) | 재고는 Lua 원자 선점 + 예약 TTL + outbox + 멱등 소비 | Accepted |
 | 2026-11-03 | [ADR-009](ADR-009-game-verdict-and-anticheat.md) | 승패는 룰 엔진 즉시 판정, KataGo 는 비동기 사후 분석 | Accepted |
 | 2026-11-03 | [ADR-008](ADR-008-visitor-identity-and-abuse.md) | 익명 세션 + GitHub 로그인, 사후 신고·숨김, 7일 보관 | Accepted |
 | 2026-11-03 | [ADR-007](ADR-007-observability.md) | 관측은 Prometheus + Grafana 읽기 전용 임베드 | Accepted |
-| 2026-11-03 | [ADR-006](ADR-006-event-delivery-layer.md) | 이벤트 전달 계층: Postgres 폴링에서 Redis Streams 또는 Kafka 로 | **Proposed** |
+| 2026-11-03 | [ADR-006](ADR-006-event-delivery-layer.md) | 이벤트 전달 계층: Postgres 폴링에서 Redis Streams 또는 Kafka 로 | Superseded by ADR-031 |
 | 2026-11-03 | [ADR-005](ADR-005-outbox-idempotent-consumer.md) | Outbox: 쓰기와 이벤트는 한 트랜잭션, 수신 쪽은 inbox(개정) | Accepted |
 | 2026-11-03 | [ADR-004](ADR-004-tech-stack.md) | Bun+Elysia / Next.js+R3F / WebSocket 단일 / 공유 타입 | Accepted |
 | 2026-11-03 | [ADR-003](ADR-003-free-hosting.md) | 완전 무료 호스팅, 집 PC 단일 호스트(Oracle 미추진), Tailscale Funnel 노출(도메인 미구입, 2026-11-05 갱신), 정적 폴백·수동 전환 대체 페이지 | Accepted |

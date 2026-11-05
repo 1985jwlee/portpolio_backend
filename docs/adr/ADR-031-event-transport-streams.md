@@ -1,5 +1,5 @@
 # ADR-031: 이벤트 전달 계층 — Postgres 정본 유지, Redis Streams 는 소비자 단위로 Phase 3 에서 판정
-- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1). ADR-006 을 대체한다(ADR-006 자체의 상태 갱신은 별도)
+- 상태: **Accepted** (2026-11-05, 사용자 일괄 확정 U1). ADR-006 을 대체한다(ADR-006 은 2026-11-05 `Superseded by ADR-031` 로 표시)
 - 날짜: 2026-11-04
 - 근거: ADR-006(Proposed) / ADR-024(Redis 이음새) / ADR-010(Redis 는 파생) / 사용자 지시("Kafka 의 메모리 부족을 Redis Streams 로 푸는 방안 검토")
 - 관련 문서: [phases/00 §4~5](../design/phases/00-platform-evolution.md)

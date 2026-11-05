@@ -1,5 +1,5 @@
 # ADR-006: 이벤트 전달 계층 — Postgres 폴링에서 Redis Streams 또는 Kafka 로
-- 상태: **Proposed** (사용자 지시: "Kafka 의 메모리 부족을 Redis 와 함께 Redis Streams 로 푸는 방안을 검토" — 결정 아님)
+- 상태: **Superseded by [ADR-031](ADR-031-event-transport-streams.md)** (2026-11-05 정리). 아래 "결정 (잠정)" 3항은 모두 ADR-031 이 이어받거나 바꿨다: 1항(M1 은 Postgres outbox·폴링, 전달 인터페이스 뒤) → 031 결정 1·2 로 유지, 2항(Phase 3 부하 시험으로 판정) → 031 결정 3, 3항(Redis Streams 우선 검토) → 031 은 **기본 Postgres, Streams 는 합격선 충족 시 소비자 단위 채택**으로 뒤집었고 Kafka 는 기각(결정 5). 본문은 당시 기록으로 보존한다. (원 상태: Proposed — 사용자 지시 "Kafka 의 메모리 부족을 Redis 와 함께 Redis Streams 로 푸는 방안을 검토")
 - 날짜: 2026-11-03
 - 근거: 원 계획안 모순 #6, Phase 3 / 명세 Out of Scope, FR-030 / 인터뷰 R6-Q1, R9-Q1
 
