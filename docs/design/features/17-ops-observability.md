@@ -438,11 +438,17 @@ flowchart TD
 | `pf_job_last_success_timestamp_seconds` | G | `job`(`dispatcher`,`reaper`,`aggregator`,`retention`,`change_log_trim`) | 초(epoch) | 각 잡 | `time()-x > 3×주기` |
 | `pf_job_duration_seconds` | H | `job` | 초 | 각 잡 | 정보 |
 | `pf_retention_deleted_total` | C | `table` | 건 | RetentionRunner | 정보 |
-| `pf_ops_last_success_timestamp` | G | `job`(`backup`,`archive_logs`,`pull_deploy`) | 초(epoch) | StatusFileCollector (`status/<job>/last_run.json` 의 `last_success_at`) | `time()-x > 26h`(backup·archive_logs) |
+| `pf_ops_last_success_timestamp` | G | `job`(`backup`,`archive_logs`,`pull_deploy`,`restore_drill`,`host_health`) | 초(epoch) | StatusFileCollector (`status/<job>/last_run.json` 의 `last_success_at`) | `time()-x > 26h`(backup·archive_logs) |
 | `pf_ops_last_run_ok` | G | `job` | 0/1 | 위와 동일 (`ok`) | `==0` |
 | `pf_retention_paused` | G | `app` | 0/1 | 보관 정리 정지 여부(증거 보존 중, ADR-028). 정지 파일이 24시간 넘으면 `RetentionPaused` 경보 | EV-16 |
 | `pf_ops_status_age_seconds` | G | `job` | 초 | 위와 동일 (`now - finished_at`) | `pull_deploy` 15분 초과(타이머 정지) |
 | `pf_backup_last_size_bytes` | G | — | 바이트 | 위와 동일 (`detail.bytes`) | 급감(정보) |
+| `pf_host_disk_used_ratio` | G | `mount`(`system`,`backup`,`data`) | 0~1 | StatusFileCollector (`status/host_health/last_run.json` 의 `detail.disks`, §16.2.1) | `> 0.85` 10분 |
+| `pf_host_disk_avail_bytes` | G | `mount` | 바이트 | 위와 동일 | 정보 |
+| `pf_db_oldest_xact_age_seconds` | G | — | 초 | DbHealthCollector (`pg_stat_activity` 의 `now()-xact_start` 최댓값, 자기 연결·복제 제외) | `> 300` 5분 |
+| `pf_db_connections` | G | `state`(`active`,`idle`,`idle_in_transaction`) | 개 | DbHealthCollector | 합 > `max_connections` 의 80% |
+| `pf_db_connections_max` | G | — | 개 | DbHealthCollector (`SHOW max_connections`) | — |
+| `pf_db_dead_tuples` | G | `table`(큐·이력 테이블 허용 목록 — outbox·inbox·change_log·trace 등, 레이블 폭발 방지) | 개 | DbHealthCollector (`pg_stat_user_tables.n_dead_tup`) | `> 10000` 이고 `n_live_tup` 대비 30% 초과 30분 |
 
 **추가 지표 — 상세 설계(F13·F14·F16)가 요구하는 이름의 정본** (위 표에 없던 것. 구현은 이 이름만 쓴다)
 
@@ -871,7 +877,7 @@ infra/grafana/
    └─ ops.json                         # 비공개 (관리자 전용: 잡·백업·배포·DB 풀)
 ```
 
-- 환경(제안): `GF_SERVER_ROOT_URL`(공개 호스트 + `/grafana/`), `GF_SERVER_SERVE_FROM_SUB_PATH=true`, `GF_SECURITY_ALLOW_EMBEDDING=true`(**공개 대시보드 임베드에 필요한지 미확인 G6**), `GF_AUTH_ANONYMOUS_ENABLED=false`(Public dashboards 우선이므로 익명 로그인은 끈다), `GF_USERS_ALLOW_SIGN_UP=false`, `GF_SECURITY_ADMIN_PASSWORD__FILE`(시크릿 파일, 10 §5).
+- 환경(제안): `GF_SERVER_ROOT_URL`(**사이트와 다른 출처** — 같은 `*.ts.net` 호스트의 Funnel 포트 8443, §8.4 출처 분리 + `/grafana/`), `GF_SERVER_SERVE_FROM_SUB_PATH=true`, `GF_SECURITY_ALLOW_EMBEDDING=true`(**공개 대시보드 임베드에 필요한지 미확인 G6**), `GF_AUTH_ANONYMOUS_ENABLED=false`(Public dashboards 우선이므로 익명 로그인은 끈다), `GF_USERS_ALLOW_SIGN_UP=false`, `GF_SECURITY_ADMIN_PASSWORD__FILE`(시크릿 파일, 10 §5).
 - **Public dashboards 가 파일 프로비저닝으로 만들어지는지는 미확인(G6).** 안 되면 관리자가 UI/API 로 한 번 생성하고 그 토큰 URL 을 `site-vars.yaml` 의 임베드 URL 변수로 둔다(콘텐츠 변수, 12 §1.1 방식 — **수정 요청 참조**).
 - 프록시는 `/grafana/` 아래에서 **공개 대시보드 보기에 필요한 경로만 허용목록**으로 전달한다(§OB-07). 정확한 필요 경로(`/grafana/public-dashboards/<토큰>`, 정적 에셋, `/grafana/api/public/dashboards/**` 등)는 **G6 에서 실측으로 확정**한다.
 
@@ -952,6 +958,7 @@ flowchart TD
 **후퇴안이 없는 이유(G6 실측)**: 익명 Viewer + 프로비저닝 대시보드 안은 `POST /api/ds/query` 로 임의 PromQL(`count({__name__=~".+"})`)이 200 으로 실행되고 `/api/search`·데이터 소스 목록·다른 대시보드가 열려 Prometheus 전체가 공개되는 것과 같다. 따라서 Public dashboards 가 안 될 때의 대안으로도 쓰지 않는다.
 
 **실측 요약**: `GF_SECURITY_ALLOW_EMBEDDING=true`(기본은 `X-Frame-Options: deny`), 익명 접근 off, iframe `sandbox="allow-scripts allow-same-origin"`(둘 다 필수), 사이트 CSP `frame-src` 에 Grafana 공개 출처 1개. 공개 URL 에서 `/explore`·`/d/<다른>`·`/dashboard/new`·`/connections`·`/profile` 은 302(로그인), `/api/search`·`/api/datasources`·`/api/dashboards/uid/*`·`/api/ds/query` 는 401, 쿼리 API 는 `/api/public/dashboards/<토큰>/panels/<id>/query` 만 열려 있고 본문의 임의 `expr` 은 무시된다. 시간 선택을 끄면 클라이언트 범위를 무시하고 대시보드 기본값으로 조회(켜면 클라이언트 범위를 따르고 서버 측 상한은 없음).
+**출처 분리(제안 — 사용자 미확인, 대안 있음)**: 위 실측의 iframe `sandbox="allow-scripts allow-same-origin"` 는 Grafana 가 **사이트와 같은 출처**(`/grafana/` 경로 임베드)이면 샌드박스를 무력화한다(`allow-same-origin` + `allow-scripts` 조합은 iframe 안 스크립트가 sandbox 속성 자체를 제거할 수 있고 사이트 출처의 권한을 그대로 갖는다 → Grafana 의 XSS 가 곧 사이트의 XSS). 그래서 **Grafana 공개 대시보드는 Funnel 의 다른 포트(8443 또는 10000 — 포트가 다르면 다른 출처)로 노출**하고, nginx 의 별도 `server` 블록이 §9.3 허용목록 경로만 프록시한다. 사이트는 443 이다. `GF_SERVER_ROOT_URL` 과 `site.metricsEmbedUrl` 은 그 출처로 하고 CSP `frame-src` 는 그 출처 1개다. Grafana **관리 화면은 `tailscale serve`(tailnet 전용)로만** 연다(공개 포트에 올리지 않는다). 쿠키는 포트로 격리되지 않으므로(같은 호스트명) 사이트 세션 쿠키는 `HttpOnly` 를 유지하고, Grafana 출처로 쿠키가 실려 가도 읽히지 않는지 G6 재실측에 포함한다. **G6 의 기존 통과(로컬)는 다른 오리진 iframe 이었으나 이 실제 토폴로지(Funnel 8443 + 허용목록 프록시)로는 아직 재실측하지 않았다 → 재실측 필요.** 대안: iframe 을 제거하고 web 이 공개 지표 API(고정 쿼리 결과)를 받아 직접 차트로 그린다 — 이 경우 Grafana 는 공개하지 않는다. 어느 쪽을 쓸지는 사용자가 고를 수 있다(이 문서는 출처 분리를 적용 안으로 둔다).
 **주의**: ① 공개 페이지 HTML 부트스트랩에 데이터 소스 이름·uid·type·`jsonData` URL(내부 주소)이 들어간다 — 데이터 소스 URL 에 자격 증명·비밀 경로를 두지 않는다. ② Grafana 포트의 `/metrics` 가 무인증으로 열려 있으므로 프록시에서 차단한다(외부 노출 금지). ③ 공개 토큰이 곧 자격이다 — 유출 시 공개를 해제하고 재발급한다.
 
 ### 8.5 오류·경보
@@ -968,6 +975,7 @@ flowchart TD
 |---|---|
 | 공개 URL 로 대시보드가 로드되고 편집 버튼·탐색 메뉴가 없음(AC-012) | L3 수동+스크린샷 |
 | `/grafana/login`, `/grafana/explore`, `/grafana/api/dashboards/**` 가 외부에서 404 | L3 |
+| Grafana 출처(8443)가 사이트 출처(443)와 다르고, iframe 안에서 `window.parent.document` 접근이 SecurityError 로 막힘 (G6 재실측 항목) | L3 |
 | 프로비저닝 JSON 이 `promtool` 식 검증이 아닌 **JSON 스키마·쿼리 문법** 점검을 CI 에서 통과 | L1 |
 | 공개 대시보드 응답에 인스턴스 주소·식별자 레이블 없음 | L3 |
 
@@ -1023,7 +1031,8 @@ limit_req_zone  $binary_remote_addr zone=pf_wsup:1m  rate=30r/m;  # /ws/ 업그�
 
 # 40-realip-funnel.conf  (집 PC 경로; 미검증)
 # Funnel 이 클라이언트 IP 를 어떤 헤더로 전달하는지 공식 문서에서 확인하지 못했다 → 실제 클라이언트 IP 확보 방법 미확인, 게이트 G14 ④ 에서 실측.
-#   확인 전: realip 를 쓰지 않는다. $remote_addr 는 Funnel 프록시의 로컬 연결 주소(예: 127.0.0.1)이므로 위의 $binary_remote_addr 기반 limit_req_zone 은
+#   확인 전(미확보): realip 를 쓰지 않고 41-limits-global.conf(§9.2: 전역 상한·주소별 limit_conn 제거·정적 자원 제외·/api/me 전역 토큰 버킷)를 마운트한다.
+#   realip 를 쓰지 않는다. $remote_addr 는 Funnel 프록시의 로컬 연결 주소(예: 127.0.0.1)이므로 위의 $binary_remote_addr 기반 limit_req_zone 은
 #            사실상 전역 한도가 된다 → 속도 제한은 세션/계정 기준(앱 RateLimitGuard)을 우선하고 /api/me 세션 발급에는 전역 상한을 둔다(제안).
 #   확인 후: Funnel 이 넣는 헤더 하나만 set_real_ip_from <Funnel 로컬 연결 주소> + real_ip_header <확인된 헤더> 로 받는다.
 #   (이전 설계의 set_real_ip_from <cloudflared 대역> + real_ip_header CF-Connecting-IP 는 Cloudflare Tunnel 전제였음, 폐기)
@@ -1108,7 +1117,21 @@ server {
 
 환경 선택은 compose 오버라이드가 `conf.d` 에 올바른 파일을 마운트하는 방식(제안).
 
+**집 PC 의 주소 확보 여부별 nginx 설정(둘 다 설계, 제안·미검증 — 어느 쪽인지는 G14 ④ 결과로 고른다)**
+
+| 항목 | IP 확보됨 (`41-limits-per-addr.conf`) | IP 미확보 (`41-limits-global.conf`) |
+|---|---|---|
+| 쓰기·읽기·`pf_auth`·`pf_wsup` 키 | `$binary_remote_addr` (위 설정 그대로) | **상수 키**(`map "" $pf_all { default all; }`) 전역 상한. 한 사용자가 아니라 사이트 전체의 폭주 방어이며 값은 §9.1 보다 크게 잡는다(S6-4 부하 시험으로 확정) |
+| `/ws/` 주소별 `limit_conn pf_ws` | 사용 | **제거**. WS 제한은 gateway 의 세션 기준(탭 상한 `4409`·메시지 `4429`·전체 `WS_MAX_CONNECTIONS`, 04)으로 이동 |
+| 정적 자원(`/_next/static/`, 이미지·폰트) | `limit_req` 제외(캐시 가능 자원이라 별도 location) | 같음 — 전역 한도가 정적 자원 한 페이지 로드에 소진되는 것을 막는다 |
+| 세션 발급(`/api/me`) | `pf_me` 주소별 | **전역 토큰 버킷** 한 개(예: 10r/s, burst 30, 제안값) + 앱의 세션 기준 제한 |
+| 주소 헤더 | Funnel 이 넣는 헤더만 신뢰. `X-Forwarded-For` 처럼 **덧붙임 방식**이면 `real_ip_recursive off` 로 **마지막 홉(Funnel 이 붙인 값)만** 신뢰하고 클라이언트가 앞에 넣은 값은 무시 | 사용 안 함, `X-Real-IP` 는 로컬 주소 |
+
+G7 ② 시험 보강: 클라이언트가 위조 `X-Forwarded-For` 를 앞에 붙이고 Funnel 이 덧붙이는 경우 마지막 홉만 `$remote_addr` 로 채택되는지 확인한다. G14 시험에 '한 주소에서 50명 동시 접속(동시 50 = AC-013)이 한도에 걸리지 않는지'를 추가한다(tech-stack 관문부).
+
 ### 9.3 `/grafana/` 허용목록 (G6 확정 전 제안)
+
+이 허용목록은 사이트(443)와 **다른 출처**인 Funnel 포트(8443, §8.4 출처 분리)용 `server` 블록에 둔다. 사이트 `server` 블록에는 `/grafana/` 위치를 두지 않는다(제안, 사용자 미확인).
 
 ```nginx
 location = /grafana/ { return 404; }                                   # 루트·로그인 화면 차단
@@ -1181,7 +1204,7 @@ flowchart TD
 | `/healthz`·`/readyz`·`/metrics` 외부 404 | L3 |
 | 쓰기 연타 → 429 (수치는 S6-4 에서) | L3 (AC-007) |
 | 액세스 로그에 주소 필드 없음 | L3 |
-| WS 업그레이드 통과 + 150초 유휴 후에도 서버가 먼저 정리 | L3 (G1·G2) |
+| WS 업그레이드 통과 + 150초 유휴 후에도 서버가 먼저 정리 | L3 (G14·G2) |
 
 ---
 
@@ -1346,14 +1369,21 @@ flowchart TD
 
 | 구분 | 내용 |
 |---|---|
-| 사전 조건 | `backups` 볼륨이 **DB 볼륨과 다른 경로**에 있음. 암호화 공개키(수신자)가 호스트에 있음(개인키는 저장소·호스트 밖) |
+| 사전 조건 | `backups` 볼륨(`BACKUP_DIR`)이 **DB 볼륨과 다른 물리 디스크**에 있음 — 호스트는 NVMe 3개(시스템 238GB 여유 123GB + 각 1.9TB 2개, ADR-033 호스트 프로필)이므로 **대용량 NVMe 한 개를 백업 전용으로 마운트**한다(같은 디스크의 다른 디렉토리는 디스크 손실을 못 막는다). 마운트되지 않았으면 스크립트가 시스템 디스크로 떨어지지 않게 `mountpoint -q` 로 확인하고 실패한다. 암호화 공개키(수신자)가 호스트에 있음(개인키는 저장소·호스트 밖) |
 | 사후 조건 | 일별 7개 + 주별 4개 보관, `status/backup/last_run.json` 갱신, 외부 저장소에도 업로드(G12) |
 
 ### 12.1 범위
 
-| 포함 | 제외 |
+**제외 목록 방식이다 — 기본은 전부 백업하고, 재구성되거나 휘발하는 것만 뺀다.** 허용 목록(스키마를 나열)이면 `events.audit_log`(관리자·시스템 행위 90일, 사고 대응 증거)와 이후 Phase 가 추가하는 스키마(원장·주문 등)가 조용히 빠진다.
+
+| 제외(데이터만 제외, 구조는 덤프) | 이유 |
 |---|---|
-| `guestbook` · `identity` **쓰기 스키마** | 읽기 모델(`*_read`, 이벤트로 재구성), `events` 이력(outbox·trace·flow, 7일 휘발), `realtime`(inbox·change_log 휘발) |
+| 읽기 모델 `*_read` | 이벤트로 재구성(`rebuild`, GB-26) |
+| `events` 의 이력 테이블(outbox·trace·flow 등, 7일 휘발) — **`audit_log` 는 제외하지 않는다** | 휘발 |
+| `realtime` 스키마(inbox·change_log) | 휘발 |
+
+- 제외 목록의 정본은 `infra/backup/tables.json` 이다. 모든 Drizzle 스키마 테이블이 `include` 또는 `exclude(이유)` 로 **분류돼 있지 않으면 CI 가 실패한다**(`config check` 잡의 검사, 09 §2). 새 테이블을 추가한 PR 은 분류를 함께 적어야 하므로 백업 누락이 조용히 생기지 않는다.
+- `backup.sh` 는 이 파일에서 `pg_dump` 인자(`--exclude-table-data=…`, `--exclude-schema=realtime`)를 만든다.
 
 복원 후 읽기 모델은 `rebuild`(GB-26)로 다시 만든다.
 
@@ -1364,11 +1394,13 @@ infra/scripts/backup.sh
  1. flock 으로 중복 실행 방지
  2. 사전: DB 연결 확인, 디스크 여유 확인(덤프 예상 크기의 2배)
  3. 건수 기록: 한 트랜잭션(REPEATABLE READ)에서 row_counts 수집 + pg_export_snapshot (제안)
- 4. pg_dump -Fc --schema=identity --schema=guestbook --snapshot=<id> > pf-YYYYMMDD.dump
- 5. sha256 계산, manifest.json 작성 {file, bytes, sha256, row_counts, schema_version, at}
- 6. 암호화: age -r $BACKUP_AGE_RECIPIENT → pf-YYYYMMDD.dump.age   (ADR-026: 수신자 공개키만 서버에 둔다, 개인키는 서버 밖 사용자 보관. age 설치·가용성은 미확인 — 대안 gpg/openssl)
+ 4. 덤프와 암호화를 한 파이프로: pg_dump -Fc --snapshot=<id> <tables.json 에서 만든 제외 인자> | age -r $BACKUP_AGE_RECIPIENT > $BACKUP_DIR/pf-YYYYMMDD.dump.age
+    (ADR-026: 수신자 공개키만 서버에 둔다, 개인키는 서버 밖 사용자 보관. age 설치·가용성은 미확인 — 대안 gpg/openssl. 파이프 중 하나라도 실패하면 `set -o pipefail` 로 실패 처리)
+    * **평문 덤프는 디스크에 쓰지 않는다** — 쓰면 암호화 전 구간에 평문이 남고 비정상 종료 시 삭제도 보장되지 않는다
     * report.note 는 이미 필드 암호화(note_enc)된 상태로 덤프된다. 복구 시에는 FIELD_KEYS 키링이 있어야 복호화된다
- 7. 평문 덤프 안전 삭제
+ 5. sha256 계산(암호문 기준), manifest.json 작성 {file, bytes, sha256, row_counts, schema_version, at}
+ 6. 크기·종료코드 검증: 종료코드 0, 크기 > 0 (실패 시 부분 파일 삭제)
+ 7. (단계 번호 유지용 빈 칸 — 평문 삭제 단계는 스트리밍으로 없어졌다)
  8. 회전: 일별 7개 유지, 일요일 덤프는 주별(YYYY-Www) 로 복사해 4개 유지
  9. 외부 업로드 (G12 대상 확정 후)  실패해도 로컬 성공은 인정, 외부 실패는 별도 기록
 10. status/backup/last_run.json 갱신 (원자적 rename; 실패해도 기록하고 `last_success_at` 은 직전 값을 유지)
@@ -1390,9 +1422,9 @@ sequenceDiagram
         B-->>T: 종료 (중복)
     else 획득
         B->>DB: 스냅샷 + row_counts
-        B->>DB: pg_dump -Fc (identity, guestbook)
+        B->>DB: pg_dump -Fc (제외 목록 외 전부, age 로 파이프)
         DB-->>B: 덤프
-        B->>B: sha256 · manifest · age 암호화 · 평문 삭제
+        B->>B: sha256 · manifest (덤프는 age 로 스트리밍, 평문 비기록)
         B->>V: 저장 + 회전 (일 7 · 주 4)
         alt 외부 업로드 가능
             B->>X: 업로드
@@ -1413,7 +1445,7 @@ flowchart TD
     B -- "예" --> C["pg_dump"]
     C --> D{"성공 (종료코드 0, 크기 > 0)?"}
     D -- "아니오" --> F1
-    D -- "예" --> E["암호화 + 평문 삭제"]
+    D -- "예" --> E["sha256 · manifest (암호문 기준)"]
     E --> G["회전: 일별 8번째 이상 삭제"]
     G --> H{"일요일?"}
     H -- "예" --> I["주별로 복사, 5번째 이상 삭제"]
@@ -1473,7 +1505,10 @@ sequenceDiagram
 |---|---|
 | 빈 DB 복원 + 무결성 쿼리 전부 통과(M1 완료 조건 S8-4) | L3 |
 | 회전: 날짜를 가짜로 진행해 일 7·주 4 가 유지됨 | L2 (스크립트 시험) |
-| 평문 덤프가 종료 후 남지 않음 | L3 |
+| 평문 덤프가 종료 후 남지 않음 — 실행 도중에도 백업 디렉토리·`/tmp` 에 평문 파일이 생기지 않음(`age` 를 실패시켜 부분 파일도 평문이 아님을 확인) | L3 |
+| `tables.json` 분류 검사: 분류 없는 테이블을 추가하면 CI 실패, `audit_log` 는 `include` | L2 (스크립트 시험) |
+| 백업 디렉토리가 시스템 디스크와 같은 장치면(`stat -c %d` 비교) 백업을 거부 | L2 (스크립트 시험) |
+| 정기 복구 시험의 자동 부분: `pf-restore-drill.timer`(주 1회, 제안)가 보관 중인 최신 덤프의 sha256 을 manifest 와 대조하고, 크기가 직전 대비 급감하지 않았는지, `age` 헤더가 유효한지 확인해 `status/restore_drill/last_run.json` 을 쓴다. 개인키가 호스트에 없으므로 **자동으로는 복호화·복원까지 못 간다** — 전체 복원 + 무결성 쿼리는 사람이 키를 제공하는 분기 시험(§12.5)으로 남는다. 한계: 자동 부분은 "읽을 수 있는 암호문이 있다"까지만 보장한다 | L3 |
 | 디스크 부족 상황에서 실패 기록 + 기존 백업 보존 | L3 |
 
 ---
@@ -1500,17 +1535,20 @@ infra/scripts/pull-deploy.sh
  5. previous.json ← current.json (롤백 기록)
  6. infra/ 를 해당 릴리스 태그로 체크아웃 (compose·nginx 설정·대시보드)  # 제안
  7. 새 이미지 pull
- 8. 마이그레이션: 일회성 컨테이너 db:migrate  → 실패 시 교체하지 않고 종료(blocked 기록)
+ 7a. 새 마이그레이션이 있으면(이미지의 마이그레이션 수 > 적용 이력 수) 직전 백업: `pg_dump -Fc(전 스키마, 제외 목록은 §12.1) | age -r $BACKUP_AGE_RECIPIENT > $BACKUP_DIR/pre-migrate/pf-<sha>.dump.age`  (평문 비기록, 최근 3개 유지). 실패하면 마이그레이션하지 않고 종료(blocked 기록 아님 — 다음 주기 재시도)
+ 8. 마이그레이션: 일회성 컨테이너 db:migrate (`pf_migrator` 접속 문자열 — 마이그레이션 실행 주체, 10 §5.1; 7a 의 덤프는 `pf_backup_ro`)  → 실패 시 교체하지 않고 종료(blocked 기록)
  9. 교체 순서: worker → api → ws-gateway → web → (proxy 설정 변경 시) proxy
     각 단계: compose up -d --no-deps <svc> (다이제스트 고정) → 헬스 연속 N회 통과 대기 (타임아웃 60초) — worker 는 /healthz, api·ws-gateway·web 은 /readyz
 10. 모두 통과: current ← 새 다이제스트, last_run.json {ok:true}
 11. 하나라도 실패: 직전 다이제스트로 되돌림(역순), blocked 에 새 다이제스트 추가, last_run.json {ok:false, detail.reason}
+12. 정리(성공·실패 공통, 실패해도 배포 결과를 바꾸지 않음): 현재·직전(롤백 기록) 다이제스트를 제외한 오래된 pf 이미지를 최근 N개(제안 3)만 남기고 `docker image rm`, 댕글링 레이어·빌드 캐시 prune. 삭제한 바이트를 `detail.pruned_bytes` 로 기록
 ```
 
 - 마이그레이션은 **앞으로 호환** 규칙(09 §4)이라 롤백 시 되돌리지 않는다. 롤백된 이전 코드가 새 스키마에서 돌아야 한다.
 - 교체 순서의 이유: **소비자(worker) 먼저**(05 §7 배포 순서). ws-gateway 교체 중 연결이 끊기며 클라이언트가 `bye`→재접속·재개(RT-11, ADR-014: Compose 는 "짧은 단절 후 복구").
 - 같은 실패 다이제스트를 5분마다 재시도하지 않도록 `blocked.json` 에 기록한다(새 stable 이 나오면 풀린다).
 - 폴백 정적 산출물은 `pf-proxy` 이미지에 들어 있으면 proxy 교체가 곧 갱신이다(OB-08).
+- 이미지 정리를 두는 이유: 시스템 디스크 여유가 123GB 뿐(ADR-033 호스트 프로필)인데 릴리스마다 이미지가 쌓인다. 정리가 없으면 디스크 가득이 `HostDiskHigh` 경보(§17)로만 드러난다.
 
 ### 13.2 시퀀스
 
@@ -2085,6 +2123,38 @@ flowchart TD
 |---|---|
 | 오류/경보 | 파일 없음(`OpsStatusMissing`), 마지막 실행 실패(`OpsRunFailed`·`DeployFailed`), 오래된 성공(`OpsJobStale`), 타이머 정지(`PullDeployTimerStopped`) — §16.3 |
 | 지표 | `pf_ops_last_success_timestamp{job}` · `pf_ops_last_run_ok{job}` · `pf_ops_status_age_seconds{job}` (§4.1) |
+
+### 16.2.1 호스트·DB 상태 보강 (2026-11-05 아키텍처 검토 7번)
+
+**공백 확인.** 위 규약은 백업·아카이브·배포 "작업의 성공 여부"만 본다. ADR-027 위험표는 "디스크 가득 → 디스크 사용량 지표"를 완화로 적었지만 해당 지표가 어디에도 정의돼 있지 않았고(실측: `pf_host_*` 없음), 호스트의 시스템 디스크는 여유 123GB(ADR-033)라 이미지·로그가 쌓이면 가장 먼저 찰 자원이다. DB 쪽도 `pf_db_pool_connections`(앱 풀)만 있어 오래 열린 트랜잭션·연결 수·큐 테이블 dead tuple 은 안 보인다.
+
+**node_exporter·postgres_exporter 는 기각된 것이 아니라 채택하지 않았을 뿐이다.** ADR-027 후속 결정 3과 §16.2 목적의 "Pushgateway·node_exporter 없이"는 *작업 결과를 한 규약으로 받으려는* 상태 파일 방식의 근거이지 호스트 지표 수집에 대한 결정이 아니다(ADR-007 에도 기각 기록 없음). 그래서 두 안을 비교한다.
+
+| 안 | 내용 | 비용 |
+|---|---|---|
+| **A(제안): 기존 규약 확장** | 호스트: `infra/scripts/host-health.sh`(systemd 타이머 `pf-host-health.timer`, 1분 제안)가 `df`·`docker system df` 로 `status/host_health/last_run.json`(`detail.disks=[{mount,used_ratio,avail_bytes}]`)을 쓰고 StatusFileCollector 가 `pf_host_disk_*` 로 노출. DB: worker 에 `DbHealthCollector`(스크레이프 시 캐시 30초, `DbPoolCollector` 계열)가 `pg_stat_activity`·`pg_stat_user_tables` 를 **읽기 전용 질의**로 조회해 `pf_db_*` 노출(`pg_monitor` 역할 필요 — 역할 분리는 아키텍처 검토 10번 소관) | 컨테이너 추가 없음(1GiB 예산 유지). 호스트 지표는 디스크 외(CPU·메모리)는 없음 |
+| B(대안): exporter 추가 | `node_exporter`(호스트)·`postgres_exporter`(DB)를 compose 서비스로 추가 | 컨테이너 2개와 메모리, 호스트 마운트(침해 시 노출면) 추가. 지표는 풍부하나 카디널리티 정책(§3.3)을 exporter 쪽에는 못 건다. 이름은 검증 필요 |
+
+A 로 시작하고 CPU·메모리 포화 관측이 필요해지면 B 를 재검토한다. 지표 이름은 `pf_` 규약을 따른다.
+
+| 감시 대상 | 지표 | 경보(§17) |
+|---|---|---|
+| 호스트 디스크 사용률(시스템·백업·데이터) | `pf_host_disk_used_ratio{mount}` | `HostDiskHigh` |
+| 가장 오래된 트랜잭션 나이(VACUUM·outbox 정리 방해) | `pf_db_oldest_xact_age_seconds` | `DbOldestXactAge` |
+| 연결 수(상한 대비) | `pf_db_connections{state}` · `pf_db_connections_max` | `DbConnectionsHigh` |
+| 큐·이력 테이블 dead tuple | `pf_db_dead_tuples{table}` | `DbDeadTuplesHigh` |
+| 정기 복구 점검 정체 | `pf_ops_last_success_timestamp{job="restore_drill"}` | `RestoreDrillStale` |
+
+**DB 유지보수 설정(아키텍처 검토 11번).** 큐·이력 테이블(`outbox`·`inbox`·`change_log`·`trace_step` 등)은 삽입 후 상태 갱신·배치 삭제가 잦아 기본 autovacuum 비율(테이블의 20%)로는 늦다. 제안값(소크 시험에서 조정):
+
+| 설정 | 제안 | 이유 |
+|---|---|---|
+| 큐·이력 테이블 `autovacuum_vacuum_scale_factor` / `_threshold` | `0.02` / `1000` (테이블 단위 `ALTER TABLE … SET`, 마이그레이션에 포함) | 작은 테이블이 20% 도달을 기다리다 팽창하지 않게 |
+| 같은 테이블 `autovacuum_vacuum_cost_delay` | `2ms` | SSD 이므로 속도 제한 완화(HDD 전제의 기본값은 과하다) |
+| `idle_in_transaction_session_timeout` | `60s`(앱 역할), 마이그레이션 역할은 제외 | 트랜잭션을 연 채 멈춘 연결이 vacuum 을 막는 것을 끊는다. 설정이 앱 정상 경로(`SKIP LOCKED` 배치, LISTEN 전용 연결은 유휴 상태이므로 해당 없음)를 끊지 않는지 통합 시험으로 확인 |
+| `statement_timeout` | 앱 역할 기본값(예 `10s`), 리텐션 배치는 세션별 상향 | 폭주 질의 차단 |
+
+배치 삭제는 이미 작은 배치(F13 §보관 정리)라 vacuum 으로 공간이 재사용된다. **소크 시험(S0-2 후속, S9-3, 08 §소크)의 관찰 항목에 `pf_db_dead_tuples`·`pf_db_oldest_xact_age_seconds`·테이블 크기 추이를 넣는다** — 큐 테이블이 시간이 지나도 커지지 않는지가 합격선이다(수치는 측정 후 확정).
 | 시험 | 08: **파일 없음 / 오래됨 / `ok=false` 를 서로 다른 결과로 구분**, 깨진 파일 처리, 부분 쓰기 방지(rename) |
 
 ## 16.3 OB-17 경보 라우팅 (Discord)
@@ -2176,6 +2246,11 @@ flowchart TD
 | RetentionPaused | `pf_retention_paused == 1` (24시간 이상 지속은 `for: 24h`) | 24h | warning | 증거 보존용 보관 정지가 해제되지 않음(ADR-028). 정지는 24시간 후 자동 해제되므로 이 경보는 해제 실패 또는 재정지를 뜻함 |
 | OpsRunFailed | `pf_ops_last_run_ok{job=~"backup\|archive_logs"} == 0` | 0 | warn | 마지막 실행 실패 |
 | OpsStatusMissing | `absent(pf_ops_last_success_timestamp{job="backup"})` | 30m | warn | 상태 파일 없음(타이머 미설치 등) |
+| HostDiskHigh | `pf_host_disk_used_ratio > 0.85` (95% 초과는 같은 식 `> 0.95` 를 critical 로 한 번 더) | 10m | warn | 호스트 디스크 사용률(시스템 디스크 여유 123GB — 이미지·로그 누적, §13.1 정리 단계). 임계는 제안 |
+| DbOldestXactAge | `pf_db_oldest_xact_age_seconds > 300` | 5m | warn | 오래 열린 트랜잭션이 vacuum·outbox 정리를 막음 |
+| DbConnectionsHigh | `sum(pf_db_connections) / pf_db_connections_max > 0.8` | 5m | warn | 연결 고갈 임박 |
+| DbDeadTuplesHigh | `pf_db_dead_tuples > 10000` 이고 live 대비 30% 초과 | 30m | warn | 큐 테이블 팽창(autovacuum 설정 부족, §16.2.1) |
+| RestoreDrillStale | `time()-pf_ops_last_success_timestamp{job="restore_drill"} > 8*86400` | 0 | warn | 주간 복구 점검(sha256·크기·헤더) 정체 |
 | OutboxStuck | `max(pf_outbox_oldest_age_seconds{status="new"}) > 60` | 2m | warn | 디스패처/리더 문제 |
 | DeadLetterGrowing | `increase(pf_outbox_dead_total[15m]) > 0` | 0 | warn | 영구 실패 증가 |
 | InboxBacklog | `max(pf_inbox_oldest_age_seconds{status="received"}) > 60` | 2m | warn | 소비 지연 |

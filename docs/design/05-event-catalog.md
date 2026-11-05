@@ -51,6 +51,8 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 
 `flow_counter` 는 이벤트 구동이 아니라 `trace_step` **주기 집계**다.
 
+**소비자는 서로 독립이라 서로의 진행 속도를 보장하지 않는다.** 같은 이벤트를 `realtime-broadcaster` 가 이미 `change_log` 에 반영했어도 `guestbook-projector` 는 아직 `entry_view` 에 반영하지 못했을 수 있다. 두 읽기 모델을 함께 읽는 스냅샷(F14 RT-05)은 이 지연을 스스로 처리한다 — 구독 먼저 → `head` → `entry_view` 읽기, 프로젝터 `inbox_message` 로 따라잡음을 확인하고 한도(2초) 안에 대기·재시도, 초과 시 4500(소비자 간 순서 의존을 만들지 않는다).
+
 ### 2.2 흐름 단계(`trace_step.step`)
 
 이벤트가 아니라 **시각화 입력**이다. 한 `traceId` 가 지나는 단계: `written → outboxed → dispatched → received → processed` (+ `retried`/`failed`/`dead`). 단계 이름은 [04](04-ws-protocol.md)의 비공개 메시지 `flow.step` 과 같은 값이다.

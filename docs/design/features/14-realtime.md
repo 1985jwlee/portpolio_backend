@@ -19,7 +19,7 @@
 | D7 | 공개 메시지는 **순수 함수 `PublicMessageMapper`**(DB 접근 없음)가 만든다. 그래서 `entry.updated` 는 부분 갱신(`entryId`, `body`, `updatedAt`, `version`), 숨김 해제는 `entry.restored`(04 수정 요청) | RT-01, RT-16 |
 | D8 | 같은 메시지는 **전체 구독자에게 한 번만 직렬화**해 같은 문자열을 보낸다 | §3.5 |
 | D9 | 세션 검증 캐시 30초 + **연결별 30초 재검증**으로 회전·폐기 시 `4401` | RT-13 |
-| D10 | 한 세션의 private 연결 상한 3 → 초과 시 가장 오래된 연결을 `4409`. 전역 상한(`WS_MAX_CONNECTIONS`)은 **미정** | RT-15 |
+| D10 | 한 세션의 private 연결 상한 3 → 초과 시 가장 오래된 연결을 `4409`. 전역 상한(`WS_MAX_CONNECTIONS`)은 **초기값 400**(수 시간 소크 후 확정) | RT-15 |
 
 ## 1. 아키텍처
 
@@ -104,7 +104,7 @@ flowchart LR
 | 프로세스 | realtime 책임 | 쓰는 DB 객체 |
 |---|---|---|
 | `apps/worker` | broadcaster(소비자), 변경 이력 기록·정리 | `realtime.inbox_message` W, `channel_seq` W, `change_log` W/D |
-| `apps/ws-gateway` | 소켓·허브·재개·스냅샷·private 라우팅 | `change_log` R, `entry_view`·`flow_counter` R(스냅샷), `trace_step` R(**events 공개 포트 `TraceReader`** 경유 — 테이블 직접 SQL 아님), `session` R(`ResolveSession` 경유) |
+| `apps/ws-gateway` | 소켓·허브·재개·스냅샷·private 라우팅 | `change_log` R, `entry_view`·`flow_counter` R(스냅샷), `trace_step` R(**events 공개 포트 `TraceReader`** 경유 — 테이블 직접 SQL 아님; events 쓰기 스키마 읽기라 CQRS 예외 **X3**, P0 §2.4), `session` R(`ResolveSession` 경유; 예외 **X4**) |
 | `apps/api` | 관여하지 않음(세션 발급만 `/api/me`) | — |
 
 ws-gateway 는 **쓰기 모델을 직접 쓰지 않는다.** 읽기 모델(`*_read`)과 세션 조회만 한다. `entry_view` 는 `guestbook` 모듈의 공개 조회 포트(`guestbook` index 의 `ReadPublicEntries`, F12 에 등록)로, `flow_counter` 는 `events` 모듈의 공개 포트 `FlowSummaryReader` 로, `trace_step` 은 `events` 의 공개 포트 `TraceReader`(`after(cursor,limit)`)로 읽고, SQL 을 realtime 모듈이 직접 짜지 않는다(모듈 경계, design/01 B4).
@@ -893,7 +893,7 @@ flowchart TD
 ```
 
 핵심 불변식: **구독(버퍼링)을 먼저 시작하고 나서 재생을 읽는다.** 반대 순서면 그 사이 변경이 사라진다. 버퍼의 중복(seq ≤ 재생 끝)은 버린다.
-지표: `pf_ws_resume_total{mode="replay|snapshot", reason}`, `pf_ws_replay_messages` 히스토그램. 시험: AC-008 — 건너뜀·이력 부족·처음 접속 3경로, 재생 중 정리, `resume > head`.
+지표: `pf_ws_resume_total{mode="replay|snapshot", reason}`, `pf_ws_replay_messages` 히스토그램. 시험: AC-008 — 건너뜀·이력 부족·처음 접속 3경로, 재생 중 정리, `resume > head`, 프로젝터 정지 중 스냅샷(RT-05 카오스 경로).
 
 ### RT-05. 스냅샷 구성
 
@@ -904,7 +904,12 @@ flowchart TD
 | 사후 조건 | `snapshot { entries, flow, head }` 전송 후 `head+1` 부터 수신 |
 | 접근 | `change_log.head` R, `entry_view` R(guestbook 공개 조회 포트), `flow_counter` R |
 
-순서(레이스 방지): ① `head` 를 먼저 읽는다 ② 그 뒤에 `entry_view` 첫 페이지(20건, 공개 필드만)와 `flow_counter` 최근 5분을 읽는다. 읽기 모델이 `head` 보다 앞선 상태일 수 있으나, 이후 오는 변경은 **덮어쓰기/중복 안전**(`id` 기준 병합, `reaction.updated` 는 총개수)이라 결과가 같다.
+순서(레이스 방지): ① 연결의 라이브 구독을 먼저 등록해 버퍼링을 시작한다(`subscribe`) ② `head` 와 그 행들의 최근 `event_id` 목록(최대 50건)을 읽는다 ③ `entry_view` 첫 페이지(20건, 공개 필드만)와 `flow_counter` 최근 5분을 읽는다 ④ **프로젝터 따라잡기 확인**: ③의 `ReadPublicEntries` 가 `caughtUp` 을 함께 돌려주고, 거짓이면 짧게 대기·재시도한다. 읽기 모델이 `head` 보다 *앞선* 상태인 것은 괜찮다. 이후 오는 변경은 **덮어쓰기/중복 안전**(`id` 기준 병합, `reaction.updated` 는 총개수)이라 결과가 같다.
+
+**읽기 모델 지연(프로젝터가 broadcaster 보다 늦음) 처리 — 결정: P0 X2 의 뼈대(구독 먼저 → head → 읽기 모델 대기·재시도)를 재사용하고, 쓰기 모델 읽기는 재사용하지 않는다.** `change_log` 의 `head` 와 `entry_view` 는 서로 다른 소비자(`realtime-broadcaster` / `guestbook-projector`)가 같은 이벤트를 각자 처리해 만든 것이라, 프로젝터가 뒤처지면 `entry_view` 가 `head` 이전 변경을 아직 반영하지 못한 채 `snapshot { head }` 가 나간다. 이후 `head+1` 부터 재생되므로 그 사이 변경은 영구히 누락된다(덮어쓰기 안전성은 *앞선* 읽기 모델만 보호하고 *뒤처진* 읽기 모델은 보호하지 못한다). X2 는 chat 이 자체 순번 카운터(`chat.room.last_seq`)를 쓰기 모델에 가져서 그것을 `head` 로 읽을 수 있지만, 방명록의 `head` 는 realtime 읽기 모델(`change_log`)이고 쓰기 모델에 대응 순번이 없다. 그래서 새 CQRS 예외(X 번호)를 만들지 않고 guestbook 이 **자기 모듈의 `inbox_message`** 로 따라잡음을 판정한다.
+
+- `ReadPublicEntries` 입력에 `headEventIds`(②의 최근 `event_id` ≤ 50개)를 더하고 출력에 `caughtUp: boolean` 을 더한다. `caughtUp = true` ⇔ `guestbook.inbox_message`(`consumer='guestbook-projector'`)에서 `message_id ∈ headEventIds` 인 행이 **모두 존재하며 `processed`** 이고 `status IN ('received','processing')` 인 행이 없다(후자는 집합체별 선두 규칙용 부분 인덱스를 쓴다). `dead` 는 대기해도 풀리지 않으므로 기다리지 않고 `pf_snapshot_projector_dead_total` 로 경보한다(복구는 읽기 모델 재구성, AC-017).
+- 대기·재시도: `caughtUp=false` 면 100ms 간격으로 ③의 `entry_view` 읽기만 다시 한다(`head` 는 다시 읽지 않는다 — 고정해야 ①에서 버퍼링한 변경과 이어진다). 전체 한도 2초(`SNAPSHOT_CATCHUP_TIMEOUT_MS`, 제안값). 넘으면 `TransientError` → 기존 오류 경로(`error { code: unavailable, fatal: true }` → close 4500, 클라이언트 백오프 재접속). **뒤처진 스냅샷을 내보내기보다 연결을 거절**한다(조용한 누락 대 보이는 재시도). 지표: `pf_ws_snapshot_catchup_wait_seconds`, `pf_ws_snapshot_catchup_timeout_total`.
 
 ```mermaid
 classDiagram
@@ -959,18 +964,22 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["SnapshotPlan"] --> B["head 읽기"]
+    A["SnapshotPlan"] --> A2["구독 먼저 등록 (버퍼링)"]
+    A2 --> B["head + 최근 event_id 읽기"]
     B --> C["entry_view 첫 페이지 + flow 윈도우 병렬 읽기"]
     C --> D{"둘 다 성공?"}
     D -- "아니오" --> E["error fatal + 4500 (클라이언트 백오프 재접속)"]
-    D -- "예" --> F["snapshot 직렬화 (64KB 한도 검사)"]
+    D -- "예" --> CU{"caughtUp?"}
+    CU -- "아니오, 2초 이내" --> C
+    CU -- "아니오, 2초 초과" --> E
+    CU -- "예" --> F["snapshot 직렬화 (64KB 한도 검사)"]
     F --> G{"64KB 초과?"}
     G -- "예" --> H["entries 를 줄여 재직렬화 (10건)"]
     G -- "아니오" --> I["전송"]
     H --> I
 ```
 
-지표: `pf_ws_snapshot_build_seconds`, `pf_ws_snapshot_bytes`. 시험: 스냅샷 직후 `head+1` 부터 이어짐(중복·누락 없음), 스냅샷에 개인 필드(`isMine` 등) 없음(AC-009).
+지표: `pf_ws_snapshot_build_seconds`, `pf_ws_snapshot_bytes`. 시험: 스냅샷 직후 `head+1` 부터 이어짐(중복·누락 없음), 스냅샷에 개인 필드(`isMine` 등) 없음(AC-009), **프로젝터 정지 + 스냅샷 카오스 경로(AC-008, 08 §6)** — 프로젝터를 멈춘 채 글 3건을 쓰면 broadcaster 만 `head` 를 올리고 `entry_view` 는 뒤처진다. ① 대기 한도(2초) 안에 프로젝터를 재개하면 3건이 모두 든 스냅샷을 받는다 ② 재개하지 않으면 4500 으로 거절되고 뒤처진 스냅샷이 나가지 않는다 ③ 재접속 후 `head+1` 부터 이어지며 누락 0.
 
 ### RT-06. 팬아웃·송신 큐·합치기·4408
 
@@ -1684,7 +1693,7 @@ flowchart TD
 | 항목 | 내용 |
 |---|---|
 | 목적 | 자원 고갈과 한 세션의 연결 남발을 막는다 |
-| 규칙 | ① **세션당 private 3개** — 4번째 연결이 열리면 가장 오래된 연결을 `4409` 로 종료(새 연결 우선) ② **전역 상한 `WS_MAX_CONNECTIONS`: 미정**(G2 소크 후 확정, 업그레이드 시 `503`) ③ **접속 주소당 동시 연결**은 nginx `limit_conn`(gateway 는 IP 를 보지 않는다) ④ 클라이언트 메시지 초당 10건 → `4429` |
+| 규칙 | ① **세션당 private 3개** — 4번째 연결이 열리면 가장 오래된 연결을 `4409` 로 종료(새 연결 우선) ② **전역 상한 `WS_MAX_CONNECTIONS`: 초기값 400**(G2 수 시간 소크 후 확정, 업그레이드 시 `503`) ③ **접속 주소당 동시 연결**은 nginx `limit_conn`(gateway 는 IP 를 보지 않는다) ④ 클라이언트 메시지 초당 10건 → `4429` |
 
 ```mermaid
 classDiagram
@@ -1866,7 +1875,7 @@ flowchart TD
 
 | 영역 | 시험 | 등급 | 위치 |
 |---|---|---|---|
-| 재개 3경로 | AC-008: 건너뜀·이력 부족·처음 접속, 재생 중 정리, `resume > head` | L3 | `apps/ws-gateway/test/resume.test.ts` |
+| 재개 3경로 | AC-008: 건너뜀·이력 부족·처음 접속, 재생 중 정리, `resume > head`, 프로젝터 정지 + 스냅샷 카오스 | L3 | `apps/ws-gateway/test/resume.test.ts` |
 | 프라이버시 | AC-009: 입력에 금지 값을 심어도 공개 출력에 없음, 스키마에 금지 키 없음 | L2·L3 | `packages/protocol/test/public-privacy.test.ts`, `apps/ws-gateway/test/privacy.test.ts` |
 | 백프레셔 | 느린 소비자 → 앱 큐가 `4408`, 다른 연결 p99 무영향, 합치기+`sk` | L3 | `apps/ws-gateway/test/backpressure.test.ts` |
 | 우아한 종료 | SIGTERM → `bye` → `1001` → 재개, 강제 종료 | L3 | `apps/ws-gateway/test/shutdown.test.ts` |

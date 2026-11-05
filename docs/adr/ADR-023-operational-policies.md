@@ -91,11 +91,11 @@
 ### 9. 백업
 | 항목 | 규칙 |
 |---|---|
-| 대상 | `guestbook`·`identity` 쓰기 스키마(정본). 읽기 모델·로그·outbox 이력은 제외(재생성/휘발) |
-| 방식 | 매일 `pg_dump`(커스텀 형식), 백업 컨테이너 또는 호스트 cron |
-| 보관 | 일별 7개 + 주별 4개, **DB 볼륨과 다른 경로** |
+| 대상 | **제외 목록 방식** — 전부 백업하되 읽기 모델(`*_read`)·`realtime`·outbox/trace/flow 이력만 뺀다(재생성/휘발). `events.audit_log` 와 이후 Phase 스키마는 자동으로 포함. 분류는 `infra/backup/tables.json`, 분류 없는 테이블은 CI 실패(F17 §12.1) |
+| 방식 | 매일 `pg_dump`(커스텀 형식)를 **`age` 로 파이프해 평문을 디스크에 쓰지 않는다**, 백업 컨테이너 또는 호스트 cron |
+| 보관 | 일별 7개 + 주별 4개, **DB 볼륨과 다른 물리 디스크**(대용량 NVMe 전용 마운트, ADR-033 호스트 프로필) |
 | 외부 | 암호화한 덤프를 **카드 없이 쓸 수 있는 무료 외부 저장소**에 업로드(대상은 **관문 G12**에서 확정) |
-| 복구 시험 | 빈 DB 에 복원해 행 수·무결성 검사를 통과시키고 절차를 `docs/` 에 기록(M1 후반 1회, 이후 분기별) |
+| 복구 시험 | 빈 DB 에 복원해 행 수·무결성 검사를 통과시키고 절차를 `docs/` 에 기록(M1 후반 1회, 이후 분기별). 사이사이에 주 1회 자동 점검(sha256·크기·`age` 헤더, 개인키가 없어 복원은 못 함)을 `restore_drill` 상태 파일로 남긴다(F17 §12.7). 마이그레이션 직전에는 별도 `pre-migrate` 덤프를 뜬다(09 §6) |
 - 키(암호화)는 저장소·이미지에 넣지 않는다.
 - 백업 결과는 `status/backup/last_run.json` 에 쓰고 worker 의 `StatusFileCollector` 가 `pf_ops_last_success_timestamp{job="backup"}` 로 노출한다. 26시간 넘게 성공이 없으면 Discord 로 경보한다([ADR-027](ADR-027-server-logs.md) 후속 결정, F17 §16~17). 실행은 systemd 타이머(`pf-backup`, 03:30).
 - 백업 암호화는 `age`(수신자 공개키만 서버에 둔다, [ADR-026](ADR-026-data-protection.md)).

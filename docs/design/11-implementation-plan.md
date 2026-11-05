@@ -1,7 +1,7 @@
 # 11. M1 구현 계획
 
 M1(사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지표 + 정적 폴백)을 **작업 단위·순서·완료 기준**으로 나눈다.
-입력: [spec](../../specs/portfolio-site.spec.md)(FR·AC), 설계 문서 00~12, 관문 G1~G14([tech-stack.md](../domains/tech-stack.md) §11, ADR-023).
+입력: [spec](../../specs/portfolio-site.spec.md)(FR·AC), 설계 문서 00~12, 관문 G2~G14(G1 은 폐기, [tech-stack.md](../domains/tech-stack.md) §11, ADR-023).
 
 > 다이어그램 해당 여부 — 순서도(의존 그래프)·시퀀스(작업 한 건의 절차)·간트형 단계도를 쓴다. **클래스·상속 구조는 해당 없음**: 이 문서는 코드가 아니라 작업 순서를 다룬다(코드 구조는 00·01).
 
@@ -29,7 +29,7 @@ flowchart LR
     S6["S6 나머지 기능<br/>반응 · 수정/삭제 · 신고/숨김"]
     S7["S7 관측<br/>지표 · Prometheus · Grafana 임베드 G6"]
     S8["S8 운영 경화<br/>프록시 · 폴백 G11 · 백업 G12 · k3d G8"]
-    S9["S9 인수<br/>AC 전수 · 부하 · 이중 호스팅"]
+    S9["S9 인수<br/>AC 전수 · 부하 · 집 PC 단일 호스트"]
     S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9
     S3 -.->|"병행 가능"| S5
     S4 -.->|"병행 가능"| S7
@@ -41,17 +41,19 @@ flowchart LR
 
 목표: **설계를 뒤집을 수 있는 불확실성을 실행으로 지운다.** 결과는 ADR-022/023 에 추가하고, 스파이크 코드는 `spikes/` 에 두거나 버린다(제품 코드가 아니다).
 
-| 작업 | 관문 | 완료 기준(검사) | 실패 시 |
-|---|---|---|---|
-| S0-1 Funnel 경로 | **G14** (구 G1 폐기) | `tailscale funnel` 로 노출한 에코 서버에 WebSocket 연결·메시지 왕복 성공, 유휴 타임아웃·하트비트 주기·대역폭 체감·**클라이언트 IP 확보 여부**·재시작 후 주소 유지·인증서 갱신을 기록한다(design/02 §7) | SSE 대체 설계(ADR-003 후속) / IP 미확보 시 속도 제한을 세션/계정 기준으로만 |
-| S0-2 Bun WS 안정성 | **G2** | 목표 연결 수에서 **소크(수 시간) 메모리 비증가**, 재접속 복구, 앱 레벨 송신 큐 상한이 느린 소비자를 끊음(`4408`), Elysia 라우트 옵션 vs `Bun.serve` 지연 비교 | WS 부분만 `Bun.serve`, 또는 Go 교체 |
-| S0-3 Next on Bun | **G3** | 빌드·`standalone` 실행·SSR·`next-intl`·이미지 최적화 정상 | web 만 Node 22 |
-| S0-4 DB 드라이버 | **G4** | Drizzle 호환·트랜잭션·`LISTEN/NOTIFY` 전용 연결·`SKIP LOCKED` 경쟁 시험 통과 | 후보 교체 |
-| S0-5 지표·로깅 | **G5** | `/metrics` 에 요청 수·지연·적체 지표, 식별자 레이블 없음 | 후보 교체 |
-| S0-6 nginx | **G7** | `nginx -V` 에 `realip`, 클라이언트 주소 헤더 정규화, TLS 방식 결정 | 모듈 포함 이미지 |
-| S0-7 마이그레이션 | **G10** | `generate --custom` raw SQL 로 부분 인덱스·어드바이저리 락 객체 생성, 빈 DB 에서 재현 | SQL 직접 관리 |
+| 작업 | 관문 | 실행 위치 | 완료 기준(검사) | 실패 시 |
+|---|---|---|---|---|
+| S0-0 호스트 프로필 | — | 호스트 | CPU(모델·코어·클럭·**AVX2**)·RAM·디스크(종류·여유)·OS 를 기록한다. **실측값은 이미 ADR-033 '호스트 프로필'에 있다**(Xeon Bronze 3204 6코어 1.9GHz·AVX2 있음, RAM 62GB, NVMe SSD 3개, 네이티브 Ubuntu 24.04.2). 남은 것은 **호스트에서 G2·G3·G14 와 k6 를 다시 재는 것**(개발 PC 수치는 참고용)이고, 병목은 메모리가 아니라 6코어의 코어당 클럭이다 | 값이 ADR-033 과 다르면 ADR-033 을 먼저 고친다 |
+| S0-1 Funnel 경로 | **G14** (구 G1 폐기) | 호스트 | `tailscale funnel` 로 노출한 에코 서버에 WebSocket 연결·메시지 왕복 성공, 유휴 타임아웃·하트비트 주기·대역폭 체감·**클라이언트 IP 확보 여부**·재시작 후 주소 유지·인증서 갱신을 기록한다(design/02 §7) | SSE 대체 설계(ADR-003 후속) / IP 미확보 시 속도 제한을 세션/계정 기준으로만 |
+| S0-2 Bun WS 안정성 | **G2** | 개발 PC → 호스트 재측정 | 목표 연결 수에서 **소크(수 시간) 메모리 비증가**, 재접속 복구, 앱 레벨 송신 큐 상한이 느린 소비자를 끊음(`4408`), Elysia 라우트 옵션 vs `Bun.serve` 지연 비교 | WS 부분만 `Bun.serve`, 또는 Go 교체 |
+| S0-3 Next on Bun | **G3** | 개발 PC → 호스트 재측정 | 빌드·`standalone` 실행·SSR·`next-intl`·이미지 최적화 정상 | web 만 Node 22 |
+| S0-4 DB 드라이버 | **G4** | 개발 PC | Drizzle 호환·트랜잭션·`LISTEN/NOTIFY` 전용 연결·`SKIP LOCKED` 경쟁 시험 통과 | 후보 교체 |
+| S0-5 지표·로깅 | **G5** | 개발 PC | `/metrics` 에 요청 수·지연·적체 지표, 식별자 레이블 없음 | 후보 교체 |
+| S0-6 nginx | **G7** | 개발 PC (Funnel 경유 확인은 호스트) | `nginx -V` 에 `realip`, 클라이언트 주소 헤더 정규화, TLS 방식 결정 | 모듈 포함 이미지 |
+| S0-7 마이그레이션 | **G10** | 개발 PC | `generate --custom` raw SQL 로 부분 인덱스·어드바이저리 락 객체 생성, 빈 DB 에서 재현 | SQL 직접 관리 |
+| S0-8 컨테이너 격리 결정 | (신규 관문 아님, 10 §5) | 호스트 | rootless Docker 또는 `userns-remap` 중 하나를 S0 에서 정한다(**기본값 제안: rootless**, 안 되면 `userns-remap`). compose 기본 강화(`cap_drop: [ALL]`·`no-new-privileges`·읽기 전용 FS)가 Bun·nginx·Postgres 이미지에서 기동하는지 확인 | 강화 항목별로 예외 기록 후 진행 |
 
-- 순서: **S0-1·S0-2 먼저**(설계를 바꿀 수 있는 크기), 나머지는 병렬.
+- 순서: **S0-0 이 맨 앞**(호스트 값이 이후 측정의 기준), 그다음 **S0-1·S0-2**(설계를 바꿀 수 있는 크기), 나머지는 병렬.
 - 소크(S0-2)는 오래 걸리므로 **먼저 띄워 두고** S1 을 진행한다. 결과는 S4 시작 전에 필요하다.
 - G9(선택)는 **S1-6**(CI 시험 DB 환경 결정)에서, G6 은 S7-3, G8 은 S8-5, G11 은 S8-3, G12 는 S8-4 에서 처리한다.
 
@@ -141,9 +143,9 @@ flowchart LR
 |---|---|---|---|---|
 | S7-1 | 지표 노출(요청·지연·오류·outbox 적체·WS 연결 수·큐 길이) | S0-5, S4 | `/metrics` 에 명세 지표, 레이블에 식별자 없음 | FR-060 |
 | S7-2 | Prometheus·Grafana 프로비저닝, 대시보드 JSON | S7-1 | compose 에서 대시보드가 자동 로드 | FR-060 |
-| S7-3 | Public dashboards 임베드 | S7-2 | **G6**: 사이트에서 편집·탐색 UI 없이 보임(로컬 실측 통과: `GF_SECURITY_ALLOW_EMBEDDING=true`, iframe `sandbox="allow-scripts allow-same-origin"`, `frame-src` 에 Grafana 공개 출처 1개). **후퇴안 없음** — 실패하면 임베드를 포기하고 링크·스크린샷으로 대체(익명 Viewer 는 임의 PromQL 이 열려 부적합) | FR-061, AC-012 |
+| S7-3 | Public dashboards 임베드 | S7-2 | **G6**(Grafana 는 사이트와 다른 출처 — Funnel 8443, F17 §8.4, 제안·사용자 미확인이라 이 토폴로지로 재실측 필요): 사이트에서 편집·탐색 UI 없이 보임(로컬 실측 통과: `GF_SECURITY_ALLOW_EMBEDDING=true`, iframe `sandbox="allow-scripts allow-same-origin"`, `frame-src` 에 Grafana 공개 출처 1개). **후퇴안 없음** — 실패하면 임베드를 포기하고 링크·스크린샷으로 대체(익명 Viewer 는 임의 PromQL 이 열려 부적합) | FR-061, AC-012 |
 | S7-4 | 운영 지표 페이지(웹) | S7-3, S5 | 임베드 + 폴백 안내 | FR-061 |
-| S7-5 | `StatusFileCollector`(OB-16)와 상태 파일 규약(`status/<job>/last_run.json`: job·started_at·finished_at·ok·detail·version·last_success_at, 원자적 rename) — 스크립트 3종이 같은 쓰기 헬퍼를 쓴다 | S7-1, S1-11 | 파일 없음/오래됨/`ok=false` 를 구분해 `pf_ops_*` 노출, 깨진 파일은 `pf_collector_errors_total` | ADR-027, AC-025, FR-062 |
+| S7-5 | `StatusFileCollector`(OB-16)와 상태 파일 규약(`status/<job>/last_run.json`: job·started_at·finished_at·ok·detail·version·last_success_at, 원자적 rename) — 스크립트 3종이 같은 쓰기 헬퍼를 쓴다. 호스트 디스크(`host_health`)·DB 상태(`DbHealthCollector`) 지표와 경보 5종 추가(F17 §16.2.1) | S7-1, S1-11 | 파일 없음/오래됨/`ok=false` 를 구분해 `pf_ops_*` 노출, 깨진 파일은 `pf_collector_errors_total` | ADR-027, AC-025, FR-062 |
 | S7-6 | Grafana 경보 규칙·Discord 연락처·정책 프로비저닝(OB-17), `rules/pf.yml` 식 정본과 `promtool test rules`, 경보 임계값 표(F17 §17) | S7-2, S7-5 | **G**(미검증 항목): 시험 알림 1건이 Discord 에 도착, `$__file{}` 시크릿 확장 확인, 개발 모드에서 규칙 미로드 · **실측 반영 확인**: 시크릿 파일/환경변수 누락 시 프로비저닝 전체 실패 동작 점검, 시험 알림은 새 API 경로(`/apis/notifications.alerting.grafana.app/v1beta1/…/receivers/{base64url 이름}/test`), 카운터 선초기화로 첫 건 유실 없음, 정본 규칙에 `\|` 이스케이프 없음 | ADR-027, AC-025, FR-063 |
 
 ### S8 — 운영 경화
@@ -152,7 +154,7 @@ flowchart LR
 | S8-1 | 라이브 compose + nginx(realip·정규화·**정적 보안 헤더**; CSP 는 web 이 설정 — S5-1) + Tailscale Funnel 노출(호스트 `tailscaled`, 평문 로컬 포트로 프록시) + 쓰기 잠금 운영 런북(OB-13) | S0-1, S0-6 | 외부에서 HTTPS·WSS 동작, 주소 헤더 위조 무시 시험 · **호스트 확인**: 실제 `pf` 사용자로 아카이브/백업이 `PF_LOG_DIR`·`STATUS_DIR` 에 쓰기 가능, systemd 유닛 `ReadWritePaths` 절대 경로 치환 후 `systemd-analyze verify` 경고 0, docker 그룹 대안(소켓 프록시/journald/rootless) 중 결정 | AC-014 일부 |
 | S8-2 | 정적 폴백 1단계(nginx, `build:fallback` 산출) | S5-2, S8-1 | 앱 컨테이너 중지 시 소개·아키텍처 페이지 제공, 데모 영역 '점검 중' | FR-070, **AC-010** |
 | S8-3 | 별도 주소 정적 호스팅 + 수동 전환 대체 페이지·런북 | S8-2 | **G11**: 호스트 다운에도 별도 주소에서 정적 페이지 응답, 앱 주소 링크·복구 안내 포함, 카드 요건 확인(design/16). (G13 Worker 절체는 도메인 확보 시 후속, 보류) | FR-070, **FR-122**, **AC-039** |
-| S8-4 | 백업(`pg_dump` 일/주) + 복구 시험 + 외부 보관 | S8-1 | **G12**: 빈 DB 복원 후 무결성 검사 통과, 절차 문서화 | ADR-023, AC-028, FR-081, FR-102 |
+| S8-4 | 백업(`pg_dump` → `age` 스트리밍 일/주, 제외 목록 방식·`tables.json` 분류 CI 검사, 시스템 디스크와 다른 물리 NVMe) + 마이그레이션 직전 백업 + 복구 시험(주간 자동 점검 포함) + 외부 보관 | S8-1 | **G12**: 빈 DB 복원 후 무결성 검사 통과, 절차 문서화 | ADR-023, AC-028, FR-081, FR-102 |
 | S8-5 | k3d + Gateway API + Envoy Gateway 매니페스트 | S8-1 | **G8**: `/api`·`/ws`·`/` 라우팅, 롤링 배포 중 재접속 복구 (ADR-002 검증, AC-014 가 아님) | ADR-002 |
 | S8-7 | 로그 아카이브(`archive-logs.sh`)·조회(`logq.sh`)·nginx 접근 로그 형식(`pf_json`, `$uri`·`rid`)·컨테이너 로깅 옵션(20m×10)·**systemd 유닛 3종**(`infra/systemd`: archive-logs 03:10, backup 03:30, pull-deploy 5분, `Persistent=true`)·`install-systemd.sh`·`PF_LOG_DIR`/`STATUS_DIR` 권한·`pf_log_*` 지표·경보 | S8-1 | 접근 로그에 쿼리·IP 부재, 7일 지난 아카이브 삭제, `rid`↔`req_id` 연결, 24시간 미성공 경보 | ADR-027, OB-15, AC-021, FR-092, FR-093 |
 | S8-8 | 비밀 회전·사고 대응 리허설: design/13 §10 체크리스트 전 항목 실행(구 비밀 거부·새 비밀 동작·소요 시간 기록), 증거 보존 명령 실제 실행, 런북 수정 | S8-1, S7-6, S2-6, S6-10 | 체크리스트 9개 항목 통과, 막힌 단계는 13 에 반영 | ADR-028, AC-035, FR-111 |
@@ -162,7 +164,7 @@ flowchart LR
 | ID | 내용 | 완료 기준 |
 |---|---|---|
 | S9-1 | AC-001~038 전수 실행 | 매트릭스(08)의 모든 행이 초록 또는 사유 기록 |
-| S9-2 | 성능(**AC-013**) | Funnel 경유 API p95 300ms, 첫 화면 LCP 2.5s, 동시 50. 측정 환경·반복·결과를 기록 |
+| S9-2 | 성능(**AC-013**) | Funnel 경유 API p95 300ms, 첫 화면 LCP 2.5s, 동시 50. **원점 p95(`$upstream_response_time`)와 한국 클라이언트 종단 값을 분리 기록**(합격선은 tech-stack G14 ⑦ 제안값). 측정 환경·반복·결과를 기록 |
 | S9-3 | 소크·재접속·롤링 | WS 장시간 안정, 배포 중 끊김 후 자동 복구 |
 | S9-4 | 집 PC 단일 호스트(**AC-014**) | 집 PC(Compose, 백엔드+web)에서 AC-001·008·010 통과. Oracle 은 카드 없음으로 미추진(spec A-029) |
 | S9-5 | 문서 정합 | ADR 상태·tech-stack 버전·README 로드맵 갱신 |
@@ -220,11 +222,11 @@ sequenceDiagram
 
 | 체크포인트 | 시점 | 확인 |
 |---|---|---|
-| **C0** | S0 종료 | G1·G2 통과(또는 대안 결정). ADR-022 갱신 |
+| **C0** | S0 종료 | S0-0 호스트 프로필 기록, G14·G2 통과(또는 대안 결정). ADR-022 갱신 |
 | **C1** | S3 종료 | `curl` 로 글 작성 → 목록에 보임, 이벤트가 inbox 를 거쳐 처리됨, AC-001(서버)·002·003·015·017. 기반 AC: AC-020(감사 원자성)·022(세션 폐기)·023(쓰기는 트랜잭션)·024(컬럼 등급)·027(비밀 스캔)·032(라이선스)·033(멱등) |
 | **C2** | S5 종료 | 브라우저에서 작성 → 실시간 반영 → 흐름 시각화. 연결 끊김 복구. AC-031(public/private 분리 연결). AC-036(접근성)·AC-037(검색·공유·오류 화면)·AC-038(개인정보 안내) |
 | **C3** | S7 종료 | 지표 대시보드 임베드. **S1~S7 에서 다루는 AC**(AC-001~009·011~013·015~020·022~027·029~034·036~038) 초록. AC-010·014·021·028·035 는 S8 이후 |
-| **C4** | S9 종료 | 인수 전체, 이중 호스팅, 성능 기록. M1 완료 선언 |
+| **C4** | S9 종료 | 인수 전체, 집 PC 단일 호스트(AC-014), 성능 기록. M1 완료 선언 |
 
 ### 7.1 층별 구현 순서 (공개 게이트는 A·B·C 모두 완료)
 
@@ -232,7 +234,7 @@ sequenceDiagram
 
 | 층 | 작업 | AC | 구현 순서 |
 |---|---|---|---|
-| **A 핵심 데모** | S0 · S1-1~S1-11 · S2-1~S2-5 · S3 · S4 · S5 · S6-1~S6-3 · S6-4(속도 제한) · S7-1~S7-4 · S8-1 · S8-2 · S8-3 · S8-5 · S8-6 | AC-001~016 · AC-023 · AC-031~033 · AC-036~038 (AC-013 성능·AC-014 이중 호스팅 포함) | 1순위 (공개 게이트 구성) |
+| **A 핵심 데모** | S0 · S1-1~S1-11 · S2-1~S2-5 · S3 · S4 · S5 · S6-1~S6-3 · S6-4(속도 제한) · S7-1~S7-4 · S8-1 · S8-2 · S8-3 · S8-5 · S8-6 | AC-001~016 · AC-023 · AC-031~033 · AC-036~038 (AC-013 성능·AC-014 집 PC 단일 호스트 포함) | 1순위 (공개 게이트 구성) |
 | **B 운영 성숙도** | S1-12(암호화 포트) · S1-14 · S6-4(쓰기 잠금) · S6-5 · S6-6 · S6-7 · S6-8(신고 메모 암호화·열람) · S6-9 · S8-4(백업·복구) · S8-7 | AC-017(읽기 모델 재구성) · AC-018~021 · AC-028(복구) · AC-029 · AC-030 | 2순위 (공개 게이트 구성) |
 | **C 후순위** | S1-13 · S1-15 · S2-6 · S6-10 · S7-5 · S7-6 · S8-8, 그리고 S6-8 의 키 회전 CLI(FR-101)·S8-4 의 백업 키 분리(FR-102) | AC-022·024·025·026·027·034·035 | 3순위 (공개 게이트 구성) |
 
@@ -257,4 +259,4 @@ AC-022(세션 폐기)·AC-024(컬럼 등급)·AC-027(비밀 스캔) 등 C 층 AC
 |---|---|
 | 일정(주 단위) 추정 | S0 결과 후 |
 | `spikes/` 코드의 보관 여부(저장소 포함 vs 폐기) | S0 시작 시 |
-| E2E 도구 선정 | S5 시작 시 |
+| ~~E2E 도구 선정~~ — Playwright 1.64.1 채택(tech-stack §11.1, Bun 동작 확인). S5 에서는 시나리오 설계만 한다 | 해소 |

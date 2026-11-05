@@ -7,7 +7,7 @@
 |---|---|
 | **00 (이 문서)** | 시스템 전체 구조, 공통 기반 클래스·오류·식별자 규약 |
 | [01](01-repository-structure.md) | 저장소 골격, 네이밍, tsconfig·스크립트, 환경변수 스키마 |
-| [02](02-dev-environment.md) | 로컬 compose, 시드, 비밀값, Tunnel·OAuth 로컬 시험 |
+| [02](02-dev-environment.md) | 로컬 compose, 시드, 비밀값, Funnel·OAuth 로컬 시험 |
 | [03](03-api-contract.md) | REST 계약, 에러 형식, 페이지네이션, 멱등 키 |
 | [04](04-ws-protocol.md) | WebSocket 봉투, 채널, seq·재접속, 스냅샷 |
 | [05](05-event-catalog.md) | 이벤트 종류·페이로드·버전 규칙 |

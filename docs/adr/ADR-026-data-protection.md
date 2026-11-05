@@ -34,6 +34,7 @@
 | 쿠키 서명 | HMAC-SHA256 | OAuth 임시 쿠키(`OAUTH_STATE_SECRET`) |
 | 비밀값 | `_FILE` 시크릿 파일 | 저장소·이미지에 없음, 로그 마스킹(`SecretString`) |
 | 백업 | **`age` 암호화** | `pg_dump` 를 수신자 공개키로 암호화 후 보관·외부 업로드. **개인키는 서버에 두지 않는다**(사용자 보관). 서버에는 공개키(`BACKUP_AGE_RECIPIENT`, 비밀 아님)만 |
+| DB 접근 | **서비스별 로그인 역할** | api·worker·ws-gateway(읽기 전용)·migrator·backup 이 각자 다른 접속 문자열(`secrets/database_url_<역할>`)을 쓰고, 감사 로그는 추가 전용 권한이다. 한 비밀이 새도 피해가 그 역할 권한으로 한정된다(설계 확정 2026-11-05, design/10 §5.1) |
 | 디스크 | 호스트 볼륨 암호화 | 집 PC: LUKS 등 호스트 설정(선택, 앱 범위 밖). Oracle(미추진): 블록 볼륨 기본 암호화 여부는 미확인 |
 | 필드 | AES-256-GCM | 아래 |
 

@@ -183,10 +183,10 @@ sequenceDiagram
 
 | 항목 | 내용 |
 |---|---|
-| 영향 | **DB 전체 접근**(쓰기 모델·읽기 모델·감사). 가장 넓은 영향 → 기본 S1 |
+| 영향 | 역할별로 다르다. `pf_migrator`·`pf_admin` 유출은 **DB 전체**(DDL 포함), `pf_api_rw`·`pf_worker_rw` 는 쓰기·읽기 모델(감사 로그는 추가만 가능), `pf_gateway_ro`·`pf_backup_ro` 는 읽기만. 가장 넓은 경우를 기준으로 → 기본 S1 |
 | 탐지 | 낯선 접속(호스트 포트가 열려 있다면 접속 로그), 이상 쿼리 |
 | 즉시 | 증거 보존(`pg_stat_activity`·Postgres 로그) → 쓰기 잠금 |
-| 회전 | 1) `ALTER ROLE pf PASSWORD '<새>'` 2) `secrets/database_url` 교체 3) 앱 재기동(우아한 종료) 4) 구 세션 정리: `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='pf' AND pid <> pg_backend_pid()` (제안) |
+| 회전 | 유출된 **역할만**(design/10 §5.1: `pf_api_rw`·`pf_worker_rw`·`pf_gateway_ro`·`pf_migrator`·`pf_backup_ro`; 어느 비밀이 샜는지 모르면 전부) 1) `ALTER ROLE <역할> PASSWORD '<새>'` 2) 해당 `secrets/database_url_<역할>` 교체 3) 그 서비스 재기동(우아한 종료) 4) 구 세션 정리: `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='<역할>' AND pid <> pg_backend_pid()` (제안) |
 | 검증 | 구 비밀번호로 `psql` 접속 거부, 앱 `/readyz` 정상 |
 | 후속 | **DB 덤프 유출 가능성으로 간주**(§6.12 영향표). 호스트 포트 노출 여부 점검(10 §2) |
 
@@ -410,7 +410,7 @@ Contact: {contact}
 | 비밀 스캔 도구(gitleaks 등)와 GitHub 비밀 스캔·푸시 보호의 무료 범위 | S1-15 |
 | Tailscale 노드 제거·재등록 절차와 재등록 후 주소 유지 | S0-1 / S8-1 (G14 ⑤) |
 | Bun 의 의존성 설치 스크립트 기본 정책 | 구현 초기 |
-| 읽기 전용 조사 역할(`pf_readonly`)을 둘지 | S8-1 |
+| 읽기 전용 조사 역할(`pf_readonly`)의 접속 방법(호스트 `psql` 로 tailnet 안에서만). 역할 자체는 설계 확정(10 §5.1) | S8-1 |
 | 법적 통지 의무의 적용 여부·기한 | **법무 검토** |
 | 이미지 해시 대조(공급망 검증) 방법 | S8 |
 | 인시던트 폴더·포스트모템 보관 기간(제안 90일) | 첫 실제 사고 후 |

@@ -302,12 +302,16 @@ M1 규약(F16 §8.2)은 "command usecase 만 `uow.run` 을 부르고 중첩을 �
 
 활성화 전 쌍의 `…InTx` 임포트는 `check:arch` 가 실패시킨다. 쌍을 활성화하는 Phase 의 설계 재검토(§12.5)에서 이 표를 다시 확인한다.
 
-**문서화된 CQRS 예외 (X)**: 쓰기 스키마를 읽는 예외는 아래 표가 전부다. 번호는 `X1`, `X2` 로 부르며 ADR-048 의 결정 번호(`E1`~`E8`, 'M-E1…M-E8')와 겹치지 않는다.
+**문서화된 CQRS 예외 (X)**: 쓰기 스키마를 읽는 예외는 아래 표가 전부다. 번호는 `X1`~`X4` 로 부르며 ADR-048 의 결정 번호(`E1`~`E8`, 'M-E1…M-E8')와 겹치지 않는다.
 
 | # | 예외 | 근거 | 도입 |
 |---|---|---|---|
 | X1 | `game_event`(대국 방 로그)를 ws-gateway 의 `RoomEventSource.after`, query usecase `SyncGame`, `GET /api/games/{id}/events` 가 쓰기 스키마에서 직접 읽는다 | 방 로그가 곧 정본 순번이고 fast lane 이 이를 읽어야 지연 예산을 지킨다(§6.7) | Phase 1 |
 | X2 | ws-gateway 의 chat `RoomSnapshotProvider`/`RoomEventSource` 구현이 읽기 모델 지연에 대비해 쓰기 모델 `chat.room.last_seq` 로 `head` 를 읽는다(구독 먼저 등록 → head → 읽기 모델 대기·재시도) | 읽기 모델이 `head` 보다 늦어도 재개 순번이 어긋나지 않게 | 6a |
+| X3 | events 의 `GetTrace`(`GET /api/flow/trace/{id}`)와 공개 포트 `TraceReader.after`(ws-gateway 의 `TraceWatcher` 소비)가 events **쓰기 스키마** `events.trace_step`(추가 전용 단계 기록)을 직접 읽는다. 대응 읽기 모델은 없다(`flow_counter` 는 익명 집계라 건별 단계를 담지 않는다). 소유 모듈의 query usecase 가 자기 표를 읽는 것이고 ws-gateway 는 테이블이 아니라 `TraceReader` 포트만 쓴다 | 건별·커서 조회가 `(trace_id, id)` 인덱스 하나로 닫히고 별도 읽기 모델은 같은 행의 복제일 뿐이다(database-schema §4-3, F13 EV-11, F14 D5) | M1 |
+| X4 | identity 의 `ResolveSession`·`GetMe` 가 쓰기 스키마 `identity.session` 을 요청마다 단건 키로 읽는다(`GET /api/me` 는 명령 쪽 보조 조회). ws-gateway 는 `ResolveSession` 공개 usecase 로만 쓴다 | 요청마다 필요한 단건 키 조회라 읽기 모델을 만들 이유가 없다(ADR-018 "조회가 없으면 읽기 모델 없음") | M1 |
+
+**X 예외의 기계 정의**: 이 표를 `modules/cqrs-exceptions.json` 이 옮겨 담는다(`id`·`reader`(모듈/usecase 또는 포트)·`schemaObject`). 경계 검사 B3(design/01)은 이 목록에 없는 쓰기 스키마 읽기를 CI 실패로 처리한다. 새 X 는 이 표와 JSON 을 같이 고친다(번호는 이어서 부여).
 
 **미사용 예약**: 쌍 #11(`AppendRoomLogInTx`, realtime 방 로그 — §6.7 2차 대응)은 **현재 허용 목록에 없다**. 룸 지연 예산 초과가 측정으로 확인될 때만 ADR-030 개정과 함께 추가한다.
 
@@ -953,7 +957,7 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 | `analysis-worker` (Phase 2 에 합류) | 큐 길이·CPU 기준, 동시성 **1**(ADR-033, 늘리려면 CPU 예산 재산정) | healthz | — | 진행 분석 취소(토큰 미완료 → 임대 만료 후 재선점) |
 | `web` | 동적 렌더(CSP nonce, G3) 라 CPU 기준 | readyz | minAvailable 1 | SIGTERM 143 |
 
-- k3d 검증(G8)과 live Compose 는 **같은 이미지**(ADR-002). HPA·PDB 는 k3d 에서만 검증된다.
+- k3d 검증(G8)과 live Compose 는 **같은 이미지**(ADR-002). HPA·PDB 는 k3d 에서만 검증된다. **Phase 4 의 산출물은 k3d 실측 보고서**(워크로드 분리·HPA·PDB·롤링 소켓 재접속 실측)이고, **라이브는 Compose 를 유지**한다. 라이브에 레플리카(api×2, ws×2)는 **포화가 측정으로 확인될 때만** 추가한다 — 위 표의 `HPA`·`최소 2` 는 k3d 검증 구성이고 라이브 Compose 의 상시 구성이 아니다(범위 변경 아님).
 - 롤링 중 소켓 재접속은 M1 실측 결과를 그대로 쓴다(우아한 종료 + preStop 조합 필수).
 
 ### 10.2 관측·경보
@@ -976,7 +980,7 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 | postgres | 유휴 56MiB → 운영 200–400MiB | 유휴 측정 + 추정(shared_buffers·커넥션) |
 | prometheus | 유휴 46MiB → 150–300MiB | 유휴 측정 + 추정(시계열 증가) |
 | **grafana** | **유휴 440MiB** | 유휴 측정(13.x 는 무겁다) |
-| tailscaled (호스트 프로세스, Funnel) | 미측정 — 교체 전 cloudflared 추정 30MiB 를 합계에 자리표시로 남김 | 교체 후 측정 필요 |
+| tailscaled (호스트 프로세스, Funnel) | 미측정 — 합계에는 자리표시로 30MiB 를 넣었다(추정, 컨테이너가 아니라 호스트 프로세스) | 호스트에서 측정 필요 |
 | redis | 유휴 6.8MiB → ≤ 256MiB(maxmemory) | 유휴 측정 + 설정 상한(제안) |
 | envoy gateway (k3d 검증 시) | 컨트롤 40–84MiB + 프록시 17–54MiB | M1 G8 측정 |
 | k3d 노드 | 약 1.25GiB | M1 G8 측정(검증 때만, 라이브와 동시 상주 아님) |
@@ -986,7 +990,7 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 
 | 순서 | 구성 | 합(추정) | 16GB 호스트 대비 | 24GB 호스트 대비 (참고용, Oracle 미추진) | 12GB(2 OCPU) 호스트 대비 (참고용, Oracle 미추진) |
 |---|---|---|---|---|---|
-| 1 | M1 (§11.1 구성요소 하한/상한 합: nginx 7.5 + web 164 + api 60–90 + ws 36–90 + worker 60 + postgres 200–400 + prometheus 150–300 + grafana 440 + cloudflared 30 MiB = 1,148–1,582 MiB) | 1,148–1,582 MiB (약 1.12–1.54GiB) | 약 7–10% | 약 5–6% | 약 9.3–12.9% |
+| 1 | M1 (§11.1 구성요소 하한/상한 합: nginx 7.5 + web 164 + api 60–90 + ws 36–90 + worker 60 + postgres 200–400 + prometheus 150–300 + grafana 440 + tailscaled 30(자리표시) MiB = 1,148–1,582 MiB) | 1,148–1,582 MiB (약 1.12–1.54GiB) | 약 7–10% | 약 5–6% | 약 9.3–12.9% |
 | 2 | + Phase 3 (+ redis, 상한 256MiB 로 계산, 모듈 +30–50MiB; 최소 pricefeed·escrow 포함) | 1,434–1,888 MiB (약 1.40–1.84GiB) | 약 9–12% | 약 6–8% | 약 11.7–15.4% |
 | 3 | + Phase 4 (레플리카: api×2, ws×2 → +200–300MiB) | 1,634–2,188 MiB (약 1.60–2.14GiB) | 약 10–13% | 약 7–9% | 약 13.3–17.8% |
 | 4 | + Phase 5 (추가 컨테이너 없음, 모듈 +30–50MiB) | 1,664–2,238 MiB (약 1.62–2.19GiB) | 약 10–14% | 약 7–9% | 약 13.5–18.2% |
@@ -997,8 +1001,8 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 
 - **도착점(최종 상태)은 구현 순서와 무관**하게 약 3.2–3.8GiB(추정)다. 순서가 바뀌면 **중간 값만** 달라진다 — 이력서 제출 가능 시점(M1+Phase 3+4)에는 약 1.6–2.1GiB 로, KataGo(1.5GiB 가정)가 합류하기 전이라 **중간 자원 부담이 가장 낮다**. 구성요소를 직접 더해 다시 계산했다(이전 표의 최종 3.1–3.7GiB 와의 차이는 모듈 증가분 추정치 반올림이다).
 - **D14 규칙**: 상시 합 ≤ 호스트 RAM 의 60%(16GB 면 9.6GiB, 12GB 면 7.2GiB). 최종 3,280–3,924MiB 는 12GB 기준 26.7–31.9% 라 메모리 60% 규칙을 통과한다. 위 추정은 여유가 크다. 가장 큰 불확실성은 **KataGo 와 Grafana(440MiB)** 다.
-- 집 PC 의 WSL2 는 메모리 상한이 별도로 있을 수 있다(미확인). Oracle(12GB·24GB 열)은 신용카드가 없어 추진하지 않는다(2026-11-05) — 해당 열은 참고용이다.
-- **CPU 예산이 메모리보다 먼저 걸린다**: 이 개발 머신은 6코어. KataGo 는 CPU 바운드이므로 `analysis-worker` 는 스레드 수·동시성 1·낮은 우선순위(`nice`)·방문 수 상한을 두고, 라이브 사이트(api·ws)의 코어를 침범하지 않게 `cpuset`/limits 로 분리한다(제안). 분석 큐 적체는 허용하되 대국 서비스 지연은 허용하지 않는다. **12GB(2 OCPU) 호스트에서는 이 문제가 더 크다**: D14 의 CPU 분리로 KataGo 에 코어 하나를 주면 사이트용(api·ws·web·worker·postgres)에 코어가 거의 남지 않을 수 있어, 메모리 60% 규칙은 통과해도 **CPU 예산이 먼저 걸린다**(스레드 수·오프피크 한정은 Phase 2 설계 재검토 §12.5 에서 다시 정한다).
+- 집 PC 호스트는 **네이티브 Ubuntu 24.04**(WSL2 아님)이고 RAM 은 **62GB**다(ADR-033 '호스트 프로필', 실측). 16GB·24GB·12GB 열은 모두 이 호스트에 비해 보수적인 참고 열이며, 병목은 메모리가 아니라 **6코어 1.9GHz 의 코어당 클럭**이다. Oracle(12GB·24GB 열)은 신용카드가 없어 추진하지 않는다(2026-11-05) — 해당 열은 참고용이다.
+- **CPU 예산이 메모리보다 먼저 걸린다**: 라이브 호스트는 6코어 1.9GHz(Xeon Bronze 3204, HT 없음, AVX2 있음)다. KataGo 는 CPU 바운드이므로 `analysis-worker` 는 스레드 수·동시성 1·낮은 우선순위(`nice`)·방문 수 상한을 두고, 라이브 사이트(api·ws)의 코어를 침범하지 않게 `cpuset`/limits 로 분리한다(제안). 분석 큐 적체는 허용하되 대국 서비스 지연은 허용하지 않는다. **(참고용) 12GB(2 OCPU) 호스트였다면 이 문제가 더 컸다**: D14 의 CPU 분리로 KataGo 에 코어 하나를 주면 사이트용(api·ws·web·worker·postgres)에 코어가 거의 남지 않을 수 있어, 메모리 60% 규칙은 통과해도 **CPU 예산이 먼저 걸린다**(스레드 수·오프피크 한정은 Phase 2 설계 재검토 §12.5 에서 다시 정한다).
 - Prometheus 시계열 증가를 막기 위해 레이블 허용목록(식별자 금지)을 도메인 지표에도 적용한다.
 
 ### 11.3 배포 단위 (Phase 4)
@@ -1134,7 +1138,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | KataGo 모델·스레드·메모리 | P1 설계 + 측정 |
 | HPA 사용자 지정 지표(연결 수) 방식 | Phase 4 |
 | Passkey 복구·분실 정책 | Phase 6b 착수 시 ADR |
-| 집 PC 의 WSL2 메모리 상한(Oracle 은 미추진) | 호스팅 실측 시 |
+| ~~집 PC 의 WSL2 메모리 상한~~ — 해소: 네이티브 Ubuntu 24.04·RAM 62GB 실측(ADR-033). 남은 것은 호스트에서 CPU 예산(코어당 클럭) 실측 | S0-0 · 호스팅 실측 시 |
 | seller 포털 필요 여부 | Phase 6 이후 |
 | `escrow`·`inventory` 모듈의 층 배치 확정(L5/L4) | 구현 착수 시(§2.1 은 제안) |
 | 승격 가능한 허용 쌍 추가(B12 #11…) | ADR-030 개정 |

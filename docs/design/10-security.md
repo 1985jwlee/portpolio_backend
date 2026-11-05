@@ -56,7 +56,7 @@ flowchart TD
 | `img-src` | `'self' data:` + **CI 배지 호스트 1개** | 외부 이미지는 CI 상태 배지(FR-003)뿐이다. 호스트는 `site.ciBadgeUrl`([12](12-content.md) §1.1)에서 빌드 시 뽑아 넣고, 변수가 `null` 이면 이 값을 넣지 않는다. 배지의 실제 호스트·리다이렉트(예: GitHub Actions 배지가 다른 호스트로 넘기는지)는 **미확인** — 구현 시 브라우저 콘솔 위반 보고로 확정. 아바타는 쓰지 않는다 |
 | `font-src` | `'self'` | 폰트는 자체 호스팅 |
 | `connect-src` | `'self' wss://<PUBLIC_ORIGIN 의 호스트>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
-| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1) | **G6 로컬 실측으로 확정**(Grafana 공개 출처 1개). 임베드가 안 되면 링크/스크린샷으로 대체하고 이 값을 제거한다. iframe `sandbox="allow-scripts allow-same-origin"` 필수, Grafana 는 `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off. **후퇴안 없음**: 익명 Viewer 는 임의 PromQL 이 열려(`POST /api/ds/query`) 부적합 |
+| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1). **사이트와 다른 출처여야 한다** — Funnel 다른 포트(8443/10000), 같은 출처 `/grafana/` 임베드는 `allow-same-origin` 으로 sandbox 가 무력화되므로 금지(F17 §8.4, 제안·사용자 미확인·대안: iframe 제거 후 web 직접 차트) | **G6 로컬 실측으로 확정**(Grafana 공개 출처 1개). 다른 포트 출처 토폴로지로는 **재실측 필요**. 임베드가 안 되면 링크/스크린샷으로 대체하고 이 값을 제거한다. iframe `sandbox="allow-scripts allow-same-origin"` 필수, Grafana 는 `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off. **후퇴안 없음**: 익명 Viewer 는 임의 PromQL 이 열려(`POST /api/ds/query`) 부적합 |
 | `frame-ancestors` | `'none'` | 클릭재킹 방지 |
 | `base-uri` | `'self'` | |
 | `form-action` | `'self'` | |
@@ -222,7 +222,7 @@ sequenceDiagram
 | 비밀 | 회전 주기 | 절차 | 노출 시 |
 |---|---|---|---|
 | `GITHUB_CLIENT_SECRET` | 연 1회 또는 노출 의심 시 | GitHub 에서 새 secret 생성 → `secrets/` 교체 → api 재기동 → 구 secret 폐기 | 즉시 폐기·교체. 기존 세션은 영향 없음(세션은 우리 것) |
-| DB 비밀번호 | 연 1회 | 새 비밀번호 설정 → `secrets/database_url` 교체 → 앱 재기동 | 즉시 교체 |
+| DB 비밀번호(역할별: §5.1) | 연 1회 | 역할마다 새 비밀번호 설정 → 해당 `secrets/database_url_<api\|worker\|gateway\|migrator\|backup>` 교체 → 그 서비스 재기동 | 즉시 교체(유출된 역할만) |
 | Tailscale 노드 인증(계정·인증 키를 쓴다면 키) | 노출 시 | 관리 콘솔에서 노드 제거·키 폐기 후 재등록 (구체 절차는 구현 시 확인, 13 §6.8) | 즉시 |
 | `FIELD_KEYS` (필드 암호화 키링, api·worker) | 연 1회 또는 노출 시 | 새 키 추가 → `active` 변경 → `worker rotate-field-keys` 로 재암호화 → 잔여 0 확인 후 옛 키 제거. **키링 백업은 백업 개인키와 별도로 보관**(분실 시 `note` 복구 불가, ADR-026) |
 | `OAUTH_STATE_SECRET` (OAuth 임시 쿠키 서명 키, api 필수) | 연 1회 또는 노출 시 | 새 값 생성 → `secrets/oauth_state_secret` 교체(저장 위치는 [02](02-dev-environment.md) §5) → api 재기동. 진행 중인 로그인 시도(10분 쿠키)만 실패한다 | 즉시 교체 |
@@ -241,6 +241,21 @@ sequenceDiagram
 - **docker 그룹 = root 동급 (로컬 입증, 2026-11-04)**: 개발 머신에서 현재 사용자(`docker` 그룹)가 `docker run -v /:/h:ro` 로 호스트 루트를 마운트하자 컨테이너 안에서 **root 권한으로** `/h/etc/shadow`(640 root:shadow)·`/h/root`(700)의 메타데이터가 보였다(내용은 읽지 않음). 읽기 전용이 아니면 쓰기도 같은 경로로 가능하다고 판단한다(쓰기는 시험하지 않음).
 - **docker 그룹 주의**: `docker` 그룹 구성원은 사실상 root 와 동급이다. systemd 유닛 사용자 `pf` 는 쉘 로그인을 막고(`nologin`) 유닛으로만 실행하며, 호스트에서 `docker` 그룹 구성원을 최소화한다. 호스트가 rootless Docker 면 `pf` 유닛을 사용자 단위로 둔다(F17 §16.1.1).
 
+**집 PC 침해 피해 범위 한정 (제안 — 구현 시 시험, 일부 미확인)**
+
+이 호스트는 개인 PC 이고 앱 컨테이너가 뚫리면 같은 LAN 과 호스트가 다음 표적이다. 아래는 피해를 줄이는 층이며 모두 **제안**이다(사용자 확정 결정 아님).
+
+| 층 | 제안 | 비고 |
+|---|---|---|
+| 데몬 | **rootless Docker 또는 `userns-remap` 결정을 S0(S0-8)로 당긴다**. 기본값 제안은 rootless(아래 표의 로컬 확인 근거). 컨테이너 루트가 호스트 루트로 이어지지 않게 한다 | 포트/네트워크 제약은 이 호스트에서 시험 |
+| compose | 모든 서비스에 `cap_drop: [ALL]`(필요한 것만 `cap_add`), `security_opt: [no-new-privileges:true]`, `read_only: true`(+ 필요한 `tmpfs`) | Bun 호환 **미확인** → 서비스별 예외를 기록 |
+| 네트워크 | postgres·prometheus 등 외부 통신이 필요 없는 서비스는 `internal: true` 네트워크에만 둔다. 외부 송신이 필요한 것(web→OAuth, worker→Discord)은 소수로 한정하고 목록을 관리 | |
+| 호스트 방화벽 | 컨테이너 대역에서 **사설 대역(RFC1918)·링크로컬 송신 차단**(LAN 의 다른 기기로의 횡이동 방지) | 침해된 컨테이너가 공유기·NAS 를 못 건드리게 한다 |
+| 이미지 | 빌드 때 서명(**cosign 후보**, 도구 선정은 후보), pull-deploy 가 서명·다이제스트를 검증한 이미지만 교체([09](09-ci-cd.md) §6) | 미검증 이미지 실행 금지 |
+| PC 분리 | 이 PC 를 개인 작업·가정 기기와 다른 VLAN/게스트 네트워크에 두기를 **권고**(사용자 환경 사항, 설계가 강제하지 않음) | |
+
+**GitHub 토큰 탈취 위험(명시)**: pull-deploy 는 `stable` 태그를 5분마다 폴링해 이미지를 교체하므로, **저장소 쓰기 권한이 있는 GitHub 토큰이 탈취되면 `stable` 에 악성 이미지를 푸시해 5분 안에 이 PC 의 컨테이너에서 코드가 실행된다**(마이그레이션 포함 릴리스만 수동 승격이므로 그 외는 자동). 완화는 이미지 서명 검증, 토큰 최소 권한·2단계 인증, 위 격리 층이며 서명 검증 전까지는 위험으로 수용한다.
+
 **docker 그룹 없이 로그를 읽는 대안 (결정은 S8-1 호스트 실측 후)**
 
 | 방법 | 근거 | 장점 | 단점 |
@@ -252,6 +267,26 @@ sequenceDiagram
 | rootless Docker | **로컬 확인**: 이 머신은 `docker-ce-rootless-extras`·`/etc/subuid`·`systemd --user`(linger)·비특권 userns 충족, **`uidmap`(newuidmap/newgidmap) 하나만 없음 — 설치에 sudo 필요** | pf 전용 데몬이라 호스트 root 와 분리 | 포트/네트워크 제약, 이 호스트 미시험 |
 - 로그 금지 목록: 접속 IP, 글 본문, 세션 토큰, OAuth 코드·토큰, `Authorization`/`Cookie` 헤더(ADR-023, 00 §5).
 
+### 5.1 DB 역할 분리 (설계 확정, 2026-11-05)
+
+앱이 하나의 계정(`pf`)으로 전체 DB 에 접속하면 api 한 곳의 침해(SQL 주입·비밀 유출)가 감사 로그 수정·읽기 모델 위조·스키마 변경까지 번진다. 그래서 **프로세스마다 로그인 역할을 나누고, GRANT 가 CQRS 경계(B3)와 읽기 전용 게이트웨이를 DB 에서 한 번 더 강제한다.** 임포트 규칙(B3·B4)은 1차, 이 권한이 2차 벽이다.
+
+| 역할 | 쓰는 곳(compose 서비스) | 접속 문자열 비밀(`secrets/`) | 권한 요약 |
+|---|---|---|---|
+| `pf_migrator` | `migrate`(일회성: pull-deploy 의 `db:migrate`, 개발·CI 의 `bun run db:migrate`, 읽기 모델 재구성 `worker rebuild` 일회성 실행) | `database_url_migrator` | **모든 스키마·표의 소유자**. DDL(CREATE/ALTER/DROP/RENAME)과 GRANT 적용. 상주 서비스에는 마운트하지 않는다 |
+| `pf_api_rw` | `api` | `database_url_api` | 쓰기 스키마(`guestbook`·`identity`·`events`·`realtime` 의 inbox 등) `SELECT/INSERT/UPDATE/DELETE`(표별 필요분), `<m>_read` 는 **`SELECT` 만**(읽기 모델은 worker 만 쓴다), `events.audit_log` 는 **`INSERT`·`SELECT` 만**(UPDATE·DELETE·TRUNCATE 없음) |
+| `pf_worker_rw` | `worker` | `database_url_worker` | 쓰기 스키마와 `<m>_read`·`realtime.change_log` 에 `SELECT/INSERT/UPDATE/DELETE`, `events.audit_log` 는 `INSERT`·`SELECT`·`DELETE`(보관 정리 `RetentionRule` 전용, UPDATE·TRUNCATE 없음). DDL 없음 |
+| `pf_gateway_ro` | `ws-gateway` | `database_url_gateway` | **읽기 전용**: `realtime.change_log`, `guestbook_read.entry_view`, `events_read.flow_counter`, `events.trace_step`(X3), `identity.session`(X4, `ResolveSession` 이 읽는 열), `guestbook.inbox_message`(스냅샷 `caughtUp` 판정, F14 RT-05)에 `SELECT`. 어떤 표에도 쓰기 없음 — 세션 슬라이딩 갱신(`last_seen_at`)은 api 요청 경로에서만 일어나고 게이트웨이의 `ResolveSession` 은 touch 를 하지 않는다. `LISTEN` 은 별도 권한이 필요 없다 |
+| `pf_backup_ro` | `backup`(cron)과 pull-deploy 의 마이그레이션 직전 덤프 | `database_url_backup` | `pg_read_all_data` 멤버(전 표 `SELECT`). 쓰기·DDL 없음. 제외 목록(`infra/backup/tables.json`)은 덤프 인자로 거르고 권한으로는 막지 않는다 |
+| `pf_admin` | `postgres` 컨테이너 초기화(`POSTGRES_USER`)만 | `postgres_admin_password`(postgres 컨테이너만 마운트) | 슈퍼유저. 최초 기동 시 init SQL 이 위 역할을 만들고 이후 앱·스크립트는 쓰지 않는다. 사고 조사용 읽기 접속(13 §S8-1 의 `pf_readonly`)은 `pf_backup_ro` 와 같은 권한의 별도 역할로 두고 어느 서비스에도 마운트하지 않는다 |
+
+- **마이그레이션 실행 주체는 `pf_migrator` 뿐이다.** 앱 런타임 역할은 표를 소유하지 않아 `ALTER`/`DROP`/`RENAME` 이 불가능하다. 읽기 모델 재구성의 이름 교체(`RENAME`, F12 §9)는 소유권이 필요해서 상주 `worker` 가 아니라 **`worker rebuild` 일회성 실행(migrator 접속 문자열)** 이 한다.
+- **GRANT 의 정본은 `packages/db/roles.json`**(표 → 역할별 권한)이다. `db:migrate` 가 마이그레이션 끝에 이 파일로 `GRANT`/`REVOKE` 를 멱등 적용하고(`ALTER DEFAULT PRIVILEGES` 로 새 표는 기본 무권한), CI 가 **모든 Drizzle 표가 이 파일에 분류돼 있는지** 검사한다(`infra/backup/tables.json` 과 같은 방식). `PUBLIC` 의 스키마·표 권한은 `REVOKE` 한다.
+- **앱 코드는 `DATABASE_URL` 하나만 읽는다**(01 §8.1). 값이 서비스마다 다른 역할의 문자열일 뿐이다 — compose 가 서비스별로 다른 비밀 파일을 `DATABASE_URL_FILE` 에 연결한다. `LISTEN/NOTIFY` 전용 연결도 같은 역할을 쓴다. 로컬 개발은 `.env` 에 `DATABASE_URL_API`·`_GATEWAY`·`_WORKER`·`_MIGRATOR` 를 두고 `dev` 스크립트가 프로세스마다 `DATABASE_URL` 로 매핑한다(권한 오류가 라이브에서 처음 나지 않게 개발·CI 도 같은 역할을 쓴다).
+- **시험(새 AC 없음, 08 의 통합 시험 항목)**: 역할별 권한 행렬을 Testcontainers 에서 확인한다 — `pf_gateway_ro` 의 `INSERT` 거부, `pf_api_rw` 의 `*_read` 쓰기 거부와 `audit_log` `UPDATE`/`DELETE` 거부, `pf_worker_rw` 의 `DDL` 거부, `pf_backup_ro` 의 `INSERT` 거부, 앱 런타임 역할의 `ALTER TABLE` 거부.
+- **회전**은 역할마다 따로 한다(§5 DB 비밀번호 행, 13 의 DB 자격증명 유출 절). 한 역할의 비밀 유출은 그 역할 권한 안으로 피해가 한정된다(예: 게이트웨이 비밀이 새도 쓰기는 불가).
+- 재검토: 서비스가 별도 DB 로 갈라질 때(ADR-017 '실서비스라면')는 이 역할 경계가 그대로 DB 분리선이 된다.
+
 ## 6. 의존성·공급망
 
 | 항목 | 방침 |
@@ -262,7 +297,7 @@ sequenceDiagram
 | 갱신 | Dependabot(GitHub 무료)로 npm·GitHub Actions·Docker 베이스를 주 1회 PR. 자동 머지는 하지 않는다 |
 | 버전 고정 | Drizzle 0.45.x 고정, 이미지는 메이저(+마이너) 태그 (tech-stack.md §12). Actions 는 커밋 SHA 고정(09) |
 | 신규 의존성 | 추가 시 유지 보수 상태(최근 릴리스·deprecated 여부)를 PR 설명에 적는다. Arctic 이 deprecated 라 직접 구현으로 간 사례가 기준(ADR-022) |
-| 이미지 | 베이스는 `-alpine`/`slim`, 비루트 사용자로 실행, 읽기 전용 루트 파일시스템과 불필요한 capability 제거는 **구현 시 시험**(Bun 호환 **미확인**) |
+| 이미지 | 베이스는 `-alpine`/`slim`, 비루트 사용자로 실행, 읽기 전용 루트 파일시스템과 불필요한 capability 제거는 **구현 시 시험**(Bun 호환 **미확인** — '집 PC 침해 피해 범위 한정' 표 참조) |
 
 ## 7. nginx 와 앱의 책임 분담
 
@@ -291,7 +326,7 @@ sequenceDiagram
 | WS | 연결·메시지 | 메시지 폭주(`4429`), 탭 폭증(`4409`), 전체 상한 | 해당 없음 |
 
 - 세션이 새로 발급되는 경로(`/api/me`)는 **세션 키로 막을 수 없어** 주소 기준 nginx 제한이 유일한 방어다. 세션을 계속 새로 받아 세션 제한을 우회하려는 시도도 같은 주소 제한에 걸린다.
-- 주소를 모르는 상태(Funnel 에서 실제 IP 미확인 G14 ④, 또는 정규화 실패)에서는 nginx 제한이 모든 요청을 한 주소(Funnel 의 로컬 연결)로 묶어 **사실상 전역 한도**가 된다 → 정규화 검증(G7 ②)과 G14 ④ 가 선행 조건이다. **그 경우 `/api/me` 의 세션 발급 남용 방어가 약해지는 것이 위험이며**, 세션/계정 기준 제한을 우선하고 신규 세션 발급에 전역 상한을 두는 방안을 구현 시 검토한다(제안, 미검증).
+- 주소를 모르는 상태(Funnel 에서 실제 IP 미확인 G14 ④, 또는 정규화 실패)에서는 nginx 제한이 모든 요청을 한 주소(Funnel 의 로컬 연결)로 묶어 **사실상 전역 한도**가 된다 → 정규화 검증(G7 ②)과 G14 ④ 가 선행 조건이다. **그 경우 `/api/me` 의 세션 발급 남용 방어가 약해지는 것이 위험이며**, 세션/계정 기준 제한을 우선하고 신규 세션 발급에 전역 토큰 버킷을 둔다. 주소 확보 시/미확보 시 nginx 설정은 둘 다 설계했다(F17 §9.2: 미확보 시 주소별 `limit_conn` 제거·전역 상한·WS 제한은 gateway 세션 기준·정적 자원 `limit_req` 제외, 제안·미검증).
 - **Funnel 에는 Cloudflare 의 기본 DDoS 방어가 없고** 대역폭 한도가 비공개이며 베타다. 한도 초과·정책 변경은 위험으로 수용하고 G14 ③ 에서 체감을 측정한다(ADR-003).
 - 제한 초과는 `pf_rate_limit_decisions_total{app,rule,decision}` 로 관측하고(레이블에 주소·세션 금지), 급증 시 쓰기 잠금 스위치(ADR-028 사다리 1단계)를 쓴다.
 - 도구 관련: 비밀 스캔(CI `secret-scan`, gitleaks 후보)은 **기본 규칙만으로는 Discord 웹훅 URL 을 못 잡고**(실측) 낮은 엔트로피·알려진 예제 키는 무시하므로 저장소 `.gitleaks.toml` 에 웹훅 규칙을 추가해야 한다(ADR-028, 13 §10).
@@ -302,7 +337,7 @@ sequenceDiagram
 |---|---|---|---|
 | **S**poofing 신원 도용 | 세션 쿠키 탈취 | HttpOnly·Secure·`__Host-`, 토큰 해시 저장, 7일 만료, CSP 로 XSS 억제 | §3, ADR-008 |
 | | OAuth 로그인 CSRF·코드 가로채기 | `state`(+ PKCE S256 은 GitHub 지원 확인 후, 미지원이면 `state` 만), 임시 쿠키 10분 | 06 |
-| | 접속 주소 위조(헤더 주입) | 프록시가 클라이언트 헤더 폐기·정규화 | G1·G7 |
+| | 접속 주소 위조(헤더 주입) | 프록시가 클라이언트 헤더 폐기·정규화 | G14·G7 |
 | **T**ampering 변조 | 남의 글 수정·삭제 | 로그인 + `OwnerPolicy` + 버전 조건 갱신 | AC-004·005, ADR-021 |
 | | 이벤트 위조·중복 처리 | 내부 경로만, inbox 중복 제거, 토큰 fencing | ADR-020·021 |
 | | 교차 사이트 요청 | §3.3 CSRF 방어, WS `Origin` 검사 | |

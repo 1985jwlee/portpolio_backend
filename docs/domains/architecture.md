@@ -73,7 +73,7 @@ flowchart TB
 | `api` | 인증, **명령 usecase**(쓰기)와 **조회 usecase**(읽기) 실행 | 무상태 | 명령은 outbox 기록까지 |
 | `ws-gateway` | 연결 유지, 구독, 브로드캐스트, 재접속 복구 | **연결을 쥔다** | 재시작 시 클라이언트 재접속(ADR-014) |
 | `worker` | 디스패처(동시 하나만 활성), 처리 워커(inbox), 회수 작업, 정리 | 무상태(락·임대로 조정) | |
-| `postgres` | 정본(쓰기 모델) + 읽기 모델 | 상태 | 볼륨 필수 |
+| `postgres` | 정본(쓰기 모델) + 읽기 모델 | 상태 | 볼륨 필수. 서비스마다 다른 로그인 역할로 접속(design/10 §5.1) |
 | `prometheus` / `grafana` | 지표 수집 / 공개 대시보드 | 상태(보존 기간 제한) | ADR-007 |
 
 ## 4. 모듈 내부 구조 (domain · service · usecase)
@@ -137,9 +137,9 @@ REST 와 WebSocket 계약의 **정본은 `packages/protocol`** 이고 문서로�
 | 경로 | 인증 | 읽는 곳 |
 |---|---|---|
 | `GET /api/entries` | 익명 허용 | `guestbook_read.entry_view` (커서) |
-| `GET /api/me` | 익명 허용(**익명 세션 발급**) | 세션 확인(명령 쪽 보조 조회, 예외) |
+| `GET /api/me` | 익명 허용(**익명 세션 발급**) | 세션 확인(명령 쪽 보조 조회, CQRS 예외 **X4**, P0 §2.4) |
 | `GET /api/admin/reports` | 관리자 | `guestbook_read.report_queue` |
-| `GET /api/flow/summary` · `/api/flow/trace/{id}` | 익명 허용 / 행위자 본인 | `events_read.flow_counter` / `events.trace_step`(공개 포트 `GetTrace`) |
+| `GET /api/flow/summary` · `/api/flow/trace/{id}` | 익명 허용 / 행위자 본인 | `events_read.flow_counter` / `events.trace_step`(공개 포트 `GetTrace`, CQRS 예외 **X3**, P0 §2.4) |
 | `GET /healthz`, `GET /readyz`, `GET /metrics` | **내부 전용** | probe·지표. 프록시에서 외부 차단 |
 
 ### WebSocket
@@ -175,8 +175,9 @@ sequenceDiagram
     P->>D: 토큰 조건으로 published
     W->>I: inbox 선점 (received 에서 processing)
     W->>R: 같은 트랜잭션: 읽기 모델 갱신 (순번 검사) + inbox 처리 완료
+    W->>R: 변경 이력 기록 (채널 순번 부여, broadcaster) + 같은 트랜잭션에서 NOTIFY
     W-->>G: 변경 알림
-    G->>R: 변경 이력 기록 (채널 순번 부여)
+    G->>R: 변경 이력을 마지막 seq 이후로 읽기
     G-->>B: 글 생성 메시지 (public) · 내 흐름 단계 (private)
 ```
 
@@ -209,7 +210,7 @@ sequenceDiagram
 | 프록시 → 앱 | 프록시가 넣은 정규화 헤더만 신뢰. 앱은 프록시 외 경로로 직접 노출하지 않는다 |
 | 브라우저 → api/ws | 세션 쿠키로 신원 확인. 영구 쓰기는 로그인 필요. 관리 경로는 허용목록 |
 | 앱 → 앱 | 같은 이미지·같은 네트워크. 내부 경로(`/metrics`, `/readyz`)는 외부 비공개 |
-| 앱 → DB | 모듈은 자기 스키마(`<m>`, `<m>_read`)만. 조회 usecase 는 `_read` 만(구조로 강제). (구현 시) 역할 분리 검토 |
+| 앱 → DB | 모듈은 자기 스키마(`<m>`, `<m>_read`)만. 조회 usecase 는 `_read` 만(구조로 강제). **DB 역할 분리 확정**: `pf_migrator`(DDL·소유자, 일회성) · `pf_api_rw` · `pf_worker_rw` · `pf_gateway_ro`(읽기 전용) · `pf_backup_ro`, 감사 로그는 추가 전용(`INSERT` 만, 보관 정리만 worker `DELETE`) — design/10 §5.1 |
 | 방문자 ↔ 방문자 | 다른 방문자의 글 내용·식별자는 요약 경로로 새지 않는다(서버에서 가공, AC-009) |
 | 공개 Grafana | 보기 전용·프로비저닝된 대시보드만. 지표 레이블에 식별자 금지(ADR-007) |
 | 외부 메시지(Phase 5 웹훅) | 서명 검증을 수신 usecase 첫 단계에서. 틀리면 inbox 에 저장하지 않는다(ADR-020) |
@@ -274,7 +275,7 @@ Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evol
 | Phase 1 | `game` 모듈(`chat`·`/ws/room` 은 6a 에서 먼저 도입, 여기서는 대국 채팅 룸 종류 추가) | 대국 명령은 **REST**(WS 는 push 전용), `game_event` 로그 + NOTIFY fast lane, `realtime` 이 룸 포트·presence 소유 | [P1](../design/phases/01-baduk.md), [P4](../design/phases/04-chat.md), ADR-032·034·035·045 |
 | Phase 2 | `analysis`(KataGo 별도 프로세스; `ledger` 는 Phase 3 에서 이미 도입) | 분석 큐는 **Postgres inbox 선점**(Redis 없음), 보상 전이는 B12 `InTx` | [P1](../design/phases/01-baduk.md) §9~10, ADR-036·037 |
 | Phase 3 | `catalog`, `deal`, `order`, `ledger`(모의 USDC·POINT 지급·교환), 최소 `pricefeed`(고정 환율 소스), `payment`(원장 결제·혼합 결제), 최소 `escrow`(hold / release / refund)와 환불, Redis(재고) | 두 게이트 재고(Redis + DB CHECK), 구매 확정은 B12 `InTx` 쌍, Streams 판정 | [P2](../design/phases/02-commerce.md), ADR-031·038·040·048 |
-| Phase 4 | 워크로드 분리 | `ws-gateway` 사이트/룸 분화, HPA·PDB, M1 G8 롤링 패턴 | [P0](../design/phases/00-platform-evolution.md) §10, ADR-033 |
+| Phase 4 | 워크로드 분리 — **산출물은 k3d 실측 보고서**(HPA·PDB·롤링 소켓 재접속). 라이브는 Compose 를 유지하고 레플리카는 포화가 측정으로 확인될 때만 추가 | HPA·PDB 는 k3d 에서만 검증, M1 G8 롤링 패턴. `ws-gateway` 사이트/룸 분화는 `/ws/room` 이 생기는 6a 이후 측정으로 판단(P0 D17) | [P0](../design/phases/00-platform-evolution.md) §10, ADR-033 |
 | Phase 5 | `settlement` + `payment`·`escrow`·`pricefeed` 확장(카드 결제, 분쟁·동결·자동 확정, 실제 시세) | 웹훅 inbox, 모의 결제 어댑터, KEK/DEK 상향 | [P2](../design/phases/02-commerce.md), ADR-039~041 |
 | Phase 6 (6a~6d) | `chat`·`support`(6a, `/ws/room` 도입), `inventory`·`fulfillment`(6c), 지갑 연결(6d) | 이중 재고 원장, 출고 사가, CS 티켓, 허용목록 역할(`agent`·`operator`) | [P3](../design/phases/03-fulfillment.md), [P4](../design/phases/04-chat.md), ADR-032·042~047 |
 | Phase 6e | 마작(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) | 마지막 구현 | [P1](../design/phases/01-baduk.md), ADR-034·035 |

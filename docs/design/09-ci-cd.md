@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `ci.yml` | `pull_request`, `push`(main 제외 브랜치는 PR 로 검사) | 검사 전부(§2). **이미지 푸시 없음** | `contents: read` |
 | `build.yml` | `push` to `main`, 수동 | 이미지 빌드(amd64·arm64 네이티브) → GHCR 푸시 → 매니페스트 병합 | `contents: read`, `packages: write` |
-| `release.yml` | `push` 태그 `v*.*.*` | 이미 빌드된 이미지에 버전 태그를 붙이고 `stable` 이동, GitHub Release 생성 | `contents: write`, `packages: write` |
+| `release.yml` | `push` 태그 `v*.*.*` | 이미 빌드된 이미지에 버전 태그를 붙이고 `stable` 이동, GitHub Release 생성. **직전 릴리스 태그 대비 `drizzle/` 마이그레이션이 늘었으면 `stable` 은 옮기지 않고 수동 승격(`workflow_dispatch`)을 기다린다**(§6) | `contents: write`, `packages: write` |
 | `schedule.yml` | 주 1회 cron | 의존성 점검(`bun audit`), 베이스 이미지 갱신 확인 | `contents: read`, `issues: write` |
 
 ```mermaid
@@ -70,6 +70,8 @@ flowchart TD
 | `unit` | `bun test` (DB 없음, L2) | |
 | `integration` | PostgreSQL 18 서비스 컨테이너로 `test:integration` (outbox/inbox 동시성, 08) | |
 | `migration reproduce` | 빈 DB 에서 마이그레이션 전부 적용 + 스키마 대조 (G10) | |
+| `migration n-1` | **새 스키마에서 직전 릴리스 이미지 통합 시험**: 직전 릴리스 태그의 `pf-server` 이미지로 핵심 usecase 통합 시험을 돌리되 DB 는 이번 변경의 마이그레이션까지 적용한 상태로 둔다(§4 "한 버전 동안 호환"을 기계로 확인, F16 §순방향 호환). 마이그레이션이 없는 PR 은 건너뛴다 | 머지 불가 |
+| `migration lint` | 위험 DDL 정적 검사 — 큰 테이블 `NOT NULL` 추가·기본값 없는 컬럼 추가·컬럼 삭제/이름 변경·`CONCURRENTLY` 없는 인덱스 등을 거부. 도구는 `squawk` 등을 **후보**로 두며 도입 시 Postgres 18 구문 지원을 확인한다(**도구명 미검증**). 의도된 예외는 PR 에 이유를 적는다 | 머지 불가 |
 | (로컬) pre-commit 훅 | 커밋 전에 같은 스캐너를 돌린다: `.githooks/pre-commit` + `git config core.hooksPath .githooks`(저장소가 안내만 하고 강제하지 않는다 → CI `secret-scan` 이 최종 방어) | |
 | `audit` | `bun audit --audit-level=high --prod` — Bun 1.4.4 에서 존재·동작 실측 확인. 높음/치명 취약점이면 실패, 낮음은 경고 | 예외는 이유를 PR 에 기록 |
 | `secret-scan` | 저장소 이력·변경분에서 비밀 패턴 검출(도구 `gitleaks` 8.30.1 로컬 확인: 이력 9커밋 누출 0. CI 는 `gitleaks git` 모드, 로컬 pre-commit 은 `gitleaks git --staged`. **기본 규칙에 Discord 웹훅이 없어 `.gitleaks.toml` 사용자 규칙이 필요**하고 추가하면 합성 비밀 3건을 모두 검출한다. 작업 트리 `dir` 모드는 `.claude/skills/*/references/secrets.md` 예제를 오탐하므로 쓰지 않는다. S1-15). 검출 시 머지 불가. 시험용 패턴 파일로 검출 동작을 검증한다 | 비밀이면 회전이 먼저([13](13-incident-response.md) §6.10) |
@@ -80,7 +82,7 @@ flowchart TD
 | `docker build smoke` | 이미지가 빌드되고 `--help`/설정 검증이 동작 | |
 
 - E2E·재접속·부하 시험은 PR 마다 돌리지 않는다. **main 머지 후 야간/수동** 워크플로(`e2e` 잡)로 분리해 PR 시간을 지킨다(08 에서 범위 확정).
-- 필수 상태 검사(branch protection)는 `lint`·`typecheck`·`arch`·`gen:schema`·`unit`·`integration`·`migration`·`web build`·`config check` 로 한다.
+- 필수 상태 검사(branch protection)는 `lint`·`typecheck`·`arch`·`gen:schema`·`unit`·`integration`·`migration`(reproduce·n-1·lint)·`web build`·`config check` 로 한다.
 
 ## 3. 이미지 빌드와 매니페스트 병합 (`build.yml`)
 
@@ -138,7 +140,7 @@ sequenceDiagram
 | `main` | main 빌드마다 | 최신 빌드 | 이동 |
 | `vX.Y.Z` | 릴리스 태그 | 릴리스 불변 참조 | 불변 |
 | `X.Y` | 릴리스 태그 | 마이너 계열 최신 | 이동 |
-| `stable` | 릴리스 후 **수동/자동 승격** | **라이브 호스트가 따라가는 태그** | 이동 |
+| `stable` | 릴리스 후 승격 — **마이그레이션이 없는 릴리스는 자동, 마이그레이션을 포함한 릴리스는 수동**(GitHub 토큰이 탈취돼도 DB 를 바꾸는 코드가 5분 안에 라이브에 닿지 않게 하고, 승격 전에 백업 최신성을 사람이 본다) | **라이브 호스트가 따라가는 태그** | 이동 |
 
 - 라이브 compose 는 `stable` 이 아니라 **다이제스트로 고정한 값을 배포 스크립트가 기록**한다(어느 다이제스트가 떠 있는지 항상 알 수 있고 롤백 대상이 명확하다).
 - `latest` 태그는 쓰지 않는다.
@@ -163,6 +165,7 @@ sequenceDiagram
         alt 현재와 다름
             H->>H: 현재 다이제스트를 롤백 기록으로 저장
             H->>REG: 새 이미지 pull
+            H->>C: 마이그레이션 직전 pg_dump (새 마이그레이션이 있을 때만, age 스트리밍)
             H->>C: 마이그레이션 실행 (일회성 컨테이너)
             H->>C: worker → api → ws-gateway → web 순 교체
             C-->>H: 헬스 통과? (worker 는 /healthz, 나머지는 /readyz)
@@ -180,10 +183,11 @@ sequenceDiagram
 |---|---|---|
 | 확인 주기 | 5분 간격 폴링 — **systemd 타이머 `pf-pull-deploy.timer`**(`infra/systemd/`, F17 §16.1.1)로 확정. 매 실행마다 `status/pull_deploy/last_run.json` 을 쓴다(변경 없음도 `ok=true`) | 확정(2026-11-04). 웹훅은 집 PC 가 수신해야 하므로 제외 |
 | 교체 순서 | worker(소비자) → api → ws-gateway → web. ws-gateway 교체 시 단절이 생기며 클라이언트가 재접속·복구 (ADR-014: Compose 는 "짧은 단절 후 복구") | 확정(ADR-014) |
-| 마이그레이션 | 교체 전 일회성 컨테이너로 `db:migrate`. 실패하면 교체하지 않는다 | 확정 |
+| 마이그레이션 | 교체 전 일회성 컨테이너로 `db:migrate`(**`pf_migrator` 역할로만** 실행, 상주 서비스의 역할은 DDL 불가, 10 §5.1). 실패하면 교체하지 않는다. **새 마이그레이션이 있으면 직전에 `pg_dump -Fc \| age` 로 전체 DB(감사 로그 포함)를 시스템 디스크가 아닌 백업 디스크의 `pre-migrate/` 에 뜨고(최근 3개 유지, 평문 비기록), 덤프가 실패하면 마이그레이션하지 않는다**(앞으로 호환이라 롤백이 스키마를 되돌리지 못하므로 데이터 손상 시 복원 지점이 된다) | 제안(2026-11-05 아키텍처 검토 반영, 구현 시 확정) |
 | 헬스 게이트 | 서비스별 헬스 통과 후 다음 서비스 — **worker 는 `/healthz`**(readyz 없음, F17 §5.1), api·ws-gateway·web 은 `/readyz` | 확정 |
 | 상태 기록 | 결과를 `status/pull_deploy/last_run.json` `{job, started_at, finished_at, ok, detail, version, last_success_at}` 로 남기고 worker 가 `pf_ops_*` 지표로 노출, 실패(`ok=false`)는 `DeployFailed` 경보(F17 §16.2·§17) | 확정 |
 | 롤백 | 직전 다이제스트로 되돌림. 마이그레이션은 되돌리지 않는다(앞으로 호환 규칙으로 흡수, §4) | 확정 |
+| 이미지 검증 | 교체 전에 다이제스트가 릴리스 서명(cosign 후보)과 일치하는지 검증하고 실패하면 교체하지 않는다. 격리 계층·토큰 탈취 시 5분 내 코드 실행 위험은 10 §5 | 제안(도구 후보, 미검증) |
 | 스크립트 위치 | `infra/scripts/pull-deploy.sh` (구현 시 작성) | 미작성 |
 
 ## 7. 시험 환경과 관문
@@ -192,7 +196,7 @@ sequenceDiagram
 |---|---|
 | G3 지속 확인 | `web build` 가 Bun 으로 성공하는지 매 PR |
 | G10 | `migration reproduce` 잡 |
-| G2·G1·G8 | CI 가 아니라 **로컬/수동 스파이크**(`spike/g…` 브랜치). 결과는 ADR-022 에 기록 |
+| G2·G14·G8 | CI 가 아니라 **로컬/수동 스파이크**(`spike/g…` 브랜치). 결과는 ADR-022 에 기록 |
 | 야간 `e2e` | main 의 최신 이미지로 compose 를 띄워 재접속·동시성 시험(08) |
 
 ## 8. 미결
@@ -201,6 +205,7 @@ sequenceDiagram
 |---|---|
 | GHCR 소유자 이름, 공개 저장소 arm 러너 라벨 | 저장소 공개 시 |
 | `bun audit` 실패 기준(`--audit-level=high --prod` 제안) 확정 | 구현 단계 0 |
-| 배포 확인 주기(5분 제안)와 `stable` 승격 자동/수동 | 첫 라이브 배포 전 |
+| 배포 확인 주기(5분 제안). `stable` 승격은 마이그레이션 포함 릴리스만 수동으로 제안(§5) — 그 외 자동 여부 | 첫 라이브 배포 전 |
+| `migration lint` 도구(`squawk` 등 후보)의 PG18 지원, `migration n-1` 잡의 직전 이미지 취득 방식 | 구현 단계 0 |
 | `pf-proxy` 이미지 필요 여부 | 관문 G7 |
 | 야간 `e2e` 범위 | [08](08-test-strategy.md) 확정 후 |

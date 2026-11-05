@@ -88,7 +88,7 @@ Go(coder/websocket)·C#(.NET 10 Kestrel 순수 WebSocket)·Bun(Elysia)로 같은
 
 ### 관문 로컬 실측 결과 (2026-11-04)
 
-WSL2, Bun 1.4.4, Docker(postgres:18.6, nginx 1.30/1.31)에서 실행했다. 실서버(집 PC·Tunnel)에서의 재시험은 S0 에서 한다.
+개발 PC(WSL2), Bun 1.4.4, Docker(postgres:18.6, nginx 1.30/1.31)에서 실행했다. 실서버는 네이티브 Ubuntu 24.04(6코어 1.9GHz, AVX2 있음, RAM 62GB — ADR-033 '호스트 프로필')이며, 그 호스트(Funnel 경유)에서의 재시험은 S0 에서 한다(G2·G3·G14 와 k6).
 
 | 관문 | 결과 | 설계 영향 |
 |---|---|---|

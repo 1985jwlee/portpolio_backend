@@ -19,7 +19,7 @@
 ```mermaid
 flowchart TB
     subgraph L4["L4 실환경 (수동·릴리스 후)"]
-        P4["Tunnel 경유 성능 · 두 호스트 AC-014 · 실제 GitHub 로그인"]
+        P4["Funnel 경유 성능 · 집 PC 단일 호스트 AC-014 · 실제 GitHub 로그인"]
     end
     subgraph L3["L3 대역에서 확인 (DB·프로세스·브라우저)"]
         E2E["E2E (AC-001·008·010)"]
@@ -47,7 +47,7 @@ flowchart TB
 | 재접속 | ws-gateway + 실제 Postgres + 가짜 클라이언트 | **L3** | main 병합 후·야간(PR 게이트 아님, 09 §2) | `apps/ws-gateway/test/` |
 | E2E | 브라우저(작성→시각화, 실시간 복구, 정적 폴백) | **L3** | main 병합 후 | `test/e2e/` (도구 미결, §11) |
 | 부하·소크 | k6 (API p95, WS 다수 연결, 느린 소비자) | **L3** | 수동·야간 | `test/load/` |
-| 실환경 | Tunnel 경유 성능, 집 PC 단일 호스트(Oracle 미추진), 실제 GitHub OAuth | **L4** | 릴리스 전 수동 | 체크리스트 |
+| 실환경 | Funnel 경유 성능, 집 PC 단일 호스트(Oracle 미추진), 실제 GitHub OAuth | **L4** | 릴리스 전 수동 | 체크리스트 |
 
 ### 2.1 무엇이 L2 를 넘는가
 
@@ -255,13 +255,13 @@ classDiagram
 | AC-005 | 로그인 글 수정·삭제, 타 사용자 403 | API 통합(세션 2종) | L3 | `apps/api/test/integration/edit-delete.test.ts` |
 | AC-006 | 관리자 숨김, 타 사용자 403 | API 통합 + 읽기 모델에서 제외 확인 | L3 | `apps/api/test/integration/hide.test.ts` |
 | AC-007 | 속도 제한 429 | 앱 세션 제한 단위(L2) + API 통합(`Retry-After`). nginx `limit_req` 는 compose 시험 | L2·L3 | `apps/api/test/integration/rate-limit.test.ts`, `test/e2e/nginx-limit.sh` |
-| AC-008 | 실시간 반영·복구 | 재접속 시험(§6) + E2E 2 탭 | L3 | `apps/ws-gateway/test/resume.test.ts`, `test/e2e/realtime.spec.ts` |
+| AC-008 | 실시간 반영·복구 | 재접속 시험(§6, **프로젝터 정지 + 스냅샷 카오스 경로 포함**) + E2E 2 탭 | L3 | `apps/ws-gateway/test/resume.test.ts`, `test/e2e/realtime.spec.ts` |
 | AC-009 | 프라이버시 | 구조 검사(§8) | L2·L3 | `packages/protocol/test/public-privacy.test.ts`, `apps/ws-gateway/test/privacy.test.ts` |
 | AC-010 | 정적 폴백 | E2E: api·web 컨테이너 중단 후 소개·아키텍처 응답, 데모 '점검 중' | L3 (2단계 미러는 G11 후 L4) | `test/e2e/static-fallback.spec.ts` |
 | AC-011 | 보관 | 정리 작업 통합 시험(가짜 시계로 7일 경과) | L3 | `modules/*/test/integration/retention.test.ts` |
 | AC-012 | 지표·임베드 | `/metrics` 지표 존재·레이블 규칙(L3) + 임베드 표시(G6 후 E2E) | L3 | `apps/api/test/metrics.test.ts` |
 | AC-013 | 성능 | k6 + Lighthouse (§9) | L3 → L4 | `test/load/` |
-| AC-014 | 이중 호스팅 | 같은 E2E 를 두 호스트에서 실행 | L4 | 릴리스 체크리스트 |
+| AC-014 | 집 PC 단일 호스트 배포 | 집 PC(Compose, 백엔드+web)에 올려 Funnel 로 노출하고 AC-001·008·010 실행(Oracle 은 미추진) | L4 | 릴리스 체크리스트 |
 | AC-015 | 동시 선점·fencing | 동시성 시험 §5.1·§5.2 | L3 | `test/chaos/claim-race.test.ts`, `claim-fencing.test.ts` |
 | AC-016 | 동시 수정 409 | 동시성 시험 §5.3 | L3 | `test/chaos/version-conflict.test.ts` |
 | AC-017 | 재구성·순서 뒤섞임 | 프로젝터 규칙(L2) + 뒤섞어 중복 전달 후 정본 대조(L3) + §7.4 | L2·L3 | `modules/guestbook/test/unit/projector.test.ts`, `test/chaos/rebuild.test.ts` |
@@ -386,6 +386,7 @@ sequenceDiagram
 | seq 건너뜀 → resume | `FakeClient` 가 seq 5 이후 6을 건너뛴 7을 받음 → `SeqTracker` 가 gap 감지 → 재연결, `hello{resume:5}` | `mode: replay`, 6·7 재생, `replay.end{count:2}`, 중복 없음 |
 | 이력 부족 → snapshot | `change_log` 최소 seq 를 resume 보다 크게 만든 뒤 재접속 | `mode: snapshot`, `snapshot.head` 이후만 이어짐 |
 | 처음 접속 | `hello` 에 `resume` 없음 | snapshot |
+| **프로젝터 정지 + 스냅샷**(카오스, AC-008) | `guestbook-projector` 소비를 멈춘 채 글 3건 작성(broadcaster 만 `head` 상승) → 처음 접속. ① 한도(2초) 안에 프로젝터 재개 ② 재개하지 않음 | ① 3건이 모두 든 `snapshot`, `head+1` 부터 이어지고 누락 0 ② `4500`(`unavailable`) 거절, 뒤처진 스냅샷 미전송, `pf_ws_snapshot_catchup_timeout_total` 증가 (F14 RT-05) |
 | NOTIFY 유실 | `NOTIFY` 를 막고 변경 삽입 | 1초 이내 폴링으로 전달 |
 | (종료 순서) | 서버가 `stop()` 을 **await 없이** 호출 → 각 소켓에 `bye`+`close(1001)` → 타임아웃 후 대기. `await server.stop()` 을 먼저 하면 열린 WS 때문에 교착(Bun 1.4.4 실측) | `GatewayHarness` 에서 교착 없이 종료됨을 시험 |
 | `bye` → 재접속 | 게이트웨이에 SIGTERM 상당 호출 | `bye{reconnectAfterMs}` 후 `1001`, 클라이언트는 지터 지연 뒤 새 인스턴스에 `resume`, 놓침 0 |
@@ -507,7 +508,7 @@ sequenceDiagram
 
 | 항목 | 값 |
 |---|---|
-| 합격선 | 동시 50 에서 **API p95 ≤ 300ms**, 첫 화면 **LCP ≤ 2.5s** (명세 A-012: Funnel 경유 판정) |
+| 합격선 | 동시 50 에서 **API p95 ≤ 300ms**, 첫 화면 **LCP ≤ 2.5s** (명세 A-012: Funnel 경유 판정). **지표를 둘로 나눠 기록한다(제안)**: ① **원점 p95** — nginx `$upstream_response_time`(및 k6 를 호스트 측에서 돌린 값). Funnel·클라이언트 회선을 뺀 **통제 가능 구간**이라 300ms 판정은 이 값으로 한다. ② **종단 값** — 한국 클라이언트에서 Funnel 경유로 잰 p50/p95. 통제 불가 구간(회선·Funnel 중계)을 포함하므로 합격선은 수치형 제안값(`tech-stack` G14 ⑦)으로 따로 두고 병기한다 |
 | 도구 | API·WS: **k6**(시나리오 스크립트 저장소 보관) / LCP: **Lighthouse CI** 또는 브라우저 Performance API 를 쓰는 E2E |
 | 시나리오 | 방문자 50 가상 사용자: 목록 조회 70% · 반응 20% · 글 작성 5% · WS 접속 유지 100%(전원). 램프업 30s, 유지 5분, 램프다운 30s |
 | 반복 | 최소 **3회**, 회마다 새로 기동한 스택. 판정은 **3회 모두** 합격선 이내(중앙값이 아니라 최악 값) |
@@ -519,7 +520,7 @@ sequenceDiagram
 한계(반드시 결과에 병기):
 
 - 개발 머신은 **WSL2 loopback** 이다: 네트워크 지연·TLS·nginx 경유·Funnel 이 없고, 부하 생성기와 서버가 같은 CPU 를 쓴다(ADR-022 벤치에서도 부하 생성기 CPU 가 서버와 비슷했다). 이 환경의 수치는 **상대 비교·회귀 감지용**이며 AC-013 합격 판정은 **터널 경유 L4 측정**으로 한다.
-- 소크(수 시간)는 별도: 메모리 증가 추세와 연결 수 유지를 본다(G2). 단시간 측정으로 대체하지 않는다.
+- 소크(수 시간)는 별도: 메모리 증가 추세와 연결 수 유지를 본다(G2). 단시간 측정으로 대체하지 않는다. **DB 쪽 관찰 항목**(F17 §16.2.1): 큐·이력 테이블 크기와 `pf_db_dead_tuples` 가 시간이 지나도 증가하지 않고, `pf_db_oldest_xact_age_seconds` 가 `idle_in_transaction_session_timeout`(60초 제안) 안에 머문다. 새 DB 경보(`HostDiskHigh`·`DbOldestXactAge`·`DbConnectionsHigh`·`DbDeadTuplesHigh`)는 AC-025 의 `promtool test rules` 에 발화·불발 케이스를 추가한다.
 - 팬아웃 지연은 반복 간 편차가 커서 순위가 아니라 **범위**로 기록한다.
 
 ```mermaid
@@ -582,7 +583,7 @@ test/
 | PR | L1 전부 + `test:unit` + 계약 + `test:integration` + 빠른 `test:chaos` (재접속은 PR 에서 돌리지 않는다 — 09 §2 정본) |
 | main 병합 후 | 위 전부 + 전체 `test:chaos` + **재접속 시험(`apps/ws-gateway/test/`)** + `test:e2e`(compose 위) |
 | 야간 | `[slow]` + 반복 500 회 동시성 + k6 소크 |
-| 릴리스 전(수동) | Funnel 경유 k6·Lighthouse, 두 호스트 E2E(AC-014), 실제 GitHub 로그인 |
+| 릴리스 전(수동) | Funnel 경유 k6·Lighthouse, 집 PC 단일 호스트 E2E(AC-014), 실제 GitHub 로그인 |
 
 ## 12. 회귀 가드
 

@@ -53,6 +53,8 @@
 
 **nginx(접속 주소 단위, 메모리 전용 — 주소를 저장하지 않는다)**
 
+> 아래 표는 **IP 확보 시**(G14 ④) 기준이다. 미확보 시에는 주소별 키가 상수 전역 키로 바뀌고 `/ws/` 주소별 `limit_conn` 은 제거되며 WS 제한은 gateway 세션 기준이 된다(정적 자원은 `limit_req` 제외, `/api/me` 는 전역 토큰 버킷 — F17 §9.2).
+
 | 대상 | 값 | 비고 |
 |---|---|---|
 | `/api/` 쓰기 메서드 | `pf_write`: 5r/s, burst 10 | 거절 시 429, `Retry-After: 1` |
@@ -105,7 +107,7 @@
 | 범위 | **(행위자 키, `Idempotency-Key`)** — 행위자 = 로그인 사용자 또는 세션 |
 | 같은 키 + 같은 요청 | 저장된 **원래 응답(상태·본문)을 재생**하고 `Idempotency-Replayed: true` 부착 |
 | 같은 키 + 다른 요청 | `422` `idempotency_key_reuse` (본문 해시 불일치) |
-| 처리 중 같은 키 | `409` `request_in_progress` + `Retry-After: 1` |
+| 처리 중 같은 키 | 첫 요청의 커밋/롤백까지 유일 인덱스에서 **최대 2초(`lock_timeout`) 대기**한다. 커밋되면 저장 응답을 재생하고, 대기가 2초를 넘으면 `409` `request_in_progress` + `Retry-After: 1` (F16 §멱등) |
 | 보관 | 24시간 (이후 같은 키는 새 요청으로 취급) |
 | 저장 | 모듈 쓰기 스키마의 `request_key` 표(스키마 반영 필요, §9), **명령과 같은 트랜잭션**에서 기록 |
 
@@ -300,7 +302,9 @@ flowchart TD
     C -- "완료" --> D{"본문 해시 동일?"}
     D -- "예" --> RP["저장 응답 재생 + Replayed 헤더"]
     D -- "아니오" --> E2["422 idempotency_key_reuse"]
-    C -- "처리 중" --> E3["409 request_in_progress"]
+    C -- "처리 중" --> W["lock_timeout 2초 대기"]
+    W -- "커밋됨" --> RP
+    W -- "시간 초과" --> E3["409 request_in_progress"]
 ```
 
 ## 8. 클래스 구조

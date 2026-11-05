@@ -932,9 +932,9 @@ flowchart TD
 |---|---|
 | 목적 | ws-gateway 의 `SnapshotBuilder`(RT-05)가 `guestbook_read` 를 **직접 읽지 않고** 모듈 공개 usecase 로 첫 페이지를 얻는다(모듈 경계, database-schema §9) |
 | 소유 | guestbook (`query` usecase, `index` 로 공개). 소비: realtime |
-| 입력 → 출력 | `{ limit }`(기본 20, 최대 50) → `PublicEntryView[]` — **개인 필드(`myReactions`·`isMine`·`canEdit`)가 없는 공개 형태**(04 §3.2) |
-| 접근 테이블 | R: `entry_view` (`status='visible'`, `entry_id DESC`, 부분 인덱스) |
-| 일관성 | 호출자(RT-05)가 먼저 `change_log` 의 `head` 를 읽고 그 뒤에 이 usecase 를 호출한다. 결과에 `head` 이후 변경이 일부 섞일 수 있으나, 이후 재생되는 변경은 모두 **덮어쓰기·id 교체 의미**라 중복 적용해도 같다(04 §5) |
+| 입력 → 출력 | `{ limit, headEventIds? }`(limit 기본 20, 최대 50; `headEventIds` 는 `change_log` 최근 `event_id` ≤ 50개) → `{ entries: PublicEntryView[], caughtUp: boolean }` — entries 는 **개인 필드(`myReactions`·`isMine`·`canEdit`)가 없는 공개 형태**(04 §3.2). `caughtUp` 은 프로젝터가 `headEventIds` 를 모두 처리했는지(아래 일관성 행) |
+| 접근 테이블 | R: `entry_view` (`status='visible'`, `entry_id DESC`, 부분 인덱스), `inbox_message`(자기 모듈, `consumer='guestbook-projector'` — `caughtUp` 판정용) |
+| 일관성 | 호출자(RT-05)가 구독을 먼저 등록하고 `change_log` 의 `head`·최근 `event_id` 를 읽은 뒤 이 usecase 를 호출한다. 결과에 `head` 이후 변경이 일부 섞일 수 있으나, 이후 재생되는 변경은 모두 **덮어쓰기·id 교체 의미**라 중복 적용해도 같다(04 §5). 반대로 **프로젝터가 뒤처져 `head` 이전 변경이 빠질 수 있으므로** `caughtUp`(`headEventIds` 가 모두 `processed` 이고 미처리 `received`/`processing` 행이 없음)을 함께 돌려주고, 거짓이면 호출자가 100ms 간격·2초 한도로 재호출한다(F14 RT-05, P0 X2 의 뼈대를 재사용하되 쓰기 모델 읽기 없이 자기 모듈 inbox 로 판정 — 새 CQRS 예외 아님). 시험: 프로젝터 정지 + 스냅샷(AC-008 카오스 경로, 08 §6) |
 
 ```mermaid
 classDiagram
@@ -959,12 +959,13 @@ sequenceDiagram
     participant L as ChangeLogReader
     participant G as guestbook.ReadPublicEntries
     participant V as entry_view
-    S->>L: head(public)
-    L-->>S: H
-    S->>G: execute(limit)
+    S->>L: head(public) + 최근 event_id
+    L-->>S: H, eventIds
+    S->>G: execute(limit, eventIds)
     G->>V: SELECT … WHERE status = visible ORDER BY entry_id DESC LIMIT n
     V-->>G: rows
-    G-->>S: PublicEntryView[] (개인 필드 없음)
+    G-->>S: PublicEntryView[] + caughtUp (개인 필드 없음)
+    Note over S,G: caughtUp 거짓이면 100ms 후 재호출, 2초 초과 시 4500
     S-->>S: snapshot { entries, head: H }
 ```
 

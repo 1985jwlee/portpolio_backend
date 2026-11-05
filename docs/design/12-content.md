@@ -30,7 +30,7 @@
 | `privacy.cookieBanner` | boolean | `false` | — | 예(결정 필요) |
 | `site.repoUrl` | url | (저장소) | — | 예 |
 | `site.ciBadgeUrl` | url \| null | `null` | 배지 숨김. **값이 있으면 그 호스트가 CSP `img-src` 에 들어간다**([10](10-security.md) §2.2) | 아니오 |
-| `site.metricsEmbedUrl` | url \| null | `null` | 운영 지표 페이지가 임베드 대신 안내·링크를 보임. 값이 있으면 그 출처가 CSP `frame-src` 에 들어간다. Grafana 공개 대시보드 URL(프로비저닝으로 만들 수 없으면 수동 발급, G6) | 아니오 |
+| `site.metricsEmbedUrl` | url \| null | `null` | 운영 지표 페이지가 임베드 대신 안내·링크를 보임. 값이 있으면 그 출처가 CSP `frame-src` 에 들어간다. Grafana 공개 대시보드 URL(사이트와 다른 출처 — Funnel 다른 포트, F17 §8.4. 프로비저닝으로 만들 수 없으면 수동 발급, G6) | 아니오 |
 | `site.securityNotice` | `{ko, en}` 문자열 \| null | `null` | 배너 없음. 값이 있으면 레이아웃 상단에 보안 공지 배너(제안, WB-01 셸). **빌드 시점 값이라 변경에는 재배포가 필요**하다 — 즉시 공지는 쓰기 잠금의 `reason` 을 쓴다([13](13-incident-response.md) §8) | 아니오 |
 | `site.seo.siteName` | string | (없음) | 비면 릴리스 빌드 실패. 페이지 title·OG·JSON-LD 의 사이트 이름([14](14-seo-and-error-pages.md)) | 예 |
 | `site.seo.description.{ko,en}` | string(70~160자) | `null` | 비면 페이지 설명 생략(자리표시 경고). 홈·공유 미리보기 설명 | 예 |

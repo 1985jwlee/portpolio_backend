@@ -410,7 +410,7 @@ flowchart LR
 
 **읽기 모델·쓰기 모델 경계의 예외(모두 명시)**: ① 위 익명화 두 건(`entry_view.author_actor_key`, `my_reaction`)은 이벤트 없이 직접 쓴다 ② 재구성 잡은 `entry_view_next` 를 채우고 교체한다 ③ `LoadEntryForConflict`(409 응답용)는 쓰기 스키마 `guestbook.entry` 를 읽는다. 그 외 모든 읽기 모델 갱신은 inbox 경유 이벤트다.
 
-**모듈 사이 읽기는 테이블이 아니라 공개 usecase 포트로 한다**(예외 아님): realtime 의 스냅샷은 `guestbook.ReadPublicEntries`(guestbook 의 읽기 모델 조회)와 `events.FlowSummaryReader`·`events.TraceReader`(events 의 읽기·추적 조회)를 호출하고, worker 의 세션 정리 잡은 `identity` 공개 usecase 와 `guestbook.AnonymizeSessionData` 를 호출한다. 남의 테이블에 직접 `SELECT`/`DELETE` 하는 곳은 위 ①~③ 뿐이다.
+**모듈 사이 읽기는 테이블이 아니라 공개 usecase 포트로 한다**(예외 아님): realtime 의 스냅샷은 `guestbook.ReadPublicEntries`(guestbook 의 읽기 모델 조회)와 `events.FlowSummaryReader`·`events.TraceReader`(events 의 읽기·추적 조회)를 호출하고, worker 의 세션 정리 잡은 `identity` 공개 usecase 와 `guestbook.AnonymizeSessionData` 를 호출한다. 남의 테이블에 직접 `SELECT`/`DELETE` 하는 곳은 위 ①~③ 뿐이다. 이 ①~③ 은 *읽기 모델 쓰기* 예외이고, *쓰기 스키마 읽기* 예외(X1~X4: `game_event`·chat `last_seq`·`events.trace_step`·`identity.session`)는 P0 §2.4 표가 정본이다(`trace_step` 은 `GetTrace`/`TraceReader`, `session` 은 `ResolveSession`/`GetMe` 가 소유 모듈 안에서 읽는다).
 
 ## 9.1 필드 보호 구분 (컬럼 단위, ADR-026)
 

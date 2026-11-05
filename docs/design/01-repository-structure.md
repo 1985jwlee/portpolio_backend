@@ -42,7 +42,7 @@ portpolio_backend/
 │  ├─ prometheus/  grafana/      # 설정·대시보드 프로비저닝 (grafana/provisioning/alerting/: 연락처·정책·규칙, F17 §16.3)
 │  ├─ systemd/                   # pf-archive-logs · pf-backup · pf-pull-deploy 의 .service/.timer (F17 §16.1.1)
 │  └─ scripts/                   # pull-deploy.sh, backup.sh, archive-logs.sh, logq.sh 등 (09, 02, ADR-027)
-├─ scripts/                      # TypeScript(Bun) 저장소 도구: check-purity.ts, gen-schema.ts, seed.ts
+├─ scripts/                      # TypeScript(Bun) 저장소 도구: check-purity.ts, check-cqrs.ts, gen-schema.ts, seed.ts
 ├─ test/                         # 교차 시험: chaos/(동시성·장애), e2e/, load/ (k6) (08 §11). 재접속 시험은 apps/ws-gateway/test/
 ├─ docs/  specs/                 # 문서
 ├─ .dependency-cruiser.cjs  biome.json  tsconfig.base.json  tsconfig.json
@@ -168,7 +168,7 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 |---|---|---|
 | **B1** 계층 방향 | `domain` ↛ `service`·`usecase`·`port`·`adapter` / `service` ↛ `usecase`·`adapter` / `port` ↛ `usecase`·`adapter` / `usecase` ↛ `adapter` | 역방향·건너뛰기 임포트 |
 | **B2** 순수성 | `domain`·`service` ↛ `node:*`, `bun`, `@pf/db`, `postgres` 계열 드라이버, 네트워크·파일 모듈 | I/O 의존 |
-| **B3** CQRS | `usecase/command/**` ↛ `*-view-repository`(읽기 포트) / `usecase/query/**` ↛ 쓰기 포트(`*-repository`, `OutboxWriter`) | 명령·조회 혼합 (00 §4.2) |
+| **B3** CQRS | 포트의 종류(쓰기/읽기)를 **파일명이 아니라 그 포트를 구현하는 어댑터가 건드리는 스키마 객체**로 정한다. 쓰기 스키마(`<m>`) 표를 쓰는 포트는 쓰기 포트, 읽기 스키마(`<m>_read`) 표만 읽는 포트는 읽기 포트이며 `modules/<m>/port-kinds.json`(포트 → kind·표)에 선언하고 `scripts/check-cqrs.ts` 가 어댑터의 `schema.ts` 임포트로 선언을 검증한다. `usecase/command/**` ↛ 읽기 포트 / `usecase/query/**` ↛ 쓰기 포트·`OutboxWriter`. 단 `modules/cqrs-exceptions.json`(P0 §2.4 X1~X4)에 등재된 (usecase 또는 포트, 표) 쌍은 허용. DB 역할의 GRANT 가 같은 경계를 한 번 더 강제한다(`api_rw` 는 `*_read` 에 INSERT/UPDATE/DELETE 불가, ADR-026) | 명령·조회 혼합 (00 §4.2) |
 | **B4** 모듈 공개 API | 모듈 밖에서는 `@pf/<m>` (`index`)만 임포트. `@pf/<m>/schema` 는 `packages/db` 와 자기 자신만 | 내부 경로·상대 경로로 타 모듈 침범 |
 | **B5** 순환 금지 | 모듈·패키지 단위 순환 | `GB → ID → GB` 같은 순환 |
 | **B6** 조립 위치 | `adapter/**` 임포트는 `apps/*/src/compose/**` 와 같은 모듈의 `adapter` 안에서만 | usecase 가 어댑터를 직접 앎 |
@@ -178,6 +178,8 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 | **B11** 쓰기는 트랜잭션 | `.insert(`·`.update(`·`.delete(`·쓰기 `execute` 는 `UnitOfWork` 가 주는 `TxContext` 에서만. `ReadDb`/풀 핸들에는 쓰기 메서드가 없다. `check-purity` 가 `adapter/postgres` 밖 사용을 문자열로 검출 | 자동 커밋 쓰기 (ADR-025) |
 | **B10** 보조 포트 구현 격리 | `@pf/infra` 는 `apps/*/src/compose/**` 에서만 임포트. `domain`·`service`·`usecase` ↛ `@pf/infra` | usecase 가 Redis·메모리 구현에 결합 (ADR-024) |
 
+**B3 를 파일명 정규식으로 쓰지 않는 이유**: 읽기 포트 `entry-view-repository.ts` 는 `*-repository` 글롭에도 걸려, `usecase/query/**` 가 읽기 포트를 임포트하면 쓰기 포트로 **오탐**한다(`*-view-repository` 를 제외하는 정규식을 쓰더라도 `*-read-repository`·`*-projection-repository` 같은 새 이름에서 다시 샌다). 그래서 이름이 아니라 스키마 객체(어느 스키마의 표를 읽고 쓰는가)를 정본으로 하고, 이름 관례(`*-repository` 쓰기, `*-view-repository` 읽기)는 사람이 읽는 힌트로만 남긴다. 시험: 읽기 포트를 쓰는 query usecase(통과), 쓰기 포트를 쓰는 query usecase(실패), 읽기 포트를 쓰는 command usecase(실패), X3 의 `GetTrace`(통과)를 한 벌씩 두는 규칙 픽스처.
+
 시간·난수 직접 호출 금지(`Date.now`, `new Date()`, `Math.random`, `crypto.randomUUID` in `domain`·`service`)는 임포트가 아니라 호출이라 dependency-cruiser 로 못 잡는다 → **`scripts/check-purity.ts`**(대상 디렉토리 텍스트 검사)로 CI 에서 확인한다. Biome 의 해당 규칙 사용 여부는 **미확인**(구현 시 확인하고, 있으면 그쪽으로 이관).
 
 ```mermaid
@@ -185,7 +187,8 @@ flowchart LR
     SRC["변경된 소스"] --> BIO["biome check<br/>포맷 · 린트"]
     BIO --> TSC["tsc -b --noEmit<br/>타입"]
     TSC --> DC["dependency-cruiser<br/>B1~B8 · B10"]
-    DC --> PUR["check-purity.ts<br/>B9 + 시간·난수"]
+    DC --> CQ["check-cqrs.ts<br/>B3 스키마 객체 기준"]
+    CQ --> PUR["check-purity.ts<br/>B9 + 시간·난수"]
     PUR --> GEN["gen-schema.ts --check<br/>protocol 스키마 최신 여부"]
     GEN --> TST["bun test<br/>unit"]
     TST --> OK["통과"]
@@ -202,7 +205,7 @@ flowchart LR
 | `build` | web `next build`(standalone), 서버 번들 점검 |
 | `typecheck` | `tsc -b --noEmit` |
 | `lint` / `format` | `biome check` / `biome format --write` |
-| `arch` | dependency-cruiser + `scripts/check-purity.ts` |
+| `arch` | dependency-cruiser + `scripts/check-cqrs.ts` + `scripts/check-purity.ts` |
 | `gen:schema` | `@pf/protocol` TypeBox → JSON Schema 내보내기. `--check` 는 변경이 있으면 실패 |
 | `test` · `test:unit` | 전체 `bun test` (unit, L2). `test` 는 `test:unit` 의 별칭 |
 | `test:integration` | DB 가 필요한 시험(컨테이너 또는 compose 서비스, 08) |
@@ -359,7 +362,7 @@ flowchart TD
 - `SESSION_COOKIE_NAME` 은 개발(http)에서 `sid`, 운영 `__Host-sid`([10](10-security.md) §3). ws-gateway 가 `/ws/private` 업그레이드에서 쿠키를 파싱하므로 api 와 gateway 가 같이 쓴다.
 - `PUBLIC_HOST` 는 별도 변수가 아니다 — `PUBLIC_ORIGIN` 에서 유도한다(CSP `connect-src wss://…` 등). 저장소 링크·Grafana 임베드 URL 은 환경변수가 아니라 **사이트 변수**(`site.repoUrl`·`site.metricsEmbedUrl`, [12](12-content.md) §1.1)다.
 
-`LISTEN/NOTIFY` 전용 연결은 `DATABASE_URL` 로 따로 하나 더 연다(풀과 별개, G4).
+`LISTEN/NOTIFY` 전용 연결은 `DATABASE_URL` 로 따로 하나 더 연다(풀과 별개, G4). **`DATABASE_URL` 은 앱 코드에서 단일 이름이지만 값은 프로세스별 DB 역할**이다 — api `pf_api_rw` · ws-gateway `pf_gateway_ro`(읽기 전용) · worker `pf_worker_rw` · `db:migrate` 일회성 `pf_migrator`(design/10 §5.1). compose 가 서비스별 비밀 파일(`secrets/database_url_<api|gateway|worker|migrator>`)을 `DATABASE_URL_FILE` 로 연결한다.
 
 ### 8.2 api
 
