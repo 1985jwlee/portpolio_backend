@@ -15,6 +15,7 @@ M1(사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지�
 | 작게 합친다 | 작업은 PR 한 개에 담길 크기(대략 하루 이내). 큰 작업은 쪼갠다 |
 | 회귀 가드 | 버그를 고칠 때 "고치기 전엔 실패하는" 시험을 먼저 둔다(08) |
 | 문서 동기 | 설계와 다르게 구현해야 하면 **코드 전에 문서·ADR 을 고친다** |
+| 편차·추적 기록 | 설계를 고친 구현 중 발견은 **[편차 로그](../deviation-log.md)에 한 줄**, 작업 완료 시 **[추적표](../traceability.md)의 AC 행**(시험·코드·상태)을 채운다. 이 둘은 '설계 우선 + AI 구현' 방식이 실제로 작동했는지의 증거다 |
 
 ## 2. 단계 지도
 
@@ -72,6 +73,8 @@ flowchart LR
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
 | S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 (근거: ADR-027, EV-14, AC-020, FR-090) |
 | S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
+| S1-16 | **추적표 점검**: `docs/traceability.md` 와 명세·시험 이름의 정합 검사(`bun run check:trace`) — 추적표의 AC 가 명세에 존재하는지, `검증` 상태인 AC 에 시험 이름이 있고 시험 파일에 그 이름이 존재하는지, 시험 이름이 존재하지 않는 AC 를 가리키지 않는지 | S1-1 | 없는 AC 를 가리키는 시험·시험 없는 `검증` 행을 CI 가 실패시키는 시험, 추적표 초기 행 39개와 명세 AC 개수 일치 (요구: AC-032) |
+| S1-17 | **편차 로그·PR 틀**: `docs/deviation-log.md` 운영 규칙, PR 템플릿에 '설계와 달랐나? → 편차 로그 ID' 체크 항목, 첫 PR 에서 로그 형식 시험 | S1-1 | PR 템플릿에 체크 항목 존재, 로그 표 열 수 점검(링크·표 검사 잡)이 CI 에서 통과 (요구: ADR-050) |
 | S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 (근거: ADR-026, AC-024, FR-100) |
 | S1-12 | `FieldCipher` 포트 + AES-256-GCM 구현(`packages/infra/crypto`), 키링 로더·키 ID 선택, 단위 시험(왕복·AAD 불일치·변조·iv 중복·회전 멱등) | S1-3, S1-8 | 시험 통과, `pg_dump` 에 평문 센티널 부재 (근거: ADR-026, AC-018, AC-034, FR-025, FR-101, FR-102) |
 | S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 (근거: ADR-024) |
@@ -211,8 +214,9 @@ sequenceDiagram
     participant M as main
     D->>B: feat/<id>-<요약> 분기
     D->>T: 완료 기준의 시험을 먼저 작성 (실패 확인)
-    D->>B: 구현 (설계와 다르면 문서 먼저 수정)
+    D->>B: 구현 (설계와 다르면 문서 먼저 수정 + 편차 로그 한 줄)
     B->>T: bun test (단위·통합)
+    D->>B: 추적표 갱신 (AC 행의 시험·코드·상태)
     D->>B: 커밋 (한 작업 = 한 목적)
     B->>CI: PR → 린트·타입·경계·시험
     CI-->>D: 결과

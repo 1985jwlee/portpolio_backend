@@ -52,6 +52,18 @@ Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) +
 | 7 | Phase 2 | KataGo 워커 + 바둑 보상 (보상 `PENDING → CONFIRMED/FLAGGED`; **모의 포인트 원장 `ledger` 는 Phase 3 에서 이미 도입**, 바둑 보상은 두 번째 포인트 출처). **분석 큐는 Postgres inbox 선점(Redis 없음)** | 대국 종료 → 비동기 분석 → 보상 확정 end-to-end, 실패·재시도 확인 | ADR-009, [설계 P1](docs/design/phases/01-baduk.md) §9~10, ADR-036·037 |
 | 8 | Phase 6e | **마작**(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) — **보류**(U13 2026-11-05: 경계만 유지, 6d 는 진행) | 항목별 독립 DoD | ADR-016, [설계 P1](docs/design/phases/01-baduk.md), ADR-034·035 |
 
+## 개발 방식
+
+이 저장소는 **모든 것을 먼저 설계한 뒤 AI 를 이용해 구현한다**는 방식을 증명한다. 설계가 구현을 실제로 이끌었는지는 아래 기록으로 확인한다.
+
+| 보고 싶은 것 | 위치 |
+|---|---|
+| 요구 → 설계 → 구현 작업 → 시험 → 코드 사슬 | [추적표](docs/traceability.md) |
+| 구현하다가 설계가 틀렸다고 드러난 사례 | [설계 대비 구현 편차 로그](docs/deviation-log.md) |
+| 사람이 결정한 것과 AI 권장을 수용한 것 | [결정 목록](docs/design/phases/00-platform-evolution.md) §16 |
+| 결정의 근거와 기각한 대안 | [ADR 색인](docs/adr/README.md) |
+| 수치의 증거 규칙(스크립트·원시 결과 없는 수치는 참고값) | [ADR-050](docs/adr/ADR-050-evidence-rule.md) |
+
 ## 저장소 안내
 
 | 경로 | 내용 |
