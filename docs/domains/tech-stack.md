@@ -144,6 +144,8 @@
 
 ### 11.1 관문 로컬 실측 요약 (2026-11-04, 개발 PC WSL2·Bun 1.4.4·Docker — 라이브 호스트는 네이티브 Ubuntu 24.04 라 G2·G3·G14 는 호스트에서 재측정, S0-0)
 
+> **증거 규칙 주석(ADR-050, 2026-11-06)**: 아래 수치는 재현 스크립트·원시 결과가 저장소에 없다 → **재현 스크립트 필요(결과만 있음) → 참고값(재현 불가)**. 삭제하지 않고 강등 표기만 한다.
+
 | 관문 | 결과 | 비고 |
 |---|---|---|
 | G1 (폐기, 이력 — Funnel 에는 적용되지 않음) | **통과(로컬, Cloudflare 임시 터널)** | trycloudflare 임시 터널(cloudflared 2026.10.7)에서 wss 업그레이드·64KB/512KB 에코·서버 close 1001/4408 이 사유까지 그대로 도달, `CF-Connecting-IP`·`X-Forwarded-Proto`·`CF-Ray` 부착. 유휴 ping 이 없으면 약 126초(125.6~126.5초 3회)에 1006 으로 끊기고 서버 hb 25초면 252초(관찰 상한)까지 유지. 에지는 클라이언트의 `X-Forwarded-For`·`True-Client-IP` 를 지우지 않으므로 nginx 정규화(덮어쓰기)가 필수이고, 클라이언트가 보낸 `CF-Connecting-IP` 요청 헤더는 에지가 403(error 1000)으로 거부한다. cloudflared→nginx→Bun 체인에서 `set_real_ip_from 127.0.0.1` + `real_ip_header CF-Connecting-IP` 가 동작. **미확인**: 정식 Named Tunnel·Access 정책·다중 커넥터(HA)·재연결(계정 필요), 임시 터널과 정식 터널의 유휴 한도 차이 |

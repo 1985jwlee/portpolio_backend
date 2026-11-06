@@ -3,7 +3,7 @@
 M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. 이 문서는 그 위에 **바둑(Phase 1~2) · 상거래(Phase 3·5) · 풀필먼트(Phase 6) · 채팅(Phase 1·6)** 을 올릴 때 **영역마다 따로 정하면 어긋나는 것**을 한 곳에서 정한다.
 네 영역 설계(`01-baduk`, `02-commerce`, `03-fulfillment`, `04-chat`)는 이 문서의 결정 번호(**D1…D26**)를 인용한다.
 
-> **구현 순서 ≠ Phase 번호 (D24).** Phase 번호는 로드맵 식별자로 유지하고, 구현 순서는 **M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e** 이다(바둑 계열(Phase 1·2)이 마지막이고, 마작은 그 뒤 6e). 모든 영역 설계는 동결하지 않고 끝까지 완성하며, 각 Phase 착수 전에 설계 재검토 단계(§12.5)를 거친다. 아래 표·절은 Phase 번호로 쓰되 '순서' 열이나 §1.4 로 구현 순서를 읽는다.
+> **구현 순서 ≠ Phase 번호 (D24).** Phase 번호는 로드맵 식별자로 유지하고, 구현 순서는 **M1 → 3 → 4 → 5 → 6a → 6b → 6c → 6d → 1 → 2 → 6e** 이다(바둑 계열(Phase 1·2)이 마지막이고, 마작은 그 뒤 6e). 모든 영역 설계는 동결하지 않고 끝까지 완성하며, 각 Phase 착수 전에 설계 재검토 단계(§12.5)를 거친다. 아래 표·절은 Phase 번호로 쓰되 '순서' 열이나 §1.4 로 구현 순서를 읽는다. **M1 공개는 A층 완성 시 먼저, B·C층은 이어서 한다**(ADR-013 개정, 사용자 결정 2026-11-06).
 
 - 상태: 이 문서와 ADR-030~048(이 문서는 030~033, 영역 설계는 034~048) 은 **Accepted(2026-11-05, 사용자 일괄 확정, U1)** 이다. 이후 변경은 개정 ADR 로 한다. 단 U11·U17·U21·U23(사용자 변경)에 따른 본문 반영은 별도 작업 중이다.
 - 근거: README 로드맵, ADR-001·002·005·006·009~016·017~028, [architecture.md §12](../../domains/architecture.md), [database-schema.md §11](../../domains/database-schema.md).
@@ -50,7 +50,7 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 | 0 | 0 | 모노레포, CI, k3d 최소 배포 | (M1 컨테이너 세트) | — | — | — | G8(통과), Gateway API |
 | 1 | **M1** | 사이트 셸·방명록·시각화 | proxy, web, api, ws-gateway, worker, postgres, prometheus, grafana (+호스트의 tailscaled/Funnel) | identity, guestbook, events, realtime, observability | 위 모듈 + `*_read` | `/ws/public`, `/ws/private` | tech-stack 관문 G2~G10 + Funnel 관문 G14 (G1 은 Funnel 교체로 폐기; §1.4 의 G14 와 다른 번호계) |
 | 2 | **3** | 타임딜 + **`ledger`(POINT·모의 USDC) 도입**과 첫 로그인 지급(POINT 100,000; USDC 는 환경별 공급)·USDC→POINT 교환, **혼합 결제**(포인트 우선 + USDC)와 환불, 최소 `pricefeed`·`escrow`. **라이브는 POINT 단독 결제로 닫는다(D1)** — USDC 다리·교환·혼합 결제는 코드로 만들되 라이브 노출은 6d 입금 브리지 이후 | **redis** | catalog, deal, order(구매 접수), **ledger**, payment(원장 결제·환불), **pricefeed(최소)**, **escrow(최소: hold·release·refund)** | `catalog`, `deal`, `order`, `ledger`, `payment`(최소), `pricefeed`(최소), `escrow`(최소), 각 `_read` | `/ws/public`(재고 카운트 푸시), `/ws/private`(구매 결과) | Redis 도입, Streams 판정(D4), k6, B12 쌍 #2·#3·#4·#5·#7·#8 |
-| 3 | **4** 🎯 | 프로덕션화 | api·ws-gateway(site) 레플리카, HPA 대상 | — | — | — | 워크로드 분리, PDB·probe, CD, 에셋 캐시, **Redis 공유 속도 제한·presence·세션 캐시 무효화(§5.1, 레플리카 ≥2 가 되므로)** (Phase 4 에는 룸 연결이 없으므로 룸 분화는 6a 이후 재평가, D17) |
+| 3 | **4** 🎯 | 프로덕션화 — **간판: 롤링 배포 중 소켓 무손실 + 단일 호스트 포화점(knee) 실측**, k3d HPA·PDB 는 부가 증명 | api·ws-gateway(site) 레플리카, HPA 대상(k3d 부가 증명) | — | — | — | 워크로드 분리, PDB·probe, CD, 에셋 캐시, **Redis 공유 속도 제한·presence·세션 캐시 무효화(§5.1, 레플리카 ≥2 가 되므로)** (Phase 4 에는 룸 연결이 없으므로 룸 분화는 6a 이후 재평가, D17) |
 | 4 | **5** | 모의 카드 결제·분쟁·반품 동결·정산·실제 시세 | (추가 없음 — 웹훅은 api 경로) | payment(카드·웹훅·환불 확장), escrow(분쟁·동결·자동 확정 타이머 확장), settlement, pricefeed(실제 소스·교차 검증 추가) | `payment` 확장, `escrow` 확장, `settlement`, `pricefeed` 확장 (+`_read`) | `/ws/private`(결제 상태) | KEK/DEK 상향(D13), PG 테스트 모드, B12 쌍 #4(확장)·#5/#7/#8(확장)·#9 |
 | 5-a | **6a** | CS 채팅 | (추가 없음) | **chat(코어 첫 도입)**, support | `chat`, `chat_read`, `support`, `support_read` | **`/ws/room` 도입**(`chat:*`, `cs:*`) | `RoomAccessPolicy` 포트(ChatRoomPolicy·CsRoomPolicy), `agent` 역할, B12 쌍 #1 |
 | 5-b | 6b | Passkey | — | identity 확장 | `identity.credential` | — | — |
@@ -65,7 +65,7 @@ M1 설계(00~15, features/)는 사이트 셸과 방명록 데모를 닫았다. �
 ```mermaid
 flowchart LR
     M1["M1<br/>사이트 셸 · 방명록<br/>이벤트 시각화"] --> P3["Phase 3<br/>타임딜 · Redis 도입<br/>ledger(POINT·USDC) · 혼합 결제<br/>최소 escrow · 환불"]
-    P3 --> P4["Phase 4 🎯<br/>프로덕션화<br/>워크로드 분리 · HPA"]
+    P3 --> P4["Phase 4 🎯<br/>프로덕션화<br/>롤링 소켓 무손실 · 포화점 실측<br/>(부가: k3d HPA·PDB)"]
     P4 --> P5["Phase 5<br/>카드 결제 · 에스크로 확장<br/>정산 · 시세 · KEK/DEK"]
     P5 --> P6a["Phase 6a<br/>CS 채팅<br/>chat 코어 · /ws/room"]
     P6a --> P6b["6b Passkey"]
@@ -125,7 +125,7 @@ flowchart TB
 | 구현 순서 | 선행 구현에 요구하는 것 | 이 단계가 새로 도입하는 기반 |
 |---|---|---|
 | Phase 3 | M1(events·realtime·audit·identity) | Redis, `ledger`(POINT·USDC), `catalog`·`deal`·`order`, 최소 `payment`(원장 결제·환불), 최소 `pricefeed`(고정 환율), 최소 `escrow`(hold·release·refund), B12 의 틀과 쌍 #2·#3·#4·#5·#7·#8 |
-| Phase 4 | Phase 3(서비스가 있어야 분리·HPA 의미) | 워크로드 분리, HPA·PDB·probe, CD |
+| Phase 4 | Phase 3(서비스가 있어야 분리·포화점 실측 의미) | 롤링 배포 중 소켓 무손실 + 단일 호스트 포화점(knee) 실측(간판), 워크로드 분리, probe, CD, k3d HPA·PDB(부가 증명) |
 | Phase 5 | Phase 3(order·ledger·payment·escrow 최소형), Phase 4 권장(운영 기반) | `escrow` 확장(분쟁·반품 동결·정산 입력·자동 확정 타이머), `settlement`, 카드 어댑터·웹훅, 실제 시세 소스·교차 검증기, KEK/DEK 상향 |
 | 6a | M1(realtime·identity), Phase 3(주문 연동 context), Phase 5(KEK/DEK v2 — CS 본문 ENC) | **`chat` 코어(방·참가자·메시지·방 카운터)**, **`/ws/room`**, `RoomAccessPolicy` 포트, `support`, `agent` 역할, B12 쌍 #1 |
 | 6b | M1(identity) | `identity.credential` |
@@ -963,7 +963,8 @@ M1 은 ENC 가 `report.note` 하나(키링 방식). Phase 3 의 `order.order.shi
 | `analysis-worker` (Phase 2 에 합류) | 큐 길이·CPU 기준, 동시성 **1**(ADR-033, 늘리려면 CPU 예산 재산정) | healthz | — | 진행 분석 취소(토큰 미완료 → 임대 만료 후 재선점) |
 | `web` | 동적 렌더(CSP nonce, G3) 라 CPU 기준 | readyz | minAvailable 1 | SIGTERM 143 |
 
-- k3d 검증(G8)과 live Compose 는 **같은 이미지**(ADR-002). HPA·PDB 는 k3d 에서만 검증된다. **Phase 4 의 산출물은 k3d 실측 보고서**(워크로드 분리·HPA·PDB·롤링 소켓 재접속 실측)이고, **라이브는 Compose 를 유지**한다. 라이브에 레플리카(api×2, ws×2)는 **포화가 측정으로 확인될 때만** 추가한다 — 위 표의 `HPA`·`최소 2` 는 k3d 검증 구성이고 라이브 Compose 의 상시 구성이 아니다(범위 변경 아님).
+- **Phase 4 의 간판은 ‘롤링 배포 중 소켓 무손실’과 ‘단일 호스트 포화점(knee) 실측’이다(사용자 결정 2026-11-06). k3d 의 HPA·PDB 는 부가 증명**이다. 정직하게 적는다: 단일 호스트에서 HPA 로 레플리카를 늘려도 같은 6코어를 나눠 쓸 뿐이라 실제 용량 확장이 아니다(구조 검증일 뿐).
+- k3d 검증(G8)과 live Compose 는 **같은 이미지**(ADR-002). HPA·PDB 는 k3d 에서만 검증된다. **Phase 4 의 산출물은 롤링 무손실·포화점 실측 보고서와 k3d 실측 보고서**(워크로드 분리·HPA·PDB·롤링 소켓 재접속 실측)이고, **라이브는 Compose 를 유지**한다. 라이브에 레플리카(api×2, ws×2)는 **포화가 측정으로 확인될 때만** 추가한다 — 위 표의 `HPA`·`최소 2` 는 k3d 검증 구성이고 라이브 Compose 의 상시 구성이 아니다(범위 변경 아님).
 - 롤링 중 소켓 재접속은 M1 실측 결과를 그대로 쓴다(우아한 종료 + preStop 조합 필수).
 - **시계 정지(`clock_freeze`)와 `DemoClock`**: 라이브는 단일 api 라 재배포·장애 중에도 대국 시계와 에스크로 기한이 흐른다. 배포 스크립트가 시스템 `clock_freeze`(정비 구간 시작·종료)를 기록하면 스위퍼·자동 해제가 멈추고, 종료 후 진행 중 대국의 `deadline_at`·`turn_started_at` 을 정지 구간만큼 이동시켜 대국별 `game.clock_adjusted` 를 남긴다(계획 외 장애는 api 생존 신호 단절 구간을 worker 가 감지해 같은 보정, 복구 런북에 '진행 중 대국 abandoned 일괄 종료'; 17 ops). 상거래 기한(에스크로 해제·반품 5일·주문 만료)은 시간 압축까지 포함해 **단일 `DemoClock` 포트** 하나로 계산하고 `clock_freeze` 구간도 같은 포트가 반영한다(정본: P1 §6·P2 §7).
 
@@ -1052,7 +1053,7 @@ M1 의 "같은 이미지 · 다른 시작 명령" 원칙을 유지한다: `serve
 | 순서 | Phase | README DoD | 선행 아키텍처 조건 | 검증 후보 |
 |---|---|---|---|---|
 | 2 | 3 | 초과 판매 0 + k6 결과 + **라이브: POINT 단독 구매·환불 시연**(첫 로그인 지급 → 구매 → 환불) + **혼합 결제·교환 시연은 로컬·시험 환경**(라이브 노출은 6d 입금 브리지 이후, D1·G16) | Redis 도입(단일 인스턴스), `StockReservation`, reconcile 잡, (Streams 판정), `ledger`(POINT·USDC)·지급·교환, 최소 `pricefeed`(고정 환율)·`payment`(원장 결제)·`escrow`(hold·release·refund)·환불, B12 틀·쌍 #2~#5·#7·#8 | 동시 예약 시험, Redis 유실 시험, 구매 확정·환불 원자성 계약 시험, 원장 속성 시험(자산별 차변=대변) |
-| 3 | 4 | README+영상만으로 이해 가능 | 워크로드 분리, HPA/PDB, 롤링 소켓 재접속 | k3d 롤링 시험, 관측 대시보드 |
+| 3 | 4 | README+영상만으로 이해 가능 — 간판: 롤링 중 소켓 무손실 + 단일 호스트 포화점(knee) 실측 | 워크로드 분리, 롤링 소켓 재접속, (부가) HPA/PDB | 롤링 무손실 시험, 포화점 부하 시험, k3d 롤링·HPA/PDB 부가 증명, 관측 대시보드 |
 | 4 | 5 | 카드 결제→분쟁·반품 동결→정산 재현, 환율 고정 기록 | PG 어댑터, 웹훅 inbox, KEK/DEK, 실제 시세 소스·교차 검증기 추가(G3), `escrow` 확장(분쟁·동결·자동 확정 타이머), `settlement` | 웹훅 중복/역순, 견적 만료, 부분 환불 후 정산 속성 시험 |
 | 5 | 6 (6a~6d) | 항목별 독립(6a: 고객 티켓→상담원 선점→해결, 본문 평문 없음, 롤링 중 룸 재구독 시험 등) | 6a: `chat` 코어·`/ws/room`·룸 포트·`agent`(선행: Phase 5 의 KEK/DEK v2), 6c: `operator`(선행: 6a 의 `RolePolicy`)·약정 활성화·물리 재고 시드 | 항목별 |
 | 6 | 1 | 두 브라우저 3D 대국, 복구, 관전 동기화 (+ **대국 채팅: 복구·중복 방지·관전자 비공개, 롤링 중 룸 재구독** — 6a 는 CS 룸(본문 없는 알림 push + REST)만 실행했으므로 평문 본문 push·관전자 비공개·`ChatRoomPolicy` 는 여기서 처음 실행된다) | `/ws/room` 에 `game:*` 추가, 룸 로그/스냅샷, 룰 엔진 선정, `GameRoomPolicy`, 대국 룸 종류 | 룸 재접속 시험, 룰 시험 세트, 채팅 재개·중복 시험(대국 룸 종류) |

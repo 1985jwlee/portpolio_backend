@@ -9,6 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-06 | [ADR-050](ADR-050-evidence-rule.md) | 증거 규칙: 스크립트와 원시 결과(호스트 사양·커밋 해시)를 커밋하지 않은 수치는 사실로 쓰지 않는다. 예외는 `참고값(재현 불가)` 강등. 범례 실측/추정/제안/참고값, 스파이크는 `spikes/` 에 보존 | Accepted |
 | 2026-11-06 | [ADR-049](ADR-049-hot-cache-and-surge-control.md) | 핫 캐시와 몰림 대응: 병합 먼저·보존은 열화 모드, 단계적 열화 사다리(0~4, 그림자 모드로 시작), 기다리는 곳에 상한, 스냅샷 head 공유, 반응 총개수는 쓰기 모델 카운터 열 | Accepted (2026-11-06) |
 | 2026-11-04 | [ADR-048](ADR-048-mock-currency-and-mixed-payment.md) | 모의 통화(USDC·POINT): 첫 로그인 지급, 단방향 교환, 혼합 결제, 선택적 지갑 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-047](ADR-047-chat-data-protection-retention.md) | 채팅 데이터 보호·보관: 방 종류별 등급, CS 본문 암호화 | Accepted (2026-11-05) |
@@ -45,7 +46,7 @@
 | 2026-11-03 | [ADR-016](ADR-016-payments-and-extensions.md) | 결제·정산(모의)과 Phase 6 확장은 순서대로, 독립 DoD 로 | Accepted (부분 대체: 결제·에스크로·시세·원장·6a·6c 는 ADR-039~041·032·042~047) |
 | 2026-11-03 | [ADR-015](ADR-015-positioning-and-scope-rules.md) | 타깃 서사, 모의 면책, 외부 참고 금지·비공개 범위 | Accepted |
 | 2026-11-03 | [ADR-014](ADR-014-deployment-and-zero-downtime.md) | CD, probe, 롤링 배포 중 소켓 재접속·세션 복구, 에셋 캐시 | Accepted |
-| 2026-11-03 | [ADR-013](ADR-013-milestone-scope-and-numbers.md) | M1 을 전부 한 번에 내되, 성능 수치는 측정 후에만 쓴다 | Accepted |
+| 2026-11-03 | [ADR-013](ADR-013-milestone-scope-and-numbers.md) | M1 을 전부 내되(공개는 A층 먼저, 2026-11-06 개정), 성능 수치는 측정 후에만 쓴다 | Accepted |
 | 2026-11-03 | [ADR-012](ADR-012-go-rule-library.md) | 바둑 룰은 라이브러리로 쓰고 선정은 Phase 1 에서 한다 | Accepted (부분 대체: 라이브러리 사용 결정은 ADR-034, 어댑터·시험 세트는 유효) |
 | 2026-11-03 | [ADR-011](ADR-011-settlement-currency-usdc.md) | 정산 통화는 USDC, 시세는 스냅샷 + 견적 유효시간 | Accepted |
 | 2026-11-03 | [ADR-010](ADR-010-stock-consistency.md) | 재고는 Lua 원자 선점 + 예약 TTL + outbox + 멱등 소비 | Accepted |
