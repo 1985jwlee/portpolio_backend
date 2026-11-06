@@ -1,4 +1,3 @@
-@.claude/AGENT.md
 # CLAUDE.md — 저장소 가이드
 
 **이 저장소가 무엇인지**만 담는다. 저장소에 단 하나뿐인 `CLAUDE.md` 다.

@@ -1,7 +1,6 @@
 # Claude Code 개인 설정
 skills-lock.json
 .claude/*
-!.claude/AGENT.md
 !.claude/settings.json
 !.claude/verification.json
 !.claude/check-rules.json
