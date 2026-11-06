@@ -510,6 +510,7 @@ for (const conn of subscribers) conn.queue.offer({ frame, bytes, coalesceKey, se
 - 구독자별 필드 차이가 없도록 공개 메시지에 **개인 필드를 두지 않는다**(04 §3). 그래서 가능한 최적화다.
 - 연결별로 달라지는 것은 `welcome`·`snapshot`·`hb` 뿐이고 이는 핫패스가 아니다.
 - `ts` 는 허브가 메시지를 만든 시각(전송 시각이 아니라 한 번 고정)이다.
+- 같은 원리를 스냅샷에 넓힌 **head 단위 스냅샷 공유**·업그레이드 admission·허브 단계 반응 병합 창·재접속 폭풍 계산(클라이언트 지터 ±50% 유지)은 [18 §5](../18-hot-cache-and-surge-control.md)(ADR-049 Accepted 2026-11-06 — 구조는 확정, 수치는 제안).
 
 ### 3.6 용량 산정
 

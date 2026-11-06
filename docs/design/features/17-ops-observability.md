@@ -856,7 +856,7 @@ flowchart TD
 
 **목적.** 지표를 시각화하고 **읽기 전용 공개 대시보드를 사이트에 임베드**한다(FR-061, AC-012). 대시보드·데이터소스는 코드로 관리한다.
 
-**트리거.** 컨테이너 기동 시 프로비저닝 파일 로드. 방문자가 `/metrics` 페이지(WB-13)를 열면 iframe 으로 공개 대시보드.
+**트리거.** 컨테이너 기동 시 프로비저닝 파일 로드. 방문자가 `/metrics` 페이지(WB-13)를 열면 iframe 으로 공개 대시보드. **단, 과부하 1단계 이상에서는 iframe 대신 정적 안내 + 링크로 바꾼다**(HC-11 확정, 2026-11-06 — 몰림 순간 방문자 × 패널 × 새로고침 질의가 Prometheus·Grafana 로 직행하지 않게, [18 §6.2](../18-hot-cache-and-surge-control.md)). 대시보드 최소 새로고침 간격은 1분 이상으로 고정한다(제안).
 
 | 구분 | 내용 |
 |---|---|
@@ -958,7 +958,7 @@ flowchart TD
 **후퇴안이 없는 이유(G6 실측)**: 익명 Viewer + 프로비저닝 대시보드 안은 `POST /api/ds/query` 로 임의 PromQL(`count({__name__=~".+"})`)이 200 으로 실행되고 `/api/search`·데이터 소스 목록·다른 대시보드가 열려 Prometheus 전체가 공개되는 것과 같다. 따라서 Public dashboards 가 안 될 때의 대안으로도 쓰지 않는다.
 
 **실측 요약**: `GF_SECURITY_ALLOW_EMBEDDING=true`(기본은 `X-Frame-Options: deny`), 익명 접근 off, iframe `sandbox="allow-scripts allow-same-origin"`(둘 다 필수), 사이트 CSP `frame-src` 에 Grafana 공개 출처 1개. 공개 URL 에서 `/explore`·`/d/<다른>`·`/dashboard/new`·`/connections`·`/profile` 은 302(로그인), `/api/search`·`/api/datasources`·`/api/dashboards/uid/*`·`/api/ds/query` 는 401, 쿼리 API 는 `/api/public/dashboards/<토큰>/panels/<id>/query` 만 열려 있고 본문의 임의 `expr` 은 무시된다. 시간 선택을 끄면 클라이언트 범위를 무시하고 대시보드 기본값으로 조회(켜면 클라이언트 범위를 따르고 서버 측 상한은 없음).
-**출처 분리(제안 — 사용자 미확인, 대안 있음)**: 위 실측의 iframe `sandbox="allow-scripts allow-same-origin"` 는 Grafana 가 **사이트와 같은 출처**(`/grafana/` 경로 임베드)이면 샌드박스를 무력화한다(`allow-same-origin` + `allow-scripts` 조합은 iframe 안 스크립트가 sandbox 속성 자체를 제거할 수 있고 사이트 출처의 권한을 그대로 갖는다 → Grafana 의 XSS 가 곧 사이트의 XSS). 그래서 **Grafana 공개 대시보드는 Funnel 의 다른 포트(8443 또는 10000 — 포트가 다르면 다른 출처)로 노출**하고, nginx 의 별도 `server` 블록이 §9.3 허용목록 경로만 프록시한다. 사이트는 443 이다. `GF_SERVER_ROOT_URL` 과 `site.metricsEmbedUrl` 은 그 출처로 하고 CSP `frame-src` 는 그 출처 1개다. Grafana **관리 화면은 `tailscale serve`(tailnet 전용)로만** 연다(공개 포트에 올리지 않는다). 쿠키는 포트로 격리되지 않으므로(같은 호스트명) 사이트 세션 쿠키는 `HttpOnly` 를 유지하고, Grafana 출처로 쿠키가 실려 가도 읽히지 않는지 G6 재실측에 포함한다. **G6 의 기존 통과(로컬)는 다른 오리진 iframe 이었으나 이 실제 토폴로지(Funnel 8443 + 허용목록 프록시)로는 아직 재실측하지 않았다 → 재실측 필요.** 대안: iframe 을 제거하고 web 이 공개 지표 API(고정 쿼리 결과)를 받아 직접 차트로 그린다 — 이 경우 Grafana 는 공개하지 않는다. 어느 쪽을 쓸지는 사용자가 고를 수 있다(이 문서는 출처 분리를 적용 안으로 둔다).
+**출처 분리(사용자 확정 2026-11-06; G6 를 이 토폴로지로 재실측하고 실패하면 대안 적용)**: 위 실측의 iframe `sandbox="allow-scripts allow-same-origin"` 는 Grafana 가 **사이트와 같은 출처**(`/grafana/` 경로 임베드)이면 샌드박스를 무력화한다(`allow-same-origin` + `allow-scripts` 조합은 iframe 안 스크립트가 sandbox 속성 자체를 제거할 수 있고 사이트 출처의 권한을 그대로 갖는다 → Grafana 의 XSS 가 곧 사이트의 XSS). 그래서 **Grafana 공개 대시보드는 Funnel 의 다른 포트(8443 또는 10000 — 포트가 다르면 다른 출처)로 노출**하고, nginx 의 별도 `server` 블록이 §9.3 허용목록 경로만 프록시한다. 사이트는 443 이다. `GF_SERVER_ROOT_URL` 과 `site.metricsEmbedUrl` 은 그 출처로 하고 CSP `frame-src` 는 그 출처 1개다. Grafana **관리 화면은 `tailscale serve`(tailnet 전용)로만** 연다(공개 포트에 올리지 않는다). 쿠키는 포트로 격리되지 않으므로(같은 호스트명) 사이트 세션 쿠키는 `HttpOnly` 를 유지하고, Grafana 출처로 쿠키가 실려 가도 읽히지 않는지 G6 재실측에 포함한다. **G6 의 기존 통과(로컬)는 다른 오리진 iframe 이었으나 이 실제 토폴로지(Funnel 8443 + 허용목록 프록시)로는 아직 재실측하지 않았다 → 재실측 필요.** 대안: iframe 을 제거하고 web 이 공개 지표 API(고정 쿼리 결과)를 받아 직접 차트로 그린다 — 이 경우 Grafana 는 공개하지 않는다. 어느 쪽을 쓸지는 사용자가 고를 수 있다(이 문서는 출처 분리를 적용 안으로 둔다).
 **주의**: ① 공개 페이지 HTML 부트스트랩에 데이터 소스 이름·uid·type·`jsonData` URL(내부 주소)이 들어간다 — 데이터 소스 URL 에 자격 증명·비밀 경로를 두지 않는다. ② Grafana 포트의 `/metrics` 가 무인증으로 열려 있으므로 프록시에서 차단한다(외부 노출 금지). ③ 공개 토큰이 곧 자격이다 — 유출 시 공개를 해제하고 재발급한다.
 
 ### 8.5 오류·경보
@@ -1124,6 +1124,7 @@ server {
 | 쓰기·읽기·`pf_auth`·`pf_wsup` 키 | `$binary_remote_addr` (위 설정 그대로) | **상수 키**(`map "" $pf_all { default all; }`) 전역 상한. 한 사용자가 아니라 사이트 전체의 폭주 방어이며 값은 §9.1 보다 크게 잡는다(S6-4 부하 시험으로 확정) |
 | `/ws/` 주소별 `limit_conn pf_ws` | 사용 | **제거**. WS 제한은 gateway 의 세션 기준(탭 상한 `4409`·메시지 `4429`·전체 `WS_MAX_CONNECTIONS`, 04)으로 이동 |
 | 정적 자원(`/_next/static/`, 이미지·폰트) | `limit_req` 제외(캐시 가능 자원이라 별도 location) | 같음 — 전역 한도가 정적 자원 한 페이지 로드에 소진되는 것을 막는다 |
+| 앱 읽기 버킷(`read.session`·`read.nosession`) | 만들지 않음(주소별 `pf_read` 로 충분) | **조건부 신설**(HC-8 확정, 2026-11-06): 미확보로 판정될 때만 앱에 둔다 — 전역 읽기 키 하나를 스크레이퍼가 다 쓰면 실제 방문자까지 429 가 되기 때문. 값은 제안([03 §1.1](../03-api-contract.md), [18 §6.7](../18-hot-cache-and-surge-control.md)) |
 | 세션 발급(`/api/me`) | `pf_me` 주소별 | **전역 토큰 버킷** 한 개(예: 10r/s, burst 30, 제안값) + 앱의 세션 기준 제한. 버킷이 상한에 근접하면 **작업증명(PoW) 챌린지**를 요구해 익명 세션 무한 생성을 억제한다(ADR-003 B16). 버킷 고갈 시 기존 세션은 영향이 없고 새 익명 세션만 `429` |
 | 주소 헤더 | Funnel 이 넣는 헤더만 신뢰. `X-Forwarded-For` 처럼 **덧붙임 방식**이면 `real_ip_recursive off` 로 **마지막 홉(Funnel 이 붙인 값)만** 신뢰하고 클라이언트가 앞에 넣은 값은 무시 | 사용 안 함, `X-Real-IP` 는 로컬 주소 |
 
@@ -1131,7 +1132,7 @@ G7 ② 시험 보강: 클라이언트가 위조 `X-Forwarded-For` 를 앞에 붙
 
 ### 9.3 `/grafana/` 허용목록 (G6 확정 전 제안)
 
-이 허용목록은 사이트(443)와 **다른 출처**인 Funnel 포트(8443, §8.4 출처 분리)용 `server` 블록에 둔다. 사이트 `server` 블록에는 `/grafana/` 위치를 두지 않는다(제안, 사용자 미확인).
+이 허용목록은 사이트(443)와 **다른 출처**인 Funnel 포트(8443, §8.4 출처 분리)용 `server` 블록에 둔다. 사이트 `server` 블록에는 `/grafana/` 위치를 두지 않는다(사용자 확정 2026-11-06).
 
 ```nginx
 location = /grafana/ { return 404; }                                   # 루트·로그인 화면 차단
@@ -2263,6 +2264,8 @@ flowchart TD
 | GitHubUnavailable | `increase(pf_auth_login_failed_total{reason="github_unavailable"}[5m]) >= 3` | 0 | warn | GitHub 장애/차단 의심(5분 3회) |
 | LogRedactionSpike | `rate(pf_log_redactions_total[10m]) > 0` | 10m | warn | 코드가 금지 데이터를 로그에 넘김 |
 | WsOverflow | `rate(pf_ws_queue_overflow_total[5m]) > 0` | 5m | info | 느린 소비자 격리 발생(대시보드만) |
+
+> 몰림 대응 지표(`pf_cache_*`·`pf_admission_*`·`pf_shed_total`·`pf_pool_wait_seconds`·`pf_loop_lag_seconds`·`pf_breaker_*`)와 경보 7종(OverloadDegraded·OverloadCritical·CacheInvalidationFailing·PoolWaitHigh·LoopLagHigh·BreakerOpen·ShedSustained), 레이블 허용목록 추가 요청 `class` 는 [18 §10](../18-hot-cache-and-surge-control.md)(ADR-049 Accepted 2026-11-06 — 이 표로의 이관은 S7-7 에서 한다. 그때까지 정본은 18 §10, 임계는 제안값). 반응 카운터 대사(HC-5)는 새 지표가 아니라 기존 `pf_projection_drift` 의 `projection="reaction_count"` 값으로 내고 경보는 기존 `ProjectionDrift` 를 쓴다.
 
 `LoginFailedSpike` 임계값은 이전 초안(10분 20회)에서 **10분 10회**로 낮췄다: 동시 접속 50 규모에서는 정상 실패가 시간당 1건 미만일 것이라는 추정에 근거하며(미측정), GitHub 장애는 별도 규칙(`GitHubUnavailable`)이 잡는다.
 

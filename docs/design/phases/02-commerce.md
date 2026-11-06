@@ -420,6 +420,8 @@ sequenceDiagram
 | 오픈 전 | 클라이언트는 `GET /api/deals/{id}` 와 WS 휘발성 `deal.state` 로 대기. 오픈 시각 이전 `reserve` 는 `NOT_OPEN` | — |
 | 대기실(옵션) | 가상 대기열(번호표) — M1 규모에는 과해서 **범위 밖**, 미결 | — |
 
+> 몰림 관점의 보강(입장 버킷 키 `pf:rl:v1:deal_entry:{deal:<id>}:<epochSec>`, 대기열 없는 정직한 재시도 안내 UX, 딜 조회 L1·시간 경계 만료, 남은 수량 구간 표시, `ConfirmPurchase` 딜 단위 세마포어)은 [design/18 §7](../18-hot-cache-and-surge-control.md)(ADR-049, Accepted 2026-11-06). 여기의 "입장 토큰"은 **버킷**이며 서명된 개별 증표가 아니다 — **HC-7 확정: 증표 미도입, 버킷만**.
+
 ### 4.9 k6 부하 시험 설계 (ADR-013 규칙 준수)
 
 **원칙**: 합격선은 정합성(0건)이고, 성능 수치는 **측정 후에 기록**한다(합격선이 아니다). 결과표에는 환경(CPU·메모리·Redis/PG 버전·k6 위치·루프백 여부)을 함께 적는다.
@@ -1458,7 +1460,7 @@ classDiagram
 
 | 테이블 | 채우는 이벤트 | 내용 | 비고 |
 |---|---|---|---|
-| `deal_read.deal_view` | `deal.*`, `reservation.*`, `stock.changed` | 공개 목록·상세: 이름·가격·기간·상태·`remaining_approx` | 목록은 읽기 모델만(CQRS). 잔여 수량은 **근사값**(수 초 지연), 정확한 판정은 `reserve` 에서만 |
+| `deal_read.deal_view` | `deal.*`, `reservation.*`, `stock.changed` | 공개 목록·상세: 이름·가격·기간·상태·`remaining_approx` | 목록은 읽기 모델만(CQRS). 잔여 수량은 **근사값**(수 초 지연), 정확한 판정은 `reserve` 에서만. **딜 화면은 숫자 대신 구간으로 표시한다**(HC-6 확정: 여유 있음 ≥50% · 절반 이하 · 얼마 남지 않음 <10% · 품절(취소분 대기) = 0, 경계는 제안값, [18 §7.3](../18-hot-cache-and-surge-control.md)) |
 | `order_read.order_view` | `order.*`, `payment.*`, `escrow.*`, `shipment.*` | 내 주문 목록·상세(단계 타임라인) | `owner_key` 로 본인 필터 |
 | `payment_read.payment_view` | `payment.*` | 결제 상태(관리자·본인) | |
 | `escrow_read.escrow_view` | `escrow.*` | 보류/해제 기한 표시 | |

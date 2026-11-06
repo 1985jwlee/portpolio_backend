@@ -23,6 +23,7 @@
 | [15](15-visual-design.md) | 시각 디자인: 토큰·타이포·컴포넌트 모양·핵심 화면 목업(모던 미니멀) |
 | [16](16-outage-fallback-page.md) | 서버 중단 시 정적 대체 페이지: 별도 주소 + 수동 전환(도메인 없음), G13 보류, 집 PC 단일 장애점 |
 | [17](17-mock-disclaimer-and-terms-draft.md) | 모의 면책·이용 약관·환불 정책·개인정보 요점·지갑 안내의 ko/en 초안(U15, 법무 검토 전) |
+| [18](18-hot-cache-and-surge-control.md) | 핫 캐시와 동시접속 몰림 대응: 핫 데이터 분류, L0~L3 계층, 스탬피드·핫 키, 재접속 폭풍·스냅샷 공유, 과부하 사다리 0~4, 타임딜 몰림, 용량 모델, 반응 카운터 열(ADR-049, Accepted 2026-11-06) |
 | [features/](features/00-feature-catalog.md) | **기능 114개 세분화(F00)와 모듈별 상세 설계 F10~F17**: 클래스·시퀀스·순서도·상속 구조 |
 | [phases/](phases/00-platform-evolution.md) | **Phase 1~6 영역 설계**: 공통 진화(P0: 서비스 경계·B12 트랜잭션 참여 규칙·이벤트 계약 정본·ENC 통합표·사용자 결정 목록), 바둑(P1), 상거래(P2), 풀필먼트(P3), 채팅(P4). ADR-030~047(Proposed) |
 
@@ -366,6 +367,7 @@ classDiagram
 | `RequestInProgressError` | 409 | `request_in_progress` (+`Retry-After: 1`) | 같은 키로 잠시 후 |
 | `IdempotencyKeyReuseError` | 422 | `idempotency_key_reuse` | 아니오(새 키로) |
 | `WriteLockedError` | 503 | `write_locked` (+`Retry-After: 60`) | 잠금 해제 후 |
+| `OverloadedError` | 503 | `overloaded` (+`Retry-After` 지터) — 과부하 사다리·핫 키·대기열 상한 거절(HC-2, [18 §6.2](18-hot-cache-and-surge-control.md)) | 쓰기는 자동 재시도 안 함(사용자가 `Retry-After` 뒤), 읽기 1회까지 |
 | `RateLimitedError` | 429 | `rate_limited` | `Retry-After` 후 |
 | `TransientError` | 503 | `unavailable` | 예 (백오프, ADR-023) |
 | `PermanentError` | 500 | `internal` | 아니오 → `dead` |

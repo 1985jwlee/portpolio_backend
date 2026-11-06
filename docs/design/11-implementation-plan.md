@@ -70,11 +70,11 @@ flowchart LR
 | S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만, AC-023 |
 | S1-5 | `.dependency-cruiser.cjs` **B1~B10** 규칙(B10 = `@pf/infra` 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
-| S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 | ADR-027, EV-14, AC-020, FR-090 |
-| S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 | ADR-028, AC-027, FR-110 |
-| S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 | ADR-026, AC-024, FR-100 |
-| S1-12 | `FieldCipher` 포트 + AES-256-GCM 구현(`packages/infra/crypto`), 키링 로더·키 ID 선택, 단위 시험(왕복·AAD 불일치·변조·iv 중복·회전 멱등) | S1-3, S1-8 | 시험 통과, `pg_dump` 에 평문 센티널 부재 | ADR-026, AC-018, AC-034, FR-025, FR-101, FR-102 |
-| S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 | ADR-024 |
+| S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 (근거: ADR-027, EV-14, AC-020, FR-090) |
+| S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
+| S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 (근거: ADR-026, AC-024, FR-100) |
+| S1-12 | `FieldCipher` 포트 + AES-256-GCM 구현(`packages/infra/crypto`), 키링 로더·키 ID 선택, 단위 시험(왕복·AAD 불일치·변조·iv 중복·회전 멱등) | S1-3, S1-8 | 시험 통과, `pg_dump` 에 평문 센티널 부재 (근거: ADR-026, AC-018, AC-034, FR-025, FR-101, FR-102) |
+| S1-8 | `packages/kernel/ports`(`RateLimiter`·`PresenceCounter`·`KeyValueCache`·`EventTransport`) + `packages/infra` 메모리/Postgres 어댑터 + 포트 계약 시험 스위트 | S1-2 | 두 어댑터가 같은 계약 스위트 통과, `usecase` 가 `@pf/infra` 를 임포트하면 B10 으로 CI 실패 (근거: ADR-024) |
 | S1-7 | 로컬 compose(02): postgres, 개발 모드 기동 + **조립 루트·생명주기 골격**(기동 순서·종료 순서, `ShutdownCoordinator`) + 시드/CLI 프레임(`db:seed`, `worker <cmd>`) | S1-4 | `bun run dev` 로 api·worker 기동, api `/readyz` 성공, SIGTERM 시 종료 순서대로 정리 |
 | S1-9 | `packages/protocol`: TypeBox 스키마(REST·WS·이벤트)·상수(`ENTRY_BODY_MAX_CHARS` 등)·`gen:schema`(JSON Schema 내보내기)·골든 JSON(`packages/protocol/golden/`) 골격 | S1-1 | `gen:schema --check` 통과, 골든 왕복 시험(L2), 별도 `@sinclair/typebox` 0.34 사용(`typebox` 1.x 금지) |
 | S1-10 | `packages/testkit`: `FakeClock`·`FakeIdGenerator`·`TestDb`·`FaultInjector`(`failAt`/`delayAt`/`Gate`)·하니스(Unit/Module/Chaos/Api/Gateway) | S1-4 | 하니스로 빈 시험이 돌고, 주입 지점 상수 목록이 F16 §13.6 과 일치 |
@@ -113,6 +113,7 @@ flowchart LR
 | S4-5 | 공개 채널 변환(`ownerKey`·`userId` 제거) | S4-2 | **AC-009** 구조 시험: 공개 메시지 스키마에 식별자 필드 없음 | FR-041 |
 | S4-6 | **`/ws/private`**: 세션 쿠키 필수(익명 포함), 세션 캐시, `PrivateRouter`, `flow.step` 전송(세션 소유자만), 세션당 연결 수 제한(`4409`), 회전 시 `4401` | S4-2, S3-7 | 타 세션이 받지 못함. 쿠키 없으면 업그레이드 401. 익명 세션도 자기 흐름 수신. 로그인 후 이전 세션 연결이 닫힘 | FR-040, AC-031 |
 | S4-7 | `flow_counter` 주기 집계 + `flow.summary` | S3-7 | 개수만 노출, 식별자 없음 | FR-041 |
+| S4-8 | `SingleFlightCache` 유틸(`KeyValueCache.getOrLoad`: 병합·논리 만료·지터·세대 가드·시간 제한·`pf_cache_*`) + 스냅샷 head 공유(`PublicHub.lastRead` 기준, `caughtUp` 일 때만) + `UpgradeAdmission`(`WS_UPGRADE_RATE` 100/초 제안, 초과 HTTP 503) + 허브 단계 반응 병합 창 | S1-8, S4-3, S4-4 | **SG-1**(콜드 동시 300 → 원본 1, 병합 끈 변형이 실패), **SG-5**(같은 head 생성 1회·`head+1` 누락 0, 순서 뒤집은 변형이 실패), 초과 업그레이드 503 | ADR-049, design/18 §3.2·§5, AC-008 |
 
 ### S5 — 웹 UI
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -127,7 +128,7 @@ flowchart LR
 ### S6 — 나머지 기능
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
-| S6-1 | 반응 PUT/DELETE, 유일 키 중복 심판, `reaction.changed(count)`, `my_reaction` | S3 | 같은 반응 동시 2회 → 1건. 총개수 덮어쓰기 | FR-021 |
+| S6-1 | 반응 PUT/DELETE, 유일 키 중복 심판, **반응 카운터 열 `guestbook.reaction_count`**(행 변화 조건부 ±1, 같은 tx, 잠금 순서 글 행 → 반응 행 → 카운터 → outbox — HC-5), `reaction.changed(count)`(값 = 카운터), `my_reaction`, 대사 한 줄(`pf_projection_drift{projection="reaction_count"}`)·`worker repair reaction-count` | S3 | 같은 반응 동시 2회 → 1건. 총개수 덮어쓰기. **I-R1(카운터 = 행 수) L3 속성 시험**(무작위 추가·취소 순열), 조건 없는 증감 변형이 실패 | FR-021, ADR-049, design/18 §4.4, F11 §3.6 |
 | S6-2 | 수정/삭제(로그인+본인), `version` 조건 갱신, 409 + 최신 뷰 | S2-3, S3 | **AC-005**, **AC-016**(동시 수정 한 건만), **AC-004**(익명 403) | FR-022, FR-034 |
 | S6-9 | 감사 조회 `GET /api/admin/audit`·`worker audit:list`·보관 규칙(`auth` 7일·`admin`/`system` 90일), 감사 호출을 ID-06·07, GB-07~10·27, CLI 에 연결 | S6-3, S1-14 | 비관리자 403·키셋 조회·보관 경계 시험, 각 행위가 같은 tx 에서 기록됨 | ADR-027, EV-15, AC-029, AC-020, FR-090, FR-091, FR-093 |
 | S6-10 | 보관 정지: `worker retention:pause\|resume`, `status/retention/pause.json`, `RetentionRunner`·`PurgeExpiredSessions`·`archive-logs.sh` 의 정지 준수, 24시간 자동 해제, 경보 `RetentionPaused` | S6-6, S8-7 | 정지 중 삭제 없음, TTL 후 자동 해제, 감사 `retention_paused` | ADR-028, EV-16, AC-026, FR-038 |
@@ -137,16 +138,19 @@ flowchart LR
 | S6-5 | 읽기 모델 재구성(`rebuild`, 그림자 교체) | S3-5 | **AC-017**: 재구성 중 쓰기가 들어와도 최종 결과가 정본과 일치 | ADR-023, FR-036 |
 | S6-6 | 보관 정리(모듈별 `RetentionRule` 등록: 세션·이벤트·`request_key`·`change_log`·`dead`)·익명화(`AnonymizeSessionData`) | S3 | **AC-011**: 7일 경과 데이터 삭제, 글 보존, 작성자 링크 익명화 | FR-080, FR-080, FR-093 |
 | S6-7 | `dead` 재투입 CLI(`worker dead-requeue`) | S3-4 | `dead → new` 전이, 시도 횟수 초기화, 사유 기록 | ADR-023, AC-030, FR-037 |
+| S6-11 | `GET /api/entries` 공개 첫 페이지 L1 병합(보존 0초) + 1단계 이상 보존(soft 2s/hard 30s 제안)·`stale-if-error`, 개인 필드는 보조 질의로 분리 유지, (선택) 프로젝터 `pg_notify('pf_cache')` 세대 무효화 + 재구독 시 전체 무효화, 기동 예열 | S4-8, S3-6, S6-1 | **SG-1·SG-2·SG-3**(세대 가드 끈 변형이 옛 값을 저장), 공개 키에 개인 필드 없음(AC-009 구조 시험 확장) | ADR-049, design/18 §3·§4, AC-013 |
+| S6-12 | 과부하 사다리 0~3(`OVERLOAD_MODE=shadow` 기본 — HC-1) + 한 풀 위 클래스 C0~C5 허용량(HC-10, 풀 10: C1 예약 2·C2 ≤4·C3 ≤6, 제안) + 풀 획득 1s·대기열 상한 + 반응 글 단위 세마포어(동시 1) + `503 overloaded`(HC-2 확정) + 타임아웃 예산 정렬(`statement_timeout = min(5s, 남은 마감)`) + 차단기·재시도 예산 | S6-4, S6-1, S1-10 | **SG-6·SG-7·SG-8**(풀 2 교착 0), C0·C1 거절 0, 단계 전이가 `pf_admission_level` 에 보임. S6-4 완료 기준에 **IP 미확보 전역 키 값(design/18 §6.7) 확정**과 미확보 판정 시 앱 읽기 버킷 신설(HC-8) 추가 | ADR-049, design/18 §6, AC-013, AC-007 |
 
 ### S7 — 관측
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
 | S7-1 | 지표 노출(요청·지연·오류·outbox 적체·WS 연결 수·큐 길이) | S0-5, S4 | `/metrics` 에 명세 지표, 레이블에 식별자 없음 | FR-060 |
 | S7-2 | Prometheus·Grafana 프로비저닝, 대시보드 JSON | S7-1 | compose 에서 대시보드가 자동 로드 | FR-060 |
-| S7-3 | Public dashboards 임베드 | S7-2 | **G6**(Grafana 는 사이트와 다른 출처 — Funnel 8443, F17 §8.4, 제안·사용자 미확인이라 이 토폴로지로 재실측 필요): 사이트에서 편집·탐색 UI 없이 보임(로컬 실측 통과: `GF_SECURITY_ALLOW_EMBEDDING=true`, iframe `sandbox="allow-scripts allow-same-origin"`, `frame-src` 에 Grafana 공개 출처 1개). **후퇴안 없음** — 실패하면 임베드를 포기하고 링크·스크린샷으로 대체(익명 Viewer 는 임의 PromQL 이 열려 부적합) | FR-061, AC-012 |
+| S7-3 | Public dashboards 임베드 | S7-2 | **G6**(Grafana 는 사이트와 다른 출처 — Funnel 8443, F17 §8.4, 출처 분리는 사용자 확정(2026-11-06)이며 이 토폴로지로 재실측 필요): 사이트에서 편집·탐색 UI 없이 보임(로컬 실측 통과: `GF_SECURITY_ALLOW_EMBEDDING=true`, iframe `sandbox="allow-scripts allow-same-origin"`, `frame-src` 에 Grafana 공개 출처 1개). **후퇴안 없음** — 실패하면 임베드를 포기하고 링크·스크린샷으로 대체(익명 Viewer 는 임의 PromQL 이 열려 부적합) | FR-061, AC-012 |
 | S7-4 | 운영 지표 페이지(웹) | S7-3, S5 | 임베드 + 폴백 안내 | FR-061 |
 | S7-5 | `StatusFileCollector`(OB-16)와 상태 파일 규약(`status/<job>/last_run.json`: job·started_at·finished_at·ok·detail·version·last_success_at, 원자적 rename) — 스크립트 3종이 같은 쓰기 헬퍼를 쓴다. 호스트 디스크(`host_health`)·DB 상태(`DbHealthCollector`) 지표와 경보 5종 추가(F17 §16.2.1) | S7-1, S1-11 | 파일 없음/오래됨/`ok=false` 를 구분해 `pf_ops_*` 노출, 깨진 파일은 `pf_collector_errors_total` | ADR-027, AC-025, FR-062 |
 | S7-6 | Grafana 경보 규칙·Discord 연락처·정책 프로비저닝(OB-17), `rules/pf.yml` 식 정본과 `promtool test rules`, 경보 임계값 표(F17 §17) | S7-2, S7-5 | **G**(미검증 항목): 시험 알림 1건이 Discord 에 도착, `$__file{}` 시크릿 확장 확인, 개발 모드에서 규칙 미로드 · **실측 반영 확인**: 시크릿 파일/환경변수 누락 시 프로비저닝 전체 실패 동작 점검, 시험 알림은 새 API 경로(`/apis/notifications.alerting.grafana.app/v1beta1/…/receivers/{base64url 이름}/test`), 카운터 선초기화로 첫 건 유실 없음, 정본 규칙에 `\|` 이스케이프 없음 | ADR-027, AC-025, FR-063 |
+| S7-7 | 몰림 대응 지표(`pf_cache_*`·`pf_admission_*`·`pf_shed_total`·`pf_pool_wait_seconds`·`pf_loop_lag_seconds`·`pf_breaker_*`)·레이블 `class` 허용목록 추가·경보 7종·대시보드 패널(열화 단계·클래스별 거절·스냅샷 공유율) + 1단계 이상 메트릭 iframe → 정적 안내(HC-11) | S7-6, S6-12, S4-8 | `promtool test rules` 통과, 레이블 규칙 시험 통과, 사다리 강제 주입 시 패널·경보가 반응 | ADR-049, design/18 §10, FR-060, FR-061 |
 
 ### S8 — 운영 경화
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
@@ -168,6 +172,7 @@ flowchart LR
 | S9-3 | 소크·재접속·롤링 | WS 장시간 안정, 배포 중 끊김 후 자동 복구 |
 | S9-4 | 집 PC 단일 호스트(**AC-014**) | 집 PC(Compose, 백엔드+web)에서 AC-001·008·010 통과. Oracle 은 카드 없음으로 미추진(spec A-029) |
 | S9-5 | 문서 정합 | ADR 상태·tech-stack 버전·README 로드맵 갱신 |
+| S9-6 | 몰림·과부하 시험(design/18, 08 §9.1) | **SG-4·SG-9** 를 호스트·Funnel 경유로 실행, 사다리 임계·히스테리시스를 측정으로 확정한 뒤 `OVERLOAD_MODE=enforce` 전환 여부를 기록(HC-1). 합격선은 AC-013·G14 ⑦ 인용 |
 
 ## 5. 의존 그래프 (핵심 경로)
 

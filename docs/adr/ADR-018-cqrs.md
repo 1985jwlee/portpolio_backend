@@ -53,7 +53,7 @@ flowchart LR
 ### M1 에 적용되는 범위
 | 모듈 | 쓰기 모델 (`<m>`) | 읽기 모델 (`<m>_read`) |
 |---|---|---|
-| `guestbook` | `entry`, `reaction`, `report`, `moderation_action` | `entry_view`(글 + 반응 집계), `report_queue` |
+| `guestbook` | `entry`, `reaction`, **`reaction_count`**(반응 집계 카운터, 쓰기 모델 상태 — ADR-049 HC-5, 불변식 I-R1: 카운터 = 반응 행 수), `report`, `moderation_action` | `entry_view`(글 + 반응 집계; 프로젝터가 이벤트의 `count` 로 덮어씀), `report_queue` |
 | `events` | `outbox_event`, `trace_step`(추가 전용) | `flow_counter`(주기 집계) |
 | `realtime` | — | `change_log`(재접속 복구용 이력) |
 | `identity` | `user_account`, `session` | 없음(조회 없음, 인증 확인은 쓰기 쪽 키 조회) |

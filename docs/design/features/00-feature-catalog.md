@@ -40,8 +40,8 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | GB-01 | 글 작성 | `POST /api/entries` | `PostEntry` | `entry` W, `request_key` W, `outbox_event` W, `trace_step` W | `entry.posted` | FR-020,024 / AC-001,002 | S3-1,2 |
 | GB-02 | 글 수정 | `PATCH /api/entries/{id}` | `EditEntry` | `entry` W(version 조건), outbox, request_key | `entry.edited` | FR-022,034 / AC-005,016 | S6-2 |
 | GB-03 | 글 삭제 | `DELETE /api/entries/{id}` | `DeleteEntry` | `entry` W(soft), outbox, request_key | `entry.deleted` | FR-022 / AC-005 | S6-2 |
-| GB-04 | 반응 추가 | `PUT …/reactions/{emoji}` | `AddReaction` | `reaction` W(유일 키), outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
-| GB-05 | 반응 취소 | `DELETE …/reactions/{emoji}` | `RemoveReaction` | `reaction` D, outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
+| GB-04 | 반응 추가 | `PUT …/reactions/{emoji}` | `AddReaction` | `reaction` W(유일 키), `reaction_count` W(카운터 +1, HC-5), outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
+| GB-05 | 반응 취소 | `DELETE …/reactions/{emoji}` | `RemoveReaction` | `reaction` D, `reaction_count` W(카운터 −1, HC-5), outbox, request_key | `reaction.changed` | FR-021 | S6-1 |
 | GB-06 | 신고 | `POST …/reports` | `ReportEntry` | `report` W, outbox, request_key | `report.filed` | FR-023 | S6-3 |
 | GB-07 | 숨김 | `POST /api/admin/entries/{id}/hide` | `HideEntry` | `entry` W(version), `moderation_action` W, outbox | `entry.hidden` | FR-023 / AC-006 | S6-3 · 감사: `admin.entry_hidden` |
 | GB-08 | 숨김 해제 | `POST …/unhide` | `UnhideEntry` | 위와 동일 | `entry.unhidden` | FR-023 | S6-3 · 감사: `admin.entry_unhidden` |
@@ -167,9 +167,9 @@ M1 에서 만들 **모든 기능을 ID 로 분해**한 정본 목록이다. 상�
 | OB-12 | CI 워크플로(PR 검사·빌드·릴리스) | `.github/workflows` | — | S1-6,S8-6 |
 | OB-13 | 쓰기 잠금·긴급 스위치 운영 절차 (`worker admin write-lock` + `POST /api/admin/write-lock`) | 런북 | ADR-008 | S6-4 (도구), S8-1 (런북) |
 | OB-14 | k3d 매니페스트·롤링 검증 | `infra/k8s` | ADR-002 (AC-014 는 집 PC 단일 호스트) | S8-5 |
-| OB-15 | 로그 아카이브·조회 | **systemd 타이머**(`pf-archive-logs`, 일 1회 03:10) / 운영자 | `archive-logs.sh`, `logq.sh`, `infra/systemd/*` | — (Docker 로그 → `$PF_LOG_DIR/archive`), 상태는 `status/archive_logs/last_run.json` | ADR-027 | S8-7 |
-| OB-16 | 운영 상태 파일 수집 | worker `/metrics` 스크레이프 | `StatusFileCollector`, `StatusFileReader` (`status/<job>/last_run.json` → `pf_ops_*` 지표) | `STATUS_DIR` 파일(읽기 전용) | ADR-027 | S7-5 |
-| OB-17 | 경보 라우팅(Discord) | Grafana 알림 평가 | Grafana 알림 규칙·연락처·정책 프로비저닝 (`infra/grafana/provisioning/alerting/**`, 식 정본 `infra/prometheus/rules/pf.yml`) | — | ADR-027 | S7-6 |
+| OB-15 | 로그 아카이브·조회 | **systemd 타이머**(`pf-archive-logs`, 일 1회 03:10) / 운영자 · `archive-logs.sh`, `logq.sh`, `infra/systemd/*` · — (Docker 로그 → `$PF_LOG_DIR/archive`), 상태는 `status/archive_logs/last_run.json` | ADR-027 | S8-7 |
+| OB-16 | 운영 상태 파일 수집 | worker `/metrics` 스크레이프 · `StatusFileCollector`, `StatusFileReader` (`status/<job>/last_run.json` → `pf_ops_*` 지표) · `STATUS_DIR` 파일(읽기 전용) | ADR-027 | S7-5 |
+| OB-17 | 경보 라우팅(Discord) | Grafana 알림 평가 · Grafana 알림 규칙·연락처·정책 프로비저닝 (`infra/grafana/provisioning/alerting/**`, 식 정본 `infra/prometheus/rules/pf.yml`) · — | ADR-027 | S7-6 |
 
 ## 9. 합계
 

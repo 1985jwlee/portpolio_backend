@@ -130,7 +130,7 @@
 | **G3** | Next.js on Bun | 빌드·`standalone` 실행·SSR·ISR·정적 에셋·`next-intl`·이미지 최적화가 Bun 런타임에서 정상 | web 만 Node 22 LTS 로 실행 |
 | **G4** | DB 드라이버 | Drizzle 호환 + 트랜잭션 + **LISTEN/NOTIFY 전용 연결** + `SKIP LOCKED` 동시성 시험 통과 | 후보 순서대로 대체. **로컬 실측 결과: Bun.sql 통과, 권장(ADR-022 관문 결과)** |
 | **G5** | 지표·로깅 | `/metrics` 에 요청 수·지연·outbox 적체 지표가 나오고 레이블 규칙(식별자 금지)을 지킴 | 후보 교체 |
-| **G6** | Grafana 임베드 | Public dashboards 가 사이트에 임베드되고 편집·탐색 UI 가 노출되지 않음. **사이트와 다른 출처(Funnel 8443 등)로 노출한 실제 토폴로지에서 재실측 필요**(제안, 사용자 미확인 — 대안: iframe 제거 후 web 직접 차트) | **후퇴안 없음**(익명 Viewer 는 임의 PromQL 이 열려 부적합, §11.1). 실패 시 임베드를 포기하고 링크/스크린샷으로 대체 |
+| **G6** | Grafana 임베드 | Public dashboards 가 사이트에 임베드되고 편집·탐색 UI 가 노출되지 않음. **사이트와 다른 출처(Funnel 8443 등)로 노출한 실제 토폴로지에서 재실측 필요**(출처 분리 **사용자 확정 2026-11-06**; 대안(iframe 제거 후 web 직접 차트)은 G6 재실측이 실패할 때의 후퇴 후보) | **후퇴안 없음**(익명 Viewer 는 임의 PromQL 이 열려 부적합, §11.1). 실패 시 임베드를 포기하고 링크/스크린샷으로 대체 |
 | **G7** | nginx | ① 사용할 이미지에서 `nginx -V` 로 `realip` 포함 확인 ② 클라이언트가 보낸 주소 헤더가 버려지고 정규화됨 ③ (Oracle 추진 시에만) Oracle 경로 TLS 자동 발급·갱신 방식 확정 — 현재 보류 | 모듈 포함 이미지 사용 또는 직접 빌드, 인증서 발급 컨테이너 분리 |
 | **G8** | Envoy Gateway on k3d | HTTPRoute 로 `/api`, `/ws`(WebSocket), `/` 가 라우팅됨 | 다른 구현체 |
 | **G9** | Testcontainers on Bun | (선택, **S1-6 에서 확인**) Bun 에서 동작 | compose 서비스 유지 |

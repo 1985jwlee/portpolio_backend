@@ -56,7 +56,7 @@ flowchart TD
 | `img-src` | `'self' data:` + **CI 배지 호스트 1개** | 외부 이미지는 CI 상태 배지(FR-003)뿐이다. 호스트는 `site.ciBadgeUrl`([12](12-content.md) §1.1)에서 빌드 시 뽑아 넣고, 변수가 `null` 이면 이 값을 넣지 않는다. 배지의 실제 호스트·리다이렉트(예: GitHub Actions 배지가 다른 호스트로 넘기는지)는 **미확인** — 구현 시 브라우저 콘솔 위반 보고로 확정. 아바타는 쓰지 않는다 |
 | `font-src` | `'self'` | 폰트는 자체 호스팅 |
 | `connect-src` | `'self' wss://<PUBLIC_ORIGIN 의 호스트>` | REST 와 WebSocket. 개발은 `ws://localhost:8080` |
-| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1). **사이트와 다른 출처여야 한다** — Funnel 다른 포트(8443/10000), 같은 출처 `/grafana/` 임베드는 `allow-same-origin` 으로 sandbox 가 무력화되므로 금지(F17 §8.4, 제안·사용자 미확인·대안: iframe 제거 후 web 직접 차트) | **G6 로컬 실측으로 확정**(Grafana 공개 출처 1개). 다른 포트 출처 토폴로지로는 **재실측 필요**. 임베드가 안 되면 링크/스크린샷으로 대체하고 이 값을 제거한다. iframe `sandbox="allow-scripts allow-same-origin"` 필수, Grafana 는 `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off. **후퇴안 없음**: 익명 Viewer 는 임의 PromQL 이 열려(`POST /api/ds/query`) 부적합 |
+| `frame-src` | Grafana 공개 대시보드 출처 1개(`site.metricsEmbedUrl` 의 출처, [12](12-content.md) §1.1). **사이트와 다른 출처여야 한다** — Funnel 다른 포트(8443/10000), 같은 출처 `/grafana/` 임베드는 `allow-same-origin` 으로 sandbox 가 무력화되므로 금지(F17 §8.4, 출처 분리 사용자 확정 2026-11-06; G6 재실측 실패 시 대안: iframe 제거 후 web 직접 차트) | **G6 로컬 실측으로 확정**(Grafana 공개 출처 1개). 다른 포트 출처 토폴로지로는 **재실측 필요**. 임베드가 안 되면 링크/스크린샷으로 대체하고 이 값을 제거한다. iframe `sandbox="allow-scripts allow-same-origin"` 필수, Grafana 는 `GF_SECURITY_ALLOW_EMBEDDING=true` + 익명 접근 off. **후퇴안 없음**: 익명 Viewer 는 임의 PromQL 이 열려(`POST /api/ds/query`) 부적합 |
 | `frame-ancestors` | `'none'` | 클릭재킹 방지 |
 | `base-uri` | `'self'` | |
 | `form-action` | `'self'` | |

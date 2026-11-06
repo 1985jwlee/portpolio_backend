@@ -45,7 +45,7 @@ flowchart TB
         A1["Pg*Repository · PgRequestKeyStore"]
     end
     subgraph store["Postgres 쓰기 스키마"]
-        T1[("guestbook.entry · reaction · report<br/>moderation_action · write_lock · request_key")]
+        T1[("guestbook.entry · reaction · reaction_count · report<br/>moderation_action · write_lock · request_key")]
         T2[("events.outbox_event · trace_step")]
     end
     RT --> BASE
@@ -391,8 +391,8 @@ classDiagram
     }
     class ReactionRepository {
         <<interface>>
-        +insertIfAbsent(r) bool
-        +deleteIfPresent(entryId, actor, emoji) bool
+        +addIfAbsent(r) CountChange
+        +removeIfPresent(entryId, actor, emoji) CountChange
         +countOf(entryId, emoji) int
         +summarize(entryId, actor) ReactionSummary
     }
@@ -450,6 +450,7 @@ classDiagram
 
 - 모든 `Pg*` 어댑터는 **`UnitOfWork.run` 이 건네준 트랜잭션 핸들**로만 동작한다(별도 커넥션 금지). 그래야 9단계가 한 트랜잭션이다.
 - `ClaimResult` = `{ kind: 'new' } | { kind: 'replay', status, body } | { kind: 'mismatch' }`.
+- `CountChange` = `{ changed: boolean, count: int }` — 반응 행 변경과 카운터 증감을 **한 문장**으로 한 결과(§3.6 R2). `countOf` 는 카운터 열을 읽는다(`count(*)` 아님).
 
 ### 3.4 값 객체 규칙 (ADR-023 길이 상한)
 
@@ -467,12 +468,79 @@ classDiagram
 | 이벤트 | 집합체(`aggregate.id`) | 순서를 지키는 수단 |
 |---|---|---|
 | `entry.posted/edited/deleted/hidden/unhidden` | `entry.id` | `entry.version` 조건부 갱신이 행 잠금을 잡음 → 이후 outbox 추가 |
-| `reaction.changed` | **`entry.id`** (반응 행이 아니라 글 단위) | 반응 명령도 `entry` 행을 `FOR NO KEY UPDATE` 로 잠그고 개수를 센 뒤 outbox 추가 |
+| `reaction.changed` | **`entry.id`** (반응 행이 아니라 글 단위) | 반응 명령도 `entry` 행을 `FOR NO KEY UPDATE` 로 잠그고 반응 행과 카운터(§3.6)를 바꾼 뒤 outbox 추가 |
 | `report.filed/resolved` | `report.id` | 신고 행 단위. 프로젝터의 `report_queue.last_seq`(키 단위 가드)로 검사 |
 
 **왜 반응이 `entry` 행을 잠그는가.** `reaction.changed` 는 변경 후 총개수(`count`)를 싣고 프로젝터는 이모지별 `reaction_seq[emoji]`(database-schema §5-1)로 오래된 이벤트를 버리고 `reactions[emoji] = count` 로 덮어쓴다. 같은 이모지의 두 반응이 **동시에** 커밋되면 `seq` 순서와 커밋 순서가 뒤바뀔 수 있고, 먼저 보이는 큰 `seq`(= 더 오래된 `count`)가 나중에 보이는 작은 `seq` 이벤트를 "오래된 것"으로 만들어 최신 개수가 영영 반영되지 않는다. 또 디스패처의 집합체 선두 규칙(F13 §3.3)도 `seq` 가 커밋 순서라는 가정에 선다.
 글 행 잠금으로 **같은 글에 대한 모든 쓰기를 직렬화**하면 `seq` 순서 = 커밋 순서가 되어 이 문제가 사라진다. 비용은 같은 글에 대한 쓰기 대기뿐이며 이 사이트 규모에서는 무시할 수 있다.
 → 이 가정(집합체별 `seq` 순서 = 커밋 순서)은 [F13 §3.3](13-events-pipeline.md) 이 받아들여 명시했다(디스패처 선두 규칙·프로젝터 순번 가드와 호환).
+
+### 3.6 반응 카운터 열 (HC-5, 2026-11-06 확정)
+
+이벤트·응답의 **변경 후 총개수**는 `count(*)` 가 아니라 쓰기 모델의 카운터 열 `guestbook.reaction_count.count`([database-schema §4-2](../../domains/database-schema.md))에서 얻는다. 해석·기각안·시뮬레이션은 [18 §4.4](../18-hot-cache-and-surge-control.md) 이고, 이 절이 SQL·동시성의 정본이다. 읽기 모델(`entry_view.reactions`)·이벤트 계약(`reaction.changed` v1)·프로젝터(GB-24)는 **바뀌지 않는다.**
+
+**불변식 I-R1**: 모든 커밋 시점에 `reaction_count.count` = 그 (글, 이모지)의 `reaction` 행 수. 행이 0 이 된 이모지는 카운터 행을 지우지 않고 `count = 0` 으로 둔다(삽입·삭제 반복으로 행이 들락거리지 않게).
+
+**규칙**
+
+| # | 규칙 | 지키지 않으면 |
+|---|---|---|
+| R1 | tx 안 잠금 순서는 **글 행(`FOR NO KEY UPDATE`) → 반응 행 → 카운터 행 → outbox**. 카운터 행을 쓰는 모든 경로(GB-04·05·복구 CLI)가 글 행을 먼저 잡는다 | 글 행 잠금이 빠지고 outbox 가 카운터보다 앞서면 `seq` ≠ 커밋 순서가 되어 프로젝터 최종값이 틀린다(18 §4.4.6: 5,000 회 중 4,401) |
+| R2 | 카운터는 **반응 행이 실제로 1행 바뀐 경우에만** ±1 한다 — 아래 SQL 처럼 `RETURNING` 결과에 묶어 **한 문장**으로 한다(usecase 가 따로 부르지 않는다) | 이미 눌린 행위자의 재요청이 두 번 센다(5,000/5,000 불일치) |
+| R3 | 카운터 증감은 반응 행 변경·outbox 추가와 **같은 tx**(`UnitOfWork` 핸들) | 롤백된 반응이 카운터에 남는다 |
+| R4 | 글 행 자체는 쓰지 않는다(`version`·`updated_at` 불변) | 낙관적 버전(ADR-021)과 03 계약의 `version` 의미가 깨진다 |
+| R5 | 감소 대상 카운터 행이 없거나 음수가 되면 I-R1 위반이다 → `PermanentError(reaction_counter_invariant)` 로 **tx 전체 롤백**(로그·`pf_projection_drift` 대사로 드러남). 조용히 0 으로 맞추지 않는다 | 어긋남이 숨겨지고 커진다 |
+
+**SQL — 추가(GB-04, 글 행 잠금 뒤 한 문장)**
+
+```sql
+WITH ins AS (
+  INSERT INTO guestbook.reaction (entry_id, actor_key, emoji, created_at)
+  VALUES ($entry, $actor, $emoji, $now)
+  ON CONFLICT (entry_id, actor_key, emoji) DO NOTHING
+  RETURNING 1
+), up AS (
+  INSERT INTO guestbook.reaction_count AS c (entry_id, emoji, count)
+  SELECT $entry, $emoji, 1 FROM ins
+  ON CONFLICT (entry_id, emoji) DO UPDATE SET count = c.count + 1
+  RETURNING c.count
+)
+SELECT EXISTS (SELECT 1 FROM ins) AS changed,
+       COALESCE((SELECT count FROM up),
+                (SELECT count FROM guestbook.reaction_count
+                  WHERE entry_id = $entry AND emoji = $emoji), 0) AS count;
+```
+
+**SQL — 취소(GB-05, 글 행 잠금 뒤 한 문장)**
+
+```sql
+WITH del AS (
+  DELETE FROM guestbook.reaction
+   WHERE entry_id = $entry AND actor_key = $actor AND emoji = $emoji
+  RETURNING 1
+), dn AS (
+  UPDATE guestbook.reaction_count c
+     SET count = c.count - 1                    -- CHECK (count >= 0) 이 음수를 막는다(R5)
+   WHERE c.entry_id = $entry AND c.emoji = $emoji
+     AND EXISTS (SELECT 1 FROM del)
+  RETURNING c.count
+)
+SELECT EXISTS (SELECT 1 FROM del) AS changed,
+       EXISTS (SELECT 1 FROM dn)  AS counter_hit,   -- changed 인데 false 면 R5 위반
+       COALESCE((SELECT count FROM dn),
+                (SELECT count FROM guestbook.reaction_count
+                  WHERE entry_id = $entry AND emoji = $emoji), 0) AS count;
+```
+
+- 데이터 변경 CTE 는 한 스냅샷에서 돈다. 변경이 없을 때(`changed=false`) 바깥의 카운터 조회는 문장 시작 시점 값이지만, 글 행 잠금이 같은 글의 다른 쓰기를 막고 있으므로 그것이 곧 현재 값이다.
+- 왕복이 한 번이라 잠금 보유 시간에 왕복 지연이 한 번만 들어간다.
+- 카운터 행 잠금은 글 행 잠금 아래에서만 잡히므로 **기다림이 생기지 않는다**(R1). 그래서 핫 로우의 직렬화 지점은 이전과 같은 글 행 하나이고, 보유 시간에서 `count(*)`(그 글의 반응 행 전체 훑기)만 빠진다.
+
+**행 수를 바꾸지 않는 경로는 카운터를 건드리지 않는다**: 세션 익명화(GB-12 `actor_key → purged:<uuid>`), 숨김·해제(GB-07·08), 삭제 묘비(GB-03 — 반응 행이 남으므로 카운터도 남는다. 공개 표시는 읽기 모델 묘비가 비운다).
+
+**대사·복구·재구성**: 대사 SQL·주기는 [database-schema §10](../../domains/database-schema.md), 복구 `worker repair reaction-count`(글 행 잠금 → 재집계 → 덮어쓰기, 이벤트 없음 → 필요하면 이어서 `rebuild entry_view`)는 [F16 §11.2](16-cross-cutting.md), 재구성 검증의 I-R1 확인은 [F12 §9.3](12-guestbook-read.md).
+
+**마이그레이션**: M1 첫 스키마에 `reaction` 과 함께 만든다(기존 데이터 없음 — 백필 불필요). 데이터가 있는 상태에서 도입하게 되면 쓰기 잠금(GB-10) 아래에서 `INSERT … SELECT entry_id, emoji, count(*) FROM reaction GROUP BY 1, 2` 로 백필한 뒤 해제한다.
 
 ---
 
@@ -522,8 +590,8 @@ stateDiagram-v2
 | 응답 필드 | 출처 (같은 트랜잭션, 쓰기 모델) |
 |---|---|
 | `id, displayName, body, status, version, createdAt, updatedAt, authorKind` | 방금 저장한 `Entry` |
-| `reactions` | `ReactionRepository.summarize(entryId, actor)` — `SELECT emoji, count(*) FROM reaction WHERE entry_id=$1 GROUP BY emoji` |
-| `myReactions` | 같은 쿼리의 두 번째 결과: `WHERE entry_id=$1 AND actor_key=$2` |
+| `reactions` | `ReactionRepository.summarize(entryId, actor)` — `SELECT emoji, count FROM reaction_count WHERE entry_id=$1 AND count > 0`(카운터 열, §3.6 — 이모지 최대 6행) |
+| `myReactions` | 같은 메서드의 두 번째 결과: `SELECT emoji FROM reaction WHERE entry_id=$1 AND actor_key=$2` |
 | `isMine` | `entry.author_session_id = ctx.actor.sessionId` 또는 `entry.author_user_id = ctx.actor.userId` |
 | `canEdit` | `ctx.actor.kind==='user'` 이고 `author_user_id == userId` 이고 `status==='visible'` |
 | `traceId` | `ctx.traceId` |
@@ -780,7 +848,7 @@ flowchart TD
 |---|---|
 | `request_key`, `write_lock` | W, R |
 | `entry` | R(`loadForUpdate`), W(조건부 UPDATE) |
-| `reaction` | R(응답 뷰 집계) |
+| `reaction`, `reaction_count` | R(응답 뷰: 총개수는 `reaction_count`, 내 반응은 `reaction`) |
 | `outbox_event`, `trace_step` | W |
 
 **조건부 갱신 SQL 의 의미**: `UPDATE entry SET body=$b, updated_at=$now, version=version+1 WHERE id=$id AND version=$expected AND status='visible' AND author_user_id=$uid`. 갱신 행이 0 이면 **원인을 진단**해 오류를 고른다: 글 없음/삭제됨 → 404, `hidden` → 409 `entry_hidden`, 소유자 다름 → 403, 그 외(버전 불일치) → 409 `version_conflict` + `details.current`(최신 뷰, `LoadEntryForConflict`).
@@ -1047,20 +1115,21 @@ flowchart TD
 
 | 사전 조건 | 사후 조건 |
 |---|---|
-| 세션 유효, 글이 `visible`, 이모지가 화이트리스트, 잠금 열림 | 새로 눌렀다면 `reaction` 1행 + `reaction.changed(op=added, count)` outbox. **이미 눌렀다면 변경·이벤트 없이 200** |
+| 세션 유효, 글이 `visible`, 이모지가 화이트리스트, 잠금 열림 | 새로 눌렀다면 `reaction` 1행 + `reaction_count.count` +1 + `reaction.changed(op=added, count)` outbox. **이미 눌렀다면 변경·이벤트 없이 200**. 어느 경우든 I-R1(카운터 = 행 수, §3.6) 유지 |
 
 | 접근 테이블 | 동작 |
 |---|---|
 | `request_key`, `write_lock` | W, R |
 | `entry` | R (`loadForUpdate`: `FOR NO KEY UPDATE`, 존재·가시성 확인과 직렬화) |
-| `reaction` | W (`INSERT … ON CONFLICT DO NOTHING`), R(`count`) |
+| `reaction` | W (`INSERT … ON CONFLICT DO NOTHING`) |
+| `reaction_count` | W (새로 눌렀을 때만 upsert +1), R(`count`) — §3.6 의 한 문장 |
 | `outbox_event`, `trace_step` | W (새로 눌렀을 때만) |
 
 **유일 키 경합 처리**
 1. `entry` 행을 `FOR NO KEY UPDATE` 로 잠근다 — 같은 글의 반응·수정·숨김이 직렬화된다(§3.5). `version` 은 바꾸지 않는다.
-2. `INSERT INTO reaction … ON CONFLICT (entry_id, actor_key, emoji) DO NOTHING RETURNING 1`.
-3. 1행이면 새로 누름 → `SELECT count(*) … WHERE entry_id AND emoji` 로 **변경 후 총개수**를 구해 이벤트에 싣는다.
-4. 0행이면 이미 누른 상태 → 이벤트 없이 현재 `count` 만 읽어 `200 { count, mine:true }`. 두 요청이 정확히 동시에 와도 유일 제약과 행 잠금이 한 건만 쓰이게 한다(나머지는 이미 눌림 경로).
+2. `addIfAbsent` — §3.6 의 한 문장: `INSERT INTO reaction … ON CONFLICT (entry_id, actor_key, emoji) DO NOTHING RETURNING 1` 이 1행일 때만 `reaction_count` 를 +1 하고 `RETURNING count` 로 **변경 후 총개수**를 얻는다(`count(*)` 를 하지 않는다).
+3. `changed=true` 면 새로 누름 → 그 `count` 를 이벤트에 싣는다.
+4. `changed=false` 면 이미 누른 상태 → 이벤트·카운터 변경 없이 현재 카운터 값으로 `200 { count, mine:true }`. 두 요청이 정확히 동시에 와도 유일 제약과 행 잠금이 한 건만 쓰이게 하고, 카운터도 한 번만 오른다(나머지는 이미 눌림 경로).
 > `database-schema.md` 는 중복 시 "나머지 409" 라고 적었으나 계약([03](../03-api-contract.md) §4.2)은 **200 멱등**이다. 계약을 따른다(수정 요청).
 
 **클래스**
@@ -1092,10 +1161,14 @@ classDiagram
     }
     class ReactionRepository {
         <<interface>>
-        +insertIfAbsent(r) bool
-        +countOf(entryId, emoji) int
+        +addIfAbsent(r) CountChange
+    }
+    class CountChange {
+        +changed bool
+        +count int
     }
     PublicWriteUseCase <|-- AddReaction
+    ReactionRepository --> CountChange
     AddReaction --> AddReactionInput
     AddReaction --> ReactionResult
     AddReaction ..> EntryPolicy
@@ -1125,16 +1198,15 @@ sequenceDiagram
             E-->>H: null 또는 비가시
             H-->>R: err 404 not_found
         else visible
-            H->>X: insertIfAbsent(reaction)
+            H->>X: addIfAbsent(reaction)
+            Note over X: 한 문장 — INSERT reaction ON CONFLICT DO NOTHING,<br/>1행일 때만 reaction_count +1 RETURNING count (F11 §3.6)
             alt 새로 눌림
-                X-->>H: true
-                H->>X: countOf(entryId, emoji)
+                X-->>H: changed true, count
                 H->>O: append(reaction.changed op added count)
                 H->>K: complete(200, count mine true)
                 H-->>R: ok
             else 이미 눌림
-                X-->>H: false
-                H->>X: countOf(entryId, emoji)
+                X-->>H: changed false, 현재 count
                 H->>K: complete(200, count mine true)
                 H-->>R: ok (이벤트 없음)
             end
@@ -1156,8 +1228,8 @@ flowchart TD
     F --> G{"글 visible?"}
     G -- "아니오" --> E3["404"]
     G -- "예" --> H{"INSERT ON CONFLICT 1행?"}
-    H -- "예 새로 누름" --> I["count 계산 + reaction.changed 기록"]
-    H -- "아니오 이미 누름" --> J["count 읽기, 이벤트 없음"]
+    H -- "예 새로 누름" --> I["같은 문장에서 reaction_count +1<br/>RETURNING count + reaction.changed 기록"]
+    H -- "아니오 이미 누름" --> J["카운터 변경 없음 · 현재 count 읽기 · 이벤트 없음"]
     I --> OK["200 count mine true"]
     J --> OK
 ```
@@ -1170,8 +1242,10 @@ flowchart TD
 | 글 없음/숨김/삭제 | `NotFoundError` | 404 | `not_found` |
 | 쓰기 잠금 | `WriteLockedError` | 503 | `write_locked` |
 | 속도 제한 | `RateLimitedError` | 429 | `rate_limited` |
+| 글 단위 세마포어 대기열 초과·대기 1초 초과(18 §4.4.5) | `OverloadedError` | 503 | `overloaded` |
+| 카운터 불변식 위반(I-R1, §3.6 R5 — 버그) | `PermanentError` | 500 | `internal`(tx 롤백) |
 
-**발행 이벤트 `reaction.changed` v1**: `{ "entryId": "…", "emoji": "👍", "op": "added", "count": 3 }`. 행위자는 봉투 `ownerKey` 에만 있다(프로젝터의 `my_reaction` 갱신용).
+**발행 이벤트 `reaction.changed` v1**: `{ "entryId": "…", "emoji": "👍", "op": "added", "count": 3 }`. `count` 는 같은 tx 의 카운터 `RETURNING count`(§3.6) — 계약은 그대로다. 행위자는 봉투 `ownerKey` 에만 있다(프로젝터의 `my_reaction` 갱신용).
 
 **지표/로그** 공통 + `guestbook_reaction_total{op}`, `guestbook_reaction_dedup_total`(이미 눌림 경로).
 
@@ -1181,7 +1255,9 @@ flowchart TD
 |---|---|---|---|
 | 동시 중복 추가 | L3 | `…/add-reaction.concurrent.test.ts` | 같은 행위자 N개 동시 요청 → `reaction` 1행, 이벤트 1건, 모두 200 |
 | 다른 행위자 동시 추가 | L3 | 위 | 최종 `count` = 행위자 수, 마지막 이벤트의 `count` = 최종값, `seq` 순서 = 커밋 순서 |
-| 숨김 글 반응 | L3 | `…/add-reaction.test.ts` | 404 |
+| **카운터 = 행 수 속성 시험**(I-R1, HC-5) | L3 | `…/reaction-counter.property.test.ts` | 행위자 K·이모지 6·추가/취소/같은 행위자 재요청의 무작위 순열(동시 실행 포함)을 돌린 뒤 **모든 (글, 이모지)에서 `reaction_count.count` = `count(*) FROM reaction`**, 이모지별 이벤트를 `seq` 순으로 보면 `count` 가 ±1 씩만 변하고 마지막 값 = 카운터. 회귀 가드: 증감을 `RETURNING` 조건 없이 하는 변형이 실패 |
+| **핫 로우 동시 N 요청** | L3 | `…/add-reaction.concurrent.test.ts` | 한 글에 서로 다른 행위자 N=300 동시(글 단위 세마포어 켬) → 교착 0, I-R1, 세마포어 초과분은 `503 overloaded` 이고 그 요청은 카운터를 바꾸지 않음. 몰림 규모 판정은 08 §9.1 SG-6 |
+| 숨김 글 반응 | L3 | `…/add-reaction.test.ts` | 404, 카운터 변화 없음 |
 | 같은 키 재시도 | L3 | 위 | 재생, 이벤트 1건 |
 | 이모지 화이트리스트 | L2 | `…/emoji.test.ts` | 6종만 통과, 변형 선택자 정규화 |
 
@@ -1194,13 +1270,14 @@ flowchart TD
 
 | 사전 조건 | 사후 조건 |
 |---|---|
-| 세션 유효, 글이 `visible` | 있었다면 `reaction` 행 삭제 + `reaction.changed(op=removed, count)`. 없었다면 변경 없이 200 `{ count, mine:false }` |
+| 세션 유효, 글이 `visible` | 있었다면 `reaction` 행 삭제 + `reaction_count.count` −1 + `reaction.changed(op=removed, count)`. 없었다면 변경 없이 200 `{ count, mine:false }`. 어느 경우든 I-R1 유지 |
 
 | 접근 테이블 | 동작 |
 |---|---|
 | `request_key` | W |
 | `entry` | R (`FOR NO KEY UPDATE`) |
-| `reaction` | W (`DELETE … RETURNING`), R(`count`) |
+| `reaction` | W (`DELETE … RETURNING`) |
+| `reaction_count` | W (삭제됐을 때만 −1), R(`count`) — §3.6 의 한 문장 |
 | `outbox_event`, `trace_step` | W (삭제됐을 때만) |
 
 **클래스**
@@ -1217,8 +1294,7 @@ classDiagram
     }
     class ReactionRepository {
         <<interface>>
-        +deleteIfPresent(entryId, actor, emoji) bool
-        +countOf(entryId, emoji) int
+        +removeIfPresent(entryId, actor, emoji) CountChange
     }
     PublicWriteUseCase <|-- RemoveReaction
     RemoveReaction --> RemoveReactionInput
@@ -1247,18 +1323,20 @@ sequenceDiagram
         alt 비가시 또는 없음
             H-->>R: err 404
         else visible
-            H->>X: deleteIfPresent(entry, actor, emoji)
+            H->>X: removeIfPresent(entry, actor, emoji)
+            Note over X: 한 문장 — DELETE reaction RETURNING,<br/>1행일 때만 reaction_count -1 RETURNING count (F11 §3.6)
             alt 삭제됨
-                X-->>H: true
-                H->>X: countOf
+                X-->>H: changed true, count
                 H->>O: append(reaction.changed op removed count)
                 H->>K: complete(200 mine false)
                 H-->>R: ok
             else 없었음
-                X-->>H: false
-                H->>X: countOf
+                X-->>H: changed false, 현재 count
                 H->>K: complete(200 mine false)
                 H-->>R: ok (이벤트 없음)
+            else 삭제됐는데 카운터 행 없음 또는 음수
+                X-->>H: PermanentError (I-R1 위반)
+                H-->>R: tx 롤백, 500
             end
         end
     end
@@ -1276,17 +1354,17 @@ flowchart TD
     D --> F{"글 visible?"}
     F -- "아니오" --> E2["404"]
     F -- "예" --> G{"DELETE 1행?"}
-    G -- "예" --> H["count 계산 + reaction.changed removed"]
-    G -- "아니오" --> I["count 읽기만"]
+    G -- "예" --> H["같은 문장에서 reaction_count -1<br/>RETURNING count + reaction.changed removed"]
+    G -- "아니오" --> I["카운터 변경 없음 · 현재 count 읽기만"]
     H --> OK["200 mine false"]
     I --> OK
 ```
 
-**오류**: 400 `validation_failed`, 404 `not_found`, 429 `rate_limited`. (쓰기 잠금 중에도 취소는 허용하므로 503 없음.)
+**오류**: 400 `validation_failed`, 404 `not_found`, 429 `rate_limited`, 글 단위 세마포어 초과 시 503 `overloaded`(18 §4.4.5), I-R1 위반 시 500(`PermanentError`, tx 롤백 — §3.6 R5). (쓰기 잠금 중에도 취소는 허용하므로 `write_locked` 는 없다.)
 
-**발행 이벤트**: `{ "entryId": "…", "emoji": "👍", "op": "removed", "count": 2 }` (`count` 는 취소 후 총개수, 0 가능).
+**발행 이벤트**: `{ "entryId": "…", "emoji": "👍", "op": "removed", "count": 2 }` (`count` 는 취소 후 총개수 = 카운터 `RETURNING count`, 0 가능).
 
-**시험**: 취소 후 `count` 감소·이벤트 1건 / 없는 반응 취소 시 200·이벤트 0건 / 동시 취소 시 한 건만 이벤트 / 추가→취소→추가 순서의 `count` 단조성. (L3, `…/remove-reaction.test.ts`)
+**시험**: 취소 후 `count` 감소·이벤트 1건 / 없는 반응 취소 시 200·이벤트 0건·카운터 불변 / 동시 취소 시 한 건만 이벤트·카운터 −1 한 번 / 추가→취소→추가 순서의 `count` 단조성 / **카운터 행을 지운 상태에서 취소 → 500 + 롤백(반응 행 남음, I-R1 위반이 커지지 않음)**. I-R1 속성 시험은 GB-04 표와 공용. (L3, `…/remove-reaction.test.ts`)
 
 ---
 
@@ -1951,7 +2029,7 @@ flowchart TD
 
 **트리거** worker 잡 `PurgeExpiredSessions`(주기, identity 소유 — [F10](10-identity.md) ID-10). events 의 `RetentionRunner` 규칙이 아니다. **입력** 만료된 `sessionIds[]`(배치).
 
-**접근 테이블** `guestbook.entry` W(`author_session_id → NULL`), `guestbook.reaction` W(`actor_key → purged:<uuid>`), `guestbook_read.entry_view` W(`author_actor_key → NULL`), `guestbook_read.my_reaction` D. 읽기 모델을 이벤트 없이 직접 쓰는 **유일한 예외**다(database-schema §9).
+**접근 테이블** `guestbook.entry` W(`author_session_id → NULL`), `guestbook.reaction` W(`actor_key → purged:<uuid>`), `guestbook_read.entry_view` W(`author_actor_key → NULL`), `guestbook_read.my_reaction` D. `guestbook.reaction_count` 는 **건드리지 않는다**(행 수가 그대로라 I-R1 이 유지된다, §3.6). 읽기 모델을 이벤트 없이 직접 쓰는 **유일한 예외**다(database-schema §9).
 
 ```mermaid
 sequenceDiagram
@@ -2002,7 +2080,7 @@ flowchart TD
 | AC-007 속도 제한 | 가드(§6.2) | 한도 초과 429 + `Retry-After` |
 | AC-016 동시 수정 | GB-02·07 | 같은 `expectedVersion` → 한 건 성공 |
 | (보조) 멱등 | 전 명령 | 같은 키 재생·불일치 422 |
-| (보조) 반응 동시성 | GB-04·05 | 유일 키 + 행 잠금으로 한 건, `count` 일관 |
+| (보조) 반응 동시성 | GB-04·05 | 유일 키 + 행 잠금으로 한 건, `count` 일관, 카운터 = 행 수(I-R1 속성 시험, §3.6) |
 
 결정적 재현을 위한 **고장 주입 지점 이름**은 `<모듈>.<usecase>.<지점>` snake_case 이다(코드의 `faults.hit('…')` 훅, 08 §3.1): `guestbook.<usecase>.after_load`, `.after_save`, `.after_outbox`, `.before_commit`. 시험은 08 의 API 로 쓴다 — `failAt(point, nth)`, `delayAt(point)` → `Gate.reached`(Promise)·`release()`. 동시성 시험은 `after_load` 에서 `delayAt` 으로 두 트랜잭션을 정렬해 경합을 만든다.
 

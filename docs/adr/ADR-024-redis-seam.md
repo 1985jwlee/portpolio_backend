@@ -58,6 +58,8 @@ M1 은 Redis 를 쓰지 않는다(ADR-022). 그런데 그 자리를 무엇이 �
 | `EventTransport` | **outbox 에 쌓이고 대기**, Redis 복구 후 재개. Postgres 폴링으로 **폴백 가능**하게 둔다 | 정합성 우선(유실 없음) |
 | `StockReservation` | 선점 거부(초과 판매 0 우선) | ADR-010 |
 
+> 몰림 중 `KeyValueCache` 우회가 원본 장애로 번지지 않게 L1 병합·원본 동시 실행 상한을 유지하는 보강(수정 제안), 그리고 `noeviction` 단일 인스턴스에 캐시 키를 두지 않는 이유는 [design/18 §3.3·§9](../design/18-hot-cache-and-surge-control.md)(ADR-049, Accepted 2026-11-06 — Phase 3 Redis 캐시 키 미도입은 HC-9 로 확정).
+
 ### 시험
 - 각 포트는 **계약 시험 스위트**를 하나 갖고, 모든 어댑터(메모리·Postgres·Redis)가 같은 스위트를 통과해야 한다([design/08](../design/08-test-strategy.md)).
 - Redis 어댑터가 추가되는 시점에 Redis 컨테이너를 L3 시험 환경에 넣는다.

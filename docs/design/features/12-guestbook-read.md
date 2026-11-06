@@ -590,7 +590,7 @@ flowchart TD
 | 목적 | `reaction.changed` 로 `entry_view.reactions`(이모지별 총개수)와 `my_reaction`(행위자별 눌림)을 갱신 |
 | 트리거 | inbox `reaction.changed` |
 | 사전 조건 | 대상 글 행이 있어야 함(없으면 `MISSING`). 봉투 `ownerKey` 로 행위자 식별 가능 |
-| 사후 조건 | 개수는 **이벤트가 싣고 온 총개수로 덮어쓴다**(증감 아님) — 재전달·역전에서도 최종 값 동일 |
+| 사후 조건 | 개수는 **이벤트가 싣고 온 총개수로 덮어쓴다**(증감 아님) — 재전달·역전에서도 최종 값 동일. 그 총개수의 출처는 쓰기 tx 의 카운터 열이다(HC-5, [F11 §3.6](11-guestbook-write.md)). **읽기 모델은 증분(±1)으로 바꾸지 않는다** — 이모지별 순번 가드가 역전된 델타를 버리고, 재구성의 이중 적용이 이중 계산하기 때문이다([18 §4.4.1](../18-hot-cache-and-surge-control.md)) |
 | 접근 테이블 | W: `entry_view.reactions/reaction_seq`, `my_reaction` |
 | 요구 | FR-021, FR-035 |
 
@@ -886,11 +886,11 @@ sequenceDiagram
 |---|---|
 | 목적 | `EditEntry`/`DeleteEntry`/`HideEntry` 가 `version` 불일치(409)를 만들 때 `details.current` 에 담을 **최신** `EntryView` 를 쓰기 모델에서 조회 |
 | 트리거 | 명령 usecase 의 조건부 갱신이 0행일 때 같은 트랜잭션(또는 직후)에서 호출 |
-| 접근 테이블 | R: `guestbook.entry`, `guestbook.reaction`(행위자별 눌림) — **쓰기 스키마** |
+| 접근 테이블 | R: `guestbook.entry`, `guestbook.reaction_count`(총개수, 카운터 열 — HC-5), `guestbook.reaction`(행위자별 눌림) — **쓰기 스키마** |
 | 사후 조건 | 삭제된 글이면 `NotFoundError`(404) — `409` 가 아니다 |
 
 - 읽기 모델을 쓰지 않는 이유: 방금 다른 탭이 바꾼 값이 아직 투영되지 않았을 수 있고, 클라이언트는 이 값을 기준으로 **다시 편집**하기 때문이다.
-- 조립은 같은 `ViewAssembler` 를 쓰되 `reactions`(총개수)는 쓰기 모델 `reaction` 을 집계한다(글 하나라 저렴).
+- 조립은 같은 `ViewAssembler` 를 쓰되 `reactions`(총개수)는 쓰기 모델 카운터 `reaction_count` 를 읽는다(`count(*)` 집계 대신 이모지 최대 6행, [F11 §3.6](11-guestbook-write.md)). 한 문장 안에서 읽으므로 카운터와 반응 행은 같은 스냅샷이고, I-R1 덕분에 잠금 없이도 둘이 어긋나 보이지 않는다.
 
 ```mermaid
 sequenceDiagram
@@ -901,7 +901,7 @@ sequenceDiagram
     E->>D: UPDATE … WHERE id AND version = expected
     D-->>E: 0행
     E->>L: execute(entryId, actor)
-    L->>D: SELECT entry + reaction 집계
+    L->>D: SELECT entry + reaction_count + 내 reaction
     alt 글 없음/삭제됨
         D-->>L: 없음
         L-->>E: NotFoundError
@@ -996,7 +996,7 @@ sequenceDiagram
 | 트리거 | `bun run worker rebuild entry_view [--dry-run]`(관리자 CLI, F16 §11.2 — 프로젝션 이름은 `entry_view`·`report_queue`·`flow_counter`). 기본 실행 환경은 worker 컨테이너 |
 | 사전 조건 | `projection_state.status = live`, 같은 이름의 재구성이 진행 중이 아님(`UPDATE … WHERE status='live'` 로 선점) |
 | 사후 조건 | `entry_view` 가 쓰기 모델과 일치, 읽기 중단 없음(교체는 밀리초 단위 잠금), 이전 테이블은 보관 후 삭제 |
-| 접근 테이블 | R: `guestbook.entry`, `guestbook.reaction`(스냅샷) · W: `entry_view_next`, `projection_state`, `entry_view` 이름 교체 |
+| 접근 테이블 | R: `guestbook.entry`, `guestbook.reaction`(스냅샷 — 반응 수는 행 집계), `guestbook.reaction_count`(검증 단계의 I-R1 확인만) · W: `entry_view_next`, `projection_state`, `entry_view` 이름 교체 |
 | 요구 | AC-017, ADR-023 |
 | 범위 | 그림자 교체는 `entry_view` 하나이고 **`my_reaction` 은 같은 잡이 함께 채운다**(쓰기 모델 `reaction` 스냅샷 + 이후 이벤트 이중 적용). `report_queue` 는 쓰기 모델 `report` 스냅샷으로 자체 재구성(`worker rebuild report_queue`, 같은 알고리즘의 단순형), `flow_counter` 는 `trace_step` 재집계(이벤트 재생이 아님, database-schema §5-1) |
 
@@ -1035,6 +1035,7 @@ rebuild(entry_view):
               fence_seq = SELECT max(seq) FROM events.outbox_event
               INSERT INTO entry_view_next SELECT … FROM guestbook.entry e
                         LEFT JOIN (reaction 이모지별 집계) …
+                        -- 반응 수는 정본 reaction 행 집계 (카운터 reaction_count 를 쓰지 않는다 — HC-5)
                         -- content_seq = status_seq = reaction_seq[*] = last_seq = fence_seq
               UPDATE projection_state SET fence_seq = $fence_seq
             COMMIT
@@ -1045,7 +1046,10 @@ rebuild(entry_view):
             -- next 에서 가드로 STALE, 이후 이벤트(seq > fence)는 next 에도 APPLIED.
             대기 조건: 프로젝터 inbox 중 seq ≤ fence_seq 인 미처리 건수 = 0
  5. 검증:   RebuildVerifier — next 의 visible 행 수·reactions 합계가 쓰기 모델 재계산과 같은지,
-            샘플 N건의 내용 해시 비교. 불일치 → 중단(next 삭제, status=live, 경보)
+            샘플 N건의 내용 해시 비교, 그리고 쓰기 모델 카운터 I-R1(reaction_count = reaction 행 수,
+            database-schema §10 의 대사 문장). 불일치 → 중단(next 삭제, status=live, 경보).
+            I-R1 위반이면 교체해도 다음 reaction.changed 가 틀린 count 로 덮어쓰므로
+            먼저 `worker repair reaction-count` 를 돌리고 재구성을 다시 시작한다
  6. 교체:   BEGIN
               SET LOCAL lock_timeout = '2s'                                       -- 제안: 읽기가 오래 막히지 않게 (§3.5)
               SELECT … FROM projection_state WHERE name='entry_view' FOR UPDATE   -- 프로젝터 대기
@@ -1128,7 +1132,7 @@ flowchart TD
 | 오류 | 선점 실패 → 종료 코드 2 (이미 진행 중). 검증 불일치 → `abort` + 경보. 교체 트랜잭션 실패(`lock_timeout` 초과 포함) → 롤백, 상태 유지 후 재시도(§3.5) |
 | 지표 | F17 의 `pf_job_duration_seconds{job="rebuild"}`, `pf_job_last_success_timestamp_seconds{job="rebuild"}`, `pf_projection_drift{projection}`. 재구성 상태 게이지(`pf_projection_rebuild_status{projection}`)와 처리 행 수는 F17 에 **추가 요청** |
 | 로그 | 단계 전환마다 `name fence_seq rows durationMs outcome` — 행 내용 금지 |
-| 시험 | **AC-017**(L3): 쓰기 부하(작성·수정·숨김·반응)를 흘리면서 `rebuild` → 완료 후 `entry_view` 가 쓰기 모델 재계산과 같음. 중단 지점별(적재 중·검증 후·교체 직전) 크래시 후 `--resume`/`--abort` 로 복구. 상태별 프로젝터 거동(이중 적용 / STALE) 단위 시험. 교체 중 읽기 쿼리가 오류 없이 대기 후 성공 |
+| 시험 | **AC-017**(L3): 쓰기 부하(작성·수정·숨김·반응)를 흘리면서 `rebuild` → 완료 후 `entry_view` 가 쓰기 모델 재계산과 같음. 카운터를 일부러 어긋나게 한 상태(직접 SQL 로 `count + 1`)에서는 검증이 교체를 거부하고, `repair reaction-count` 후 재시도하면 통과(HC-5). 중단 지점별(적재 중·검증 후·교체 직전) 크래시 후 `--resume`/`--abort` 로 복구. 상태별 프로젝터 거동(이중 적용 / STALE) 단위 시험. 교체 중 읽기 쿼리가 오류 없이 대기 후 성공 |
 
 ---
 

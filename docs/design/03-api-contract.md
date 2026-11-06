@@ -17,7 +17,7 @@
 | CSRF | `SameSite=Lax` + `Origin` 검사 + JSON 전용 + `Idempotency-Key` 필수의 조합. 별도 토큰 없음([06](06-auth.md) §4, [10](10-security.md) §3.3) |
 | 추적 | 모든 응답에 `X-Trace-Id`(= `traceId`). 쓰기 응답 본문에도 `traceId` |
 | 속도 제한 | 초과 시 `429` + `Retry-After`. 헤더 `RateLimit-Limit`/`Remaining`/`Reset` 제공(앱 세션 단위 기준). **수치는 §1.1** |
-| 캐시 | 조회는 `Cache-Control: no-store`(개인화·실시간), 정적 자원만 길게 |
+| 캐시 | 조회는 `Cache-Control: no-store`(개인화·실시간), 정적 자원만 길게. **M1 은 공개 조회에 공유 가능 캐시 헤더(`public`) 예외를 두지 않는다**(HC-3 확정, 2026-11-06 — 딜 조회 `public, max-age=1` 은 Phase 3 착수 시 재검토 후보일 뿐), ETag·조건부 요청 미도입(HC-4 확정). 예외표 정본과 열화 시 `503 overloaded` 는 [18 §3.1·§6.2](18-hot-cache-and-surge-control.md) |
 | 압축 | 프록시(nginx) 담당 |
 
 ### 1.1 속도 제한 값 (AC-007, 가정 A-011)
@@ -54,6 +54,8 @@
 **nginx(접속 주소 단위, 메모리 전용 — 주소를 저장하지 않는다)**
 
 > 아래 표는 **IP 확보 시**(G14 ④) 기준이다. 미확보 시에는 주소별 키가 상수 전역 키로 바뀌고 `/ws/` 주소별 `limit_conn` 은 제거되며 WS 제한은 gateway 세션 기준이 된다(정적 자원은 `limit_req` 제외, `/api/me` 는 전역 토큰 버킷 — F17 §9.2).
+>
+> **조건부 신설(HC-8 확정, 2026-11-06)**: G14 ④ 에서 IP **미확보**로 판정되면 앱 읽기 버킷 `read.session`(세션 단위, 10r/s·burst 30)·`read.nosession`(세션 없는 읽기 전역, 50r/s)을 이 표에 추가한다(값은 제안, [18 §6.7](18-hot-cache-and-surge-control.md)). IP 확보로 판정되면 만들지 않고 위 "(조회 `GET`) 앱 제한 없음" 이 그대로다.
 
 | 대상 | 값 | 비고 |
 |---|---|---|
@@ -94,7 +96,7 @@
 | `code` | 00 §4.3 표의 코드. 클라이언트 분기는 **`code` 로만** 한다 |
 | `message` | 사람이 읽는 문장. 요청 `Accept-Language`(ko/en)에 맞춤. 클라이언트는 표시용으로만 사용 |
 | `details` | 코드별 구조: `validation_failed` → `fields: [{path, rule}]`, `version_conflict` → `current`, `rate_limited` → `retryAfterSeconds` |
-| 코드 보강 | 00 §4.3 의 코드에 더해(**wire 코드에는 모듈 접두사를 붙이지 않는다**; 내부 클래스 코드 `guestbook.write_locked` 는 응답에서 `write_locked`): `write_locked`(503 + `Retry-After: 60`), `entry_hidden`(409, 이미 숨김), `entry_not_hidden`(409), `request_in_progress`(409 + `Retry-After: 1`), `idempotency_key_reuse`(422), `origin_mismatch`(403), `github_unavailable`(502), `github_rejected`(502), `oauth_state_invalid`(400), `oauth_state_expired`(400). 클라이언트 사전 키는 `errors.<code>` ([F15](features/15-web.md)) |
+| 코드 보강 | 00 §4.3 의 코드에 더해(**wire 코드에는 모듈 접두사를 붙이지 않는다**; 내부 클래스 코드 `guestbook.write_locked` 는 응답에서 `write_locked`): `write_locked`(503 + `Retry-After: 60`), **`overloaded`(503 + `Retry-After` 지터 — 과부하 사다리 2·3단계 거절과 핫 키·대기열 상한 초과. 관리자 쓰기 잠금 `write_locked` 와 원인·문구·재시도 간격이 달라 따로 둔다. 클라이언트는 쓰기를 자동 재시도하지 않는다, HC-2 확정 2026-11-06, [18 §6.2](18-hot-cache-and-surge-control.md))**, `entry_hidden`(409, 이미 숨김), `entry_not_hidden`(409), `request_in_progress`(409 + `Retry-After: 1`), `idempotency_key_reuse`(422), `origin_mismatch`(403), `github_unavailable`(502), `github_rejected`(502), `oauth_state_invalid`(400), `oauth_state_expired`(400). 클라이언트 사전 키는 `errors.<code>` ([F15](features/15-web.md)) |
 | 5xx | `message` 는 일반 문구, **내부 정보·스택을 담지 않는다** |
 
 ## 3. 멱등 키

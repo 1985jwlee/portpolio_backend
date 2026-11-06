@@ -36,7 +36,7 @@ outbox 행과 inbox 행, 소비자 핸들러 입력이 **같은 모양**이다.
 | `report.filed` | guestbook | `ReportEntry` | `reportId`, `entryId`, `reasonCode`, `excerpt`(앞 80자, **관리자 큐 전용**) — 신고자 `note` 는 싣지 않는다(`guestbook.report.note` 에만 둔다) |
 | `report.resolved` | guestbook | `ResolveReport` | `reportId`, `resolution`(`dismissed`\|`entry_hidden`) |
 
-- **`reaction.changed` 는 증감이 아니라 변경 후 총개수(`count`)를 싣는다.** 프로젝터가 `reactions[emoji] = count` 로 **덮어쓰므로** 재전달·순서 역전에서도 결과가 같다(`last_seq` 검사와 함께).
+- **`reaction.changed` 는 증감이 아니라 변경 후 총개수(`count`)를 싣는다.** 프로젝터가 `reactions[emoji] = count` 로 **덮어쓰므로** 재전달·순서 역전에서도 결과가 같다(`last_seq` 검사와 함께). 생산자는 이 값을 `count(*)` 가 아니라 같은 tx 에서 증감한 쓰기 모델 카운터 `guestbook.reaction_count.count` 의 `RETURNING` 값으로 얻는다(HC-5, 2026-11-06, [F11 §3.6](features/11-guestbook-write.md)) — **이벤트 모양·의미·버전(v1)은 그대로**이고 소비자 수정은 없다.
 - `entry.posted` 의 `authorUserId` 는 이벤트에 남기되(소비자가 필요), 읽기 모델은 `author_actor_key`(`ownerKey` 와 같은 값)로 저장한다. 공개 변환에서는 둘 다 제거된다.
 - `entry.posted` 의 `displayName` 은 발행 시점의 값이다. 이후 이름이 바뀌어도 과거 이벤트는 바꾸지 않는다.
 - 사이트 공통 이벤트(`entry.*`, `reaction.*`)만 **공개 채널 변환 대상**이다. `report.*` 는 관리자 큐 전용이며 어떤 공개 채널로도 나가지 않는다.

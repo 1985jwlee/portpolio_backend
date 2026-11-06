@@ -1217,6 +1217,7 @@ M1 에서는 `redis` 분기가 구현되지 않는다(분기 자리만 문서화
 |---|---|---|---|---|
 | `db:seed` | `scripts/seed.ts` | 시나리오 시드(`GuestbookBasic`·`AdminAndReports`·`LoadMix`) | **아니오**(`APP_ENV=production` 이면 즉시 종료) | `--scenario`, `--reset` |
 | `worker rebuild <projection>` | `apps/worker/src/cli` | 읽기 모델 그림자 재구성(GB-26) | 예 | `--projection entry_view`, `--dry-run` |
+| `worker repair reaction-count` | 〃 | 반응 카운터 수리(HC-5, [F11 §3.6](11-guestbook-write.md)): 글마다 짧은 tx 로 `entry` `FOR NO KEY UPDATE` → `reaction` 재집계 → `reaction_count` 덮어쓰기. 이벤트를 내지 않으므로 읽기 모델이 틀려 있으면 이어서 `worker rebuild entry_view`. 기본은 대사 결과의 어긋난 글만 | 예 | `--entry <id>`, `--all`, `--dry-run`(어긋남 목록만 출력) |
 | `worker dead-requeue` | 〃 | `dead` → 대기 재투입(EV-07) | 예 | `--consumer`, `--type`, `--id`, `--all`, `--limit`, `--reason`(필수) |
 | `worker admin write-lock on\|off` | 〃 | 긴급 쓰기 잠금(GB-10) | 예 | `--reason` |
 | `worker rotate-field-keys` | 〃 | 필드 암호화 키 회전: 옛 키로 암호화된 행을 `active` 키로 배치 재암호화(멱등, 배치마다 짧은 tx, ADR-026) | 예 | `--field report.note`, `--batch`, `--dry-run` |

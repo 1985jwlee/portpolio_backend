@@ -105,6 +105,20 @@ Postgres 스키마 설계. **M1 은 테이블 단위로 상세히, Phase 1~5 는
 | `created_at` | |
 | 키 | **PK (`entry_id`, `actor_key`, `emoji`)** — 동시 중복 추가는 한 건만 성공, 나머지는 `ON CONFLICT DO NOTHING` 으로 **200 멱등**(03 계약, 409 아님) |
 
+**`reaction_count`** — (글, 이모지)별 반응 수 **카운터 열**(HC-5, 2026-11-06, [ADR-049](../adr/ADR-049-hot-cache-and-surge-control.md)). 쓰기 모델 집합체의 파생 상태이며 읽기 모델이 아니다 — 정본은 여전히 `reaction` 행이다.
+
+| 컬럼 | 타입 | 제약·설명 |
+|---|---|---|
+| `entry_id` | uuid | FK → `entry(id)` |
+| `emoji` | text | `reaction.emoji` 와 같은 길이 `CHECK` |
+| `count` | int | NOT NULL, 기본 0, **`CHECK (count >= 0)`**. 0 이 되어도 행을 지우지 않는다 |
+| 키 | | **PK (`entry_id`, `emoji`)** |
+| 저장 옵션 | | `fillfactor = 50`(제안) — 반응마다 같은 행을 HOT 갱신하므로 페이지 여유를 둔다 |
+
+- **불변식 I-R1**: 모든 커밋 시점에 `count` = 그 (글, 이모지)의 `reaction` 행 수. `AddReaction`/`RemoveReaction` 이 반응 행이 **실제로 1행 바뀐 경우에만 같은 tx·같은 문장에서** ±1 한다. 잠금 순서는 `entry`(`FOR NO KEY UPDATE`) → `reaction` → `reaction_count` → `outbox_event`([F11 §3.6](../design/features/11-guestbook-write.md)).
+- 이벤트 `reaction.changed.count` 와 쓰기 응답의 총개수는 이 값(`RETURNING count`)이다. `entry` 행에 두지 않은 이유는 반응마다 본문을 실은 글 튜플을 다시 쓰지 않고 `entry.version`·`updated_at` 의 의미를 지키기 위해서다([18 §4.4.2](../design/18-hot-cache-and-surge-control.md)).
+- 행 수를 바꾸지 않는 쓰기(세션 익명화의 `actor_key` 교체, 숨김·삭제 묘비)는 이 표를 건드리지 않는다.
+
 **`report`** — 신고
 
 | 컬럼 | 설명 |
@@ -286,7 +300,7 @@ outbox 행과 inbox 행은 **봉투(05 §1)의 모든 필드를 컬럼으로 갖
 
 | 읽기 모델 | 재구성 원천 | 방식 |
 |---|---|---|
-| `entry_view` | 쓰기 모델 `entry`·`reaction` 스냅샷 + `fence_seq` 이후 이벤트 | 그림자 테이블 + 교체 |
+| `entry_view` | 쓰기 모델 `entry`·`reaction` 스냅샷 + `fence_seq` 이후 이벤트. 반응 수는 카운터 `reaction_count` 가 아니라 **`reaction` 행 집계**로 채운다(카운터 어긋남을 옮기지 않게) — 검증 단계가 I-R1 을 함께 확인 | 그림자 테이블 + 교체 |
 | `my_reaction` | 쓰기 모델 `reaction` 스냅샷 + 이후 이벤트 | 같은 재구성 잡이 함께(`entry_view` 와 한 쌍) |
 | `report_queue` | 쓰기 모델 `report` 스냅샷 + 이후 이벤트 | 자체 재구성(`rebuild report-queue`) |
 | `flow_counter` | `trace_step` **재집계** | 이벤트 재생이 아니다. `trace_step` 보관(7일) 범위만 복구 가능 |
@@ -335,6 +349,7 @@ outbox 행과 inbox 행은 **봉투(05 §1)의 모든 필드를 컬럼으로 갖
 erDiagram
     USER_ACCOUNT ||--o{ SESSION : "로그인 세션"
     ENTRY ||--o{ REACTION : "반응 정본"
+    ENTRY ||--o{ REACTION_COUNT : "이모지별 카운터 (I-R1)"
     ENTRY ||--o{ REPORT : "신고"
     ENTRY ||--o{ MODERATION_ACTION : "조치 이력"
     WRITE_LOCK {
@@ -454,6 +469,8 @@ flowchart LR
 | `reaction.entry_id`, `created_at` | SYS | |
 | `reaction.actor_key` | PSD | 세션 만료 시 `purged:<uuid>` |
 | `reaction.emoji` | PUB | |
+| `reaction_count.entry_id`, `emoji` | SYS·PUB | |
+| `reaction_count.count` | PUB | 공개 표시되는 개수와 같은 값. 행위자 정보 없음 |
 | `report.id`, `entry_id`, `status`, `resolution`, `*_at` | SYS | |
 | `report.reason_code` | SYS | 고정 열거 |
 | `report.reporter_key` | PSD | |
@@ -516,6 +533,7 @@ flowchart LR
 | 점검 | 방법 | 지표 |
 |---|---|---|
 | 읽기 모델 ↔ 정본 | `entry_view.reactions` 를 `reaction` 개수와 대조 | `projection_drift` |
+| **쓰기 모델 카운터 ↔ 반응 행(I-R1, HC-5)** | `SELECT entry_id, emoji, COALESCE(c.count,0) AS counter, COALESCE(r.n,0) AS actual FROM guestbook.reaction_count c FULL JOIN (SELECT entry_id, emoji, count(*) AS n FROM guestbook.reaction GROUP BY 1, 2) r USING (entry_id, emoji) WHERE COALESCE(c.count,0) <> COALESCE(r.n,0)` — **한 문장(한 스냅샷)** 이라 진행 중 tx 로 인한 오탐이 없다(두 값은 같은 tx 에서만 바뀐다). 위 점검과 같은 주기 잡. 어긋나면 `worker repair reaction-count` → 필요 시 `rebuild entry_view` 순서([F11 §3.6](../design/features/11-guestbook-write.md)) | `projection_drift{projection="reaction_count"}`(새 지표 아님, 경보 `ProjectionDrift`) |
 | 반영 지연 | 가장 오래된 미처리 inbox 의 나이 | `projection_lag_seconds`, `inbox_oldest_age_seconds` |
 | 고착 항목 | 오래된 `processing` | `oldest_processing_age_seconds` |
 | 재구성 고착 | `projection_state.status != live` 가 오래 지속 | `projection_rebuild_age_seconds` |

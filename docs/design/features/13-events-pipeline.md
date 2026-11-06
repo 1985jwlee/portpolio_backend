@@ -480,7 +480,7 @@ RETURNING o.id, o.status;
 | 보장하지 않는 것 | 서로 다른 집합체 사이의 순서, 모듈 사이의 처리 완료 순서 |
 | `dead` 의 영향 | `dead` 는 선두 규칙의 **차단 대상이 아니다**(운영자가 포기한 이벤트가 영구히 뒤를 막지 않게). 대신 프로젝터가 누락에 안전해야 한다(아래) |
 | 쓰는 쪽 의무 | 이벤트를 `append` 하기 **전에** 그 집합체의 행 잠금(`SELECT … FOR UPDATE` / `FOR NO KEY UPDATE` 또는 `pg_advisory_xact_lock(hashtext(aggregate_id))`)을 잡는다. guestbook 의 반응 명령(F11)은 대상 `entry` 행에 `FOR NO KEY UPDATE` 를 잡고 그 **뒤에** outbox 를 append 한다 — 이 규칙이 받아들여진다. 그러면 같은 집합체에 대해 `seq` 순서 = 커밋 순서가 된다 |
-| 반응 이벤트 | `reaction.changed` 의 집합체는 **글(`entryId`)** 이다. 이모지가 달라도 같은 글이면 글 행 잠금으로 직렬화해 `count`(변경 후 총개수)가 `seq` 와 같은 순서가 되게 한다 |
+| 반응 이벤트 | `reaction.changed` 의 집합체는 **글(`entryId`)** 이다. 이모지가 달라도 같은 글이면 글 행 잠금으로 직렬화해 `count`(변경 후 총개수)가 `seq` 와 같은 순서가 되게 한다. `count` 는 같은 tx 의 쓰기 모델 카운터 `reaction_count` 값이며(HC-5), 카운터 갱신은 글 행 잠금 **뒤**·outbox `append` **앞**이다([F11 §3.6](11-guestbook-write.md) R1) — 이 의무는 바뀌지 않는다 |
 | 프로젝터 안전망 | 읽기 모델 필드별 순번(`content_seq` 등)보다 작은 `seq` 는 해당 필드만 무시(AC-017). 대상 행이 없는데 `entry.posted` 가 아닌 이벤트가 오면 `TransientError`(앞 이벤트가 아직 안 온 것으로 보고 재시도, 8회 후 `dead`) |
 | 전역 `seq` 구멍 | 시퀀스는 롤백으로 구멍이 생기고 커밋 순서와 달라도 된다. **`seq` 는 비교용이지 연속 번호가 아니다** |
 

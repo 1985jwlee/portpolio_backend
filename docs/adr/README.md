@@ -9,6 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
+| 2026-11-06 | [ADR-049](ADR-049-hot-cache-and-surge-control.md) | 핫 캐시와 몰림 대응: 병합 먼저·보존은 열화 모드, 단계적 열화 사다리(0~4, 그림자 모드로 시작), 기다리는 곳에 상한, 스냅샷 head 공유, 반응 총개수는 쓰기 모델 카운터 열 | Accepted (2026-11-06) |
 | 2026-11-04 | [ADR-048](ADR-048-mock-currency-and-mixed-payment.md) | 모의 통화(USDC·POINT): 첫 로그인 지급, 단방향 교환, 혼합 결제, 선택적 지갑 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-047](ADR-047-chat-data-protection-retention.md) | 채팅 데이터 보호·보관: 방 종류별 등급, CS 본문 암호화 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-046](ADR-046-cs-ticket-and-agent-assignment.md) | CS 티켓과 상담원 배정: 상태 머신, CAS+임대 | Accepted (2026-11-05) |

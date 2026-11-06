@@ -416,7 +416,7 @@ classDiagram
 | 실패 격리 | prefetch 가 던져도 **페이지를 막지 않는다**(try/catch → 빈 상태로 렌더, 클라이언트가 곧바로 재조회). `console.error` 에 `traceId` 만 |
 | 클라이언트 | `useEntries` 가 하이드레이션된 데이터를 사용하고 `staleTime` 30초 안에는 재요청하지 않는다 |
 | 개인 필드 | SSR 시점에는 서버가 쿠키로 행위자를 알기 때문에 `myReactions/isMine/canEdit` 이 이미 채워진다(쿠키가 없으면 익명 기본값). 세션이 막 발급되는 첫 방문은 SSR 에서 익명 기본값이고, 클라이언트 `['me']` 확정 후 **재조회 1회**로 보정한다 |
-| 캐시 금지 | SSR 응답은 개인화되므로 `Cache-Control: private, no-store` (콘텐츠 4개 페이지도 동적 렌더이므로 `no-store` 로 둘 수 있다. CDN 캐시가 필요해지면 재검토) |
+| 캐시 금지 | SSR 응답은 개인화되므로 `Cache-Control: private, no-store` (콘텐츠 4개 페이지도 동적 렌더이므로 `no-store` 로 둘 수 있다. CDN 캐시가 필요해지면 재검토). SSR prefetch 는 api 의 L1 병합 혜택을 받고, 과부하 단계에 따라 시간 제한 단축·생략된다([18 §6.2](../18-hot-cache-and-surge-control.md)) |
 
 ### 4.2 로케일 전환과 캐시
 
@@ -1046,7 +1046,9 @@ iframe 요건(관문 G6 **로컬 실측으로 확정**, 2026-11-04):
 
 ```mermaid
 flowchart TD
-    M["페이지 진입"] --> CFG{"site.metricsEmbedUrl 설정됨?"}
+    M["페이지 진입"] --> LV{"과부하 단계 1 이상?<br/>(/api/me 단계 힌트)"}
+    LV -- "예" --> FB0["MetricsFallback: 정적 안내 + 새 탭 링크 (HC-11)"]
+    LV -- "아니오" --> CFG{"site.metricsEmbedUrl 설정됨?"}
     CFG -- "아니오" --> FB1["MetricsFallback: '지표 화면 준비 중'"]
     CFG -- "예" --> PRB["HEAD 로 사전 확인(같은 출처 프록시 경로일 때)"]
     PRB --> OK{"2xx ?"}
@@ -1079,8 +1081,9 @@ sequenceDiagram
 ```
 
 - iframe 의 HTTP 오류는 `onerror` 로 잡히지 않으므로 **사전 HEAD 확인 + 로드 타임아웃** 두 가지를 쓴다(별도 호스트면 CORS 때문에 HEAD 불가 → 타임아웃만, **미확인**).
+- **과부하 1단계 이상에서는 iframe 을 마운트하지 않고 `MetricsFallback`(정적 안내 + '새 탭에서 열기' 링크)을 보인다**(HC-11 확정, 2026-11-06 — 방문자 × 패널 × 새로고침 질의가 Prometheus·Grafana 로 직행하는 것을 막는다, [18 §6.2](../18-hot-cache-and-surge-control.md)). 단계는 `/api/me` 응답의 단계 힌트로 안다(필드 모양은 제안, S7-7 에서 확정) — 위 순서도의 첫 분기.
 - `MetricsExplainer`: "지표 레이블에 식별자를 쓰지 않습니다"(ADR-007) 설명과 지표 목록 링크.
-- **접근성**: iframe `title` 필수("운영 지표 대시보드, 읽기 전용"), 대안으로 요약 표 링크. **지표**: 없음. **시험**: 컴포넌트(3분기 폴백), E2E G6 통과 시 임베드에 편집 UI 없음 확인(수동 체크리스트 병행).
+- **접근성**: iframe `title` 필수("운영 지표 대시보드, 읽기 전용"), 대안으로 요약 표 링크. **지표**: 없음. **시험**: 컴포넌트(4분기 폴백 — 과부하 단계 분기 포함), E2E G6 통과 시 임베드에 편집 UI 없음 확인(수동 체크리스트 병행).
 
 ### WB-14 관리자 신고 큐 (S6-3)
 
@@ -1231,6 +1234,7 @@ flowchart TD
 | 섬 단위 | `IslandErrorBoundary`: 방명록 목록·흐름 패널 중 하나가 죽어도 나머지는 동작. 해당 영역만 "불러오지 못했습니다 [다시 시도]" |
 | 오프라인 | `navigator.onLine=false` → `OfflineNotice`(상단 얇은 바). 쓰기 버튼은 비활성하지 않고 전송 시 네트워크 오류 경로(WB-06)로 처리 |
 | 백엔드 다운 | `BackendStatus`: `['me']` 가 연속 3회 네트워크 오류/5xx(최근 60초)면 `backendDown=true` → 데모 CTA 에 "점검 중" 칩, 링크 `aria-disabled` |
+| 과부하 거절(`503 overloaded`, HC-2 확정) | 쓰기는 **자동 재시도하지 않고** "지금 방문자가 많아 잠시 쓰기를 멈췄습니다. N초 후 다시 시도해 주세요"(N = `Retry-After`)를 보이고 낙관적 갱신을 그 항목만 되돌린다. 읽기는 1회까지 재시도. `overloaded` 는 서버가 살아 있다는 뜻이므로 `BackendStatus` 의 실패 카운트에 넣지 않는다([18 §6.2·§6.6](../18-hot-cache-and-surge-control.md)) |
 
 ```mermaid
 flowchart TD
