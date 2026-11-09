@@ -563,7 +563,7 @@ Then 앱과 별도 호스팅에서 ko/en 병기 정적 대체 페이지(중단 �
 | (결정) | 화폐·결제(M1 밖) | — | **첫 GitHub 로그인 시 POINT 100,000 지급(USDC 는 환경별 공급, U24)**, USDC→POINT 단방향 교환, **혼합 결제(포인트 먼저)**, **Solana 지갑 선택(devnet 에스크로 시연)** | Y — 영역 설계 Phase 3·5·6d 의 몫, ADR-048(Out of Scope 에 한 줄 연결) |
 
 ## Open Questions
-- [ ] (명세 밖) Tailscale 호스트(머신) 이름 확정과 짧은 링크 표기 여부 — A-035, 구현 시작 시 필요. **tailnet 기본 도메인은 `tail91f132.ts.net` 으로 확인됨(사용자, 2026-11-05)** 이므로 주소는 `https://<머신 이름>.tail91f132.ts.net` 이 된다. 머신 이름이 정해지면 GitHub OAuth 콜백 주소와 `PUBLIC_ORIGIN` 이 확정된다
+- [x] (명세 밖) Tailscale 머신 이름 확정 — A-035. **머신 이름은 `qd` 로 확정(사용자, 2026-11-09)**, tailnet 도메인은 `tail91f132.ts.net`(사용자, 2026-11-05) 이므로 공개 주소는 `https://qd.tail91f132.ts.net` 이다. GitHub OAuth 콜백 주소와 `PUBLIC_ORIGIN` 은 이 값으로 확정한다(짧은 링크 표기 여부는 열어 둠). 서버 호스트명(`qdServer`)과는 별개로 `tailscale up --hostname=qd` 로 지정한다
 - [ ] (명세 밖) 자기소개 문구 제공 — A-004
 - [ ] (구현 초기 실측) Tailscale Funnel 의 WebSocket 통과·유휴 타임아웃·대역폭 체감·클라이언트 IP·재시작 후 주소 유지·인증서 갱신 — A-009·A-036, 관문 G14. 통과하지 않으면 FR-050 대안(예: SSE·폴링) 재결정 필요
 - [ ] (명세 밖) 관리자 GitHub 숫자 ID 제공(허용목록) — A-001
@@ -597,7 +597,7 @@ Then 앱과 별도 호스팅에서 ko/en 병기 정적 대체 페이지(중단 �
 **사용자가 판단·제공해야 하는 것**
 1. 이 명세를 확정할지, 또는 수정할 곳이 있는지
 2. 자기소개 문구·경력·연락처와 연락처 노출 방식(`site-vars`, FR-001·A-004)
-3. Tailscale 머신 이름 선택(tailnet 도메인 `tail91f132.ts.net` 은 확인됨, 주소 형식은 고정 — A-035)
+3. ~~Tailscale 머신 이름 선택~~ — `qd` 로 확정(2026-11-09), 주소 `https://qd.tail91f132.ts.net` (A-035)
 4. 관리자 GitHub 숫자 ID, GitHub OAuth 앱 등록(개발·운영)
 5. Discord 서버·웹훅 생성, `age` 개인키 보관 위치
 6. 정적 호스트(Cloudflare Pages 또는 GitHub Pages) 가입(카드 요건·약관 확인, A-034)과 대체 페이지의 스크린샷·데모 영상 링크 제공
