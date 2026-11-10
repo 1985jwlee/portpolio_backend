@@ -1,0 +1,12 @@
+{
+  "name": "spike-g4-g10-db",
+  "private": true,
+  "type": "module",
+  "description": "G4(DB 드라이버)·G10(Drizzle 마이그레이션) 스파이크. 제품 코드가 아니다.",
+  "dependencies": {
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11"
+  }
+}
