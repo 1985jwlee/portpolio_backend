@@ -1,0 +1,58 @@
+{
+  "source": "서버 로그(docker logs g14-echo)의 ev=report 줄을 그대로 옮김",
+  "loggedAt": "2026-11-10T04:20:03.007Z",
+  "commit": "5e1ffb82e1ef93b3639297c0a7ef78f59a8c1900",
+  "page": "spikes/g14-funnel/lab.html",
+  "report": {
+    "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1",
+    "conn": null,
+    "startedAt": "2026-11-10T04:19:03.170Z",
+    "wsConnect": {
+      "ok": 10,
+      "fail": 0,
+      "ms": {
+        "n": 10,
+        "p50": 469,
+        "p95": 1227,
+        "max": 1227
+      }
+    },
+    "wsRtt": {
+      "n": 30,
+      "p50": 141,
+      "p95": 328,
+      "max": 427
+    },
+    "firstVisit": [
+      {
+        "got": 600000,
+        "ttfb": 278,
+        "sec": 2.849
+      },
+      {
+        "got": 600000,
+        "ttfb": 132,
+        "sec": 0.992
+      },
+      {
+        "got": 600000,
+        "ttfb": 124,
+        "sec": 0.904
+      }
+    ],
+    "download": [
+      {
+        "par": 1,
+        "bytesEach": 8000000,
+        "aggMBps": 0.44,
+        "eachMBps": [
+          0.44
+        ],
+        "sec": 17.4
+      }
+    ],
+    "error": "TypeError: Load failed",
+    "label": "error",
+    "finishedAt": "2026-11-10T04:20:02.290Z"
+  }
+}

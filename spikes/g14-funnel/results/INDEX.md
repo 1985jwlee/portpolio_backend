@@ -26,6 +26,12 @@
 | `…01-47-04-026Z-throughput.json` | `throughput --mode=http --par=16` | ③ 병렬 16 | v4 | 합계 2.55MB/s |
 | `…01-55-40-077Z-ws-watch-p461486.json` | `ws-watch --secs=300 --interval=2000` | ① 간헐 실패·정지→재개 | v5 | 서버에서 01:56:38 reset, 01:56:58 재개(notes.md) |
 | `2026-11-10-ws-watch.stdout.log` | 같은 실행의 표준출력 | ① | v5 | |
+| `…04-14-54-346Z-headers-rerun.json` | `headers` (Funnel 재개 후) | ④ 재확인 | v5 | 서버 04:14 UTC 에 Funnel 재개, 같은 결과. 식별정보 치환 |
+| `…04-20-03Z-phone-report-1-error.json` | `/lab` (iPhone Safari) | ⑦ 휴대폰 1회차 | lab | 병렬 4 에서 `Load failed` 로 중단 |
+| `…04-26-12Z-phone-report-2-suite.json` | `/lab` (iPhone Safari) | ⑦ 휴대폰 2회차 | lab | 끝까지 갔으나 회선이 나쁨(왕복 p50 950ms) → 판정 제외 |
+| `…04-30-56-481Z-throughput-p846291.json` | `throughput --mode=http --par=4 --at=…` | ⑦ 동시 시험의 개발 PC 쪽 | v5 | 서버 쪽 `ECONNRESET` 으로 비교 불성립, 합계 0.64MB/s. 파일명 시각은 대기 시작 시각 |
+| `…04-36-10-956Z-throughput-p869581.json` | `throughput --mode=http --par=4` | ③ 개발 PC 단독 재측정 | v5 | 합계 0.50MB/s (01시대 2.28MB/s 와 비교) |
+| `…04-37-55-168Z-ws-watch-p878053.json` | `ws-watch --secs=330` | ⑤ `tailscaled` 재시작 중 접속 | v5 | 재시작 04:38:20~21 UTC, 외부 복구 약 16초. notes.md §4 |
 | `notes.md` | — | 서버 출력 원문(netcheck, 직접 업로드, 서버 로그), 대조 시험 | — | |
 
 저장되지 않은 관찰(Funnel 을 처음 켠 직후의 WS 실패 2건)은 [ENV.md](../ENV.md) 와 notes.md 에 서술돼 있다.

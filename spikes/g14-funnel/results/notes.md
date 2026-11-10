@@ -66,8 +66,74 @@ upload: 12128774 bytes/s  time: 4.122428s
 ```
 `clientWallSec` 는 요청 왕복 편차(`rtt/2` 보정)가 섞여 신뢰도가 낮다. `monotonicVsServer` 가 유휴 시험의 비율(889.2/960.0 = 0.926)과 일치해서 근거로 쓴다.
 
-## 3. 아직 관찰하지 못한 것
-- ⑤ `tailscaled`·호스트 재시작 후 주소 유지
-- ⑥ 인증서 만료일·갱신
-- ⑦ 다른 회선(국내 모바일 등)의 종단 성능, 출발지가 다른 동시 접속
+## 3. 아직 관찰하지 못한 것 (2차 측정 뒤에도 남은 것)
+- ⑥ 인증서 **갱신** (만료일만 기록함, 아래 4절)
+- 호스트 재부팅 후 주소 유지 (공유 호스트라 시험하지 않음)
+- 시간 변동의 원인(제한이 걸리는지, 경로가 바뀌는지), 한 시간 이상 쉰 뒤 처리량 회복 여부
+- 서버 자신을 출발지로 한 병렬 16에서의 리셋 원인
 - 클라이언트 IP: IPv6 클라이언트, 클라이언트가 `X-Forwarded-For` 를 여러 값/긴 값으로 보낼 때의 정규화
+
+## 4. 2차 측정 (2026-11-10 04:14~04:44 UTC) — 사용자가 서버에서 실행한 출력과 대조 시험
+
+### 실행 방법과 커밋
+저장소를 서버 호스트가 아니라 Docker 볼륨(`g14src`)에 `git clone --depth 1` 로 받아 읽기 전용으로 붙였다. 실행 코드의 커밋:
+```
+5e1ffb82e1ef93b3639297c0a7ef78f59a8c1900
+```
+서버 쪽 Bun 은 1.3.11(`oven/bun:1`), 개발 PC 는 1.4.4. Funnel 을 다시 켠 시각은 04:14 UTC(서버 셸 출력의 컨테이너 시작 `04:14:27.236Z`).
+
+### ⑥ 인증서 (개발 PC 에서 `openssl s_client`, 04:14:54 UTC)
+```
+subject=CN = qd.tail91f132.ts.net
+issuer=C = US, O = Let's Encrypt, CN = YE1
+notBefore=Nov 10 00:37:17 2026 GMT
+notAfter=Feb  8 00:37:16 2027 GMT
+serial=06AFD3227F1F9CA2A70F6BBE173B1477FD6A
+```
+발급 시각이 오늘 측정 시작(01:35 UTC)보다 앞서므로 이전 Funnel 시험 때 자동 발급된 것으로 보인다. 갱신은 관찰하지 못했다.
+
+### ⑤ `tailscaled` 재시작 (서버 셸 출력 원문, 시각 UTC)
+```
+04:38:20.378989974
+# Funnel on:  https://qd.tail91f132.ts.net  (/ proxy http://127.0.0.1:28080)
+04:38:21.628367114     ← sudo systemctl restart tailscaled 직후
+04:38:41.633158407
+# Funnel on:  https://qd.tail91f132.ts.net  (/ proxy http://127.0.0.1:28080)
+100.81.216.0  qd  1985jwlee@  linux  -
+```
+`results/…04-37-55-168Z-ws-watch-p878053.json` 의 시도별 기록과 대조: 04:38:19.9 와 04:38:29.9 의 시도가 5초 타임아웃으로 실패, 첫 성공은 04:38:36.9 → **재시작 시작에서 외부 복구까지 약 16초**.
+
+### 서버 자신을 출발지로 (같은 서버의 컨테이너가 자기 공개 주소로 접속)
+```
+headers → "status": 200, "x-forwarded-for": "<SERVER_PUBLIC_IP>"   (서버 자신의 공인 IP)
+throughput --par=1  (15MB)       : mbPerSec 0.28,  totalSec 52.97
+throughput --par=4  (15MB × 4)   : mbPerSec 0.36 / 0.41 / 0.43 / 0.32, aggregateMbPerSec 1.26, totalSec 47.56
+throughput --par=16 (15MB × 16)  : error: The socket connection was closed unexpectedly … code: "ECONNRESET"
+                                   (제 도구가 병렬 흐름의 오류를 잡지 않아 실행이 중단됨 — 어느 시점인지 미기록)
+```
+결과 JSON 은 볼륨 안에 남았다가 정리 때 삭제된다(출력만 보존).
+
+### 동시 시험 시도 (실패)
+시작 시각 `AT=1794285266459` (= 04:34:26 UTC). 서버 쪽은 `시작까지 189초 대기` 를 출력한 뒤 시작 직후 `ECONNRESET` 으로 종료했다. 개발 PC 쪽은 병렬 4 합계 **0.64MB/s**(`results/…04-30-56-481Z-throughput-p846291.json`, 파일명 시각은 대기를 시작한 시각이다). 서버 쪽이 끊겨 ‘두 출발지 동시’ 비교는 성립하지 않았다.
+
+### 개발 PC 단독 재측정 (04:36:10 UTC, 같은 조건)
+```
+병렬 4, 10MB × 4: 0.31 / 0.36 / 0.12 / 0.14 MB/s, aggregateMbPerSec 0.5, totalSec 80.71
+```
+01:46 UTC 의 같은 조건(2.28MB/s)과 4.5배 차이. 동시 시험의 영향이 아니라 시간에 따른 변동이다.
+
+### 대조: 두 회선은 그대로였다
+```
+서버 → 중립 호스트 직접 업로드 (04:4x UTC, 2회):
+upload: 12131293 bytes/s  time: 4.121572s
+upload: 12140519 bytes/s  time: 4.118440s
+개발 PC → 중립 호스트 다운로드 (04:43 UTC, 3회, control-download.ts):
+{"bytes":30000000,"sec":0.49,"mbPerSec":58.34}
+{"bytes":30000000,"sec":0.5,"mbPerSec":56.73}
+{"bytes":30000000,"sec":0.6,"mbPerSec":47.98}
+```
+오전(01시대)의 12.1MB/s, 62MB/s 와 같은 수준이다 → 느려진 구간은 두 회선이 아니라 **Funnel 경로**.
+
+### 휴대폰(iPhone Safari, 모바일 데이터)
+서버 로그의 `ev=report` 두 건을 `results/…phone-report-*.json` 에 옮겼다(각 보고의 `startedAt` 이 시각이다). 첫 보고는 병렬 4 단계에서 `TypeError: Load failed` 로 중단, 두 번째는 끝까지 갔지만 회선이 나빴다(작은 메시지 왕복 p50 950ms, 단일 다운로드 0.08MB/s). 같은 기기·장소에서 5분 사이 7배 차이가 나 **판정에 쓰지 않는다**.
+

@@ -1,0 +1,73 @@
+{
+  "cmd": "throughput",
+  "base": "https://qd.tail91f132.ts.net",
+  "startedAt": "2026-11-10T04:30:56.481Z",
+  "finishedAt": "2026-11-10T04:35:53.576Z",
+  "options": {
+    "mode": "http",
+    "bytes": "10485760",
+    "par": "4",
+    "at": "1794285266459"
+  },
+  "client": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpus": 6,
+    "loadavg": [
+      0.19,
+      0.59,
+      0.9
+    ]
+  },
+  "server": {
+    "bun": "1.3.11",
+    "platform": "linux",
+    "release": "6.8.0-139-generic",
+    "cpuModel": "Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz",
+    "cpus": 6,
+    "loadavg": [
+      0.36,
+      0.26,
+      0.17
+    ],
+    "totalMem": 67043045376,
+    "freeMem": 41368944640,
+    "uptimeSec": 5304452
+  },
+  "commit": "5e1ffb82e1ef93b3639297c0a7ef78f59a8c1900",
+  "dirty": true,
+  "result": {
+    "conns": 10,
+    "size": 65536,
+    "secs": 15,
+    "httpDownload": {
+      "requestedBytesEach": 10485760,
+      "par": 4,
+      "each": [
+        {
+          "receivedBytes": 10485760,
+          "sec": 62.43,
+          "mbPerSec": 0.16
+        },
+        {
+          "receivedBytes": 10485760,
+          "sec": 22.56,
+          "mbPerSec": 0.44
+        },
+        {
+          "receivedBytes": 10485760,
+          "sec": 52.28,
+          "mbPerSec": 0.19
+        },
+        {
+          "receivedBytes": 10485760,
+          "sec": 42.7,
+          "mbPerSec": 0.23
+        }
+      ],
+      "aggregateMbPerSec": 0.64,
+      "totalSec": 62.43
+    }
+  }
+}
