@@ -1,0 +1,38 @@
+{
+  "run": "2026-11-10T06-55-35-914Z-churn",
+  "startedAt": "2026-11-10T06:55:35.915Z",
+  "params": {
+    "stormAt": [
+      60,
+      150
+    ],
+    "duration": 1500,
+    "public": 180,
+    "private": 20,
+    "slow": 0,
+    "slowAt": 1800,
+    "publicRate": 20,
+    "payload": 200,
+    "port": 3100,
+    "storm": 0,
+    "window": 60,
+    "churnRate": 50,
+    "churnAt": 120,
+    "churnSec": 1200
+  },
+  "host": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpuModel": "12th Gen Intel(R) Core(TM) i5-12400",
+    "cpus": 6,
+    "totalMem": 16771043328,
+    "loadavgAtStart": [
+      1.85,
+      2.69,
+      2.13
+    ]
+  },
+  "commit": "44d528072662ec2fc091245156341dd735e567c8",
+  "dirty": true
+}
