@@ -1,0 +1,78 @@
+{
+  "cmd": "http",
+  "base": "https://qd.tail91f132.ts.net",
+  "startedAt": "2026-11-10T01:40:34.795Z",
+  "finishedAt": "2026-11-10T01:40:40.651Z",
+  "options": {
+    "conc": "50",
+    "total": "500",
+    "runs": "2"
+  },
+  "client": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpus": 6,
+    "loadavg": [
+      2.91,
+      2.29,
+      1.35
+    ]
+  },
+  "server": {
+    "bun": "1.3.11",
+    "platform": "linux",
+    "release": "6.8.0-139-generic",
+    "cpuModel": "Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz",
+    "cpus": 6,
+    "loadavg": [
+      0.47,
+      0.25,
+      0.25
+    ],
+    "totalMem": 67043045376,
+    "freeMem": 41555906560,
+    "uptimeSec": 5293938
+  },
+  "commit": "71802e26e57eb748fdd53d217ca05f81d79d6ea9",
+  "dirty": false,
+  "result": {
+    "path": "/echo",
+    "conc": 50,
+    "total": 500,
+    "runs": [
+      {
+        "run": 1,
+        "sec": 3.62,
+        "rps": 138.2,
+        "status": {
+          "200": 478,
+          "error:ECONNRESET: The socket connection was closed unexpectedly. For more information,": 22
+        },
+        "latencyMs": {
+          "n": 500,
+          "p50": 111.27,
+          "p95": 1720.76,
+          "p99": 2660.31,
+          "max": 3618
+        }
+      },
+      {
+        "run": 2,
+        "sec": 2.17,
+        "rps": 230.9,
+        "status": {
+          "200": 476,
+          "error:ECONNRESET: The socket connection was closed unexpectedly. For more information,": 24
+        },
+        "latencyMs": {
+          "n": 500,
+          "p50": 76.37,
+          "p95": 366.42,
+          "p99": 1091.02,
+          "max": 1094.58
+        }
+      }
+    ]
+  }
+}

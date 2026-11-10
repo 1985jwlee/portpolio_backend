@@ -1,0 +1,91 @@
+{
+  "cmd": "http",
+  "base": "http://127.0.0.1:39015",
+  "startedAt": "2026-11-10T01:40:11.116Z",
+  "finishedAt": "2026-11-10T01:40:11.138Z",
+  "options": {
+    "conc": "50",
+    "total": "500",
+    "runs": "3"
+  },
+  "client": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpus": 6,
+    "loadavg": [
+      4.17,
+      2.46,
+      1.37
+    ]
+  },
+  "server": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpuModel": "12th Gen Intel(R) Core(TM) i5-12400",
+    "cpus": 6,
+    "loadavg": [
+      4.17,
+      2.46,
+      1.37
+    ],
+    "totalMem": 16771043328,
+    "freeMem": 10837610496,
+    "uptimeSec": 5373
+  },
+  "commit": "71802e26e57eb748fdd53d217ca05f81d79d6ea9",
+  "dirty": false,
+  "result": {
+    "path": "/echo",
+    "conc": 50,
+    "total": 500,
+    "runs": [
+      {
+        "run": 1,
+        "sec": 0.01,
+        "rps": 51317.7,
+        "status": {
+          "200": 500
+        },
+        "latencyMs": {
+          "n": 500,
+          "p50": 0.61,
+          "p95": 2.89,
+          "p99": 3.2,
+          "max": 3.33
+        }
+      },
+      {
+        "run": 2,
+        "sec": 0,
+        "rps": 105099.7,
+        "status": {
+          "200": 500
+        },
+        "latencyMs": {
+          "n": 500,
+          "p50": 0.43,
+          "p95": 0.9,
+          "p99": 1.07,
+          "max": 1.12
+        }
+      },
+      {
+        "run": 3,
+        "sec": 0.01,
+        "rps": 86403.6,
+        "status": {
+          "200": 500
+        },
+        "latencyMs": {
+          "n": 500,
+          "p50": 0.54,
+          "p95": 0.91,
+          "p99": 1.14,
+          "max": 1.34
+        }
+      }
+    ]
+  }
+}
