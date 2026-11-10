@@ -31,7 +31,8 @@ const target = (meta.params.public + meta.params.private) * 0.99;
 const reached = samples.find((s) => s.conns.public + s.conns.private >= target);
 const t0 = reached ? reached.t : samples[0]?.t ?? 0;
 const warmEnd = t0 + CRIT.warmupMin * 60_000;
-const after = samples.filter((s) => s.t >= warmEnd);
+const churnStartRec = ld.find((r) => r.type === "churn-start"); // churn 모드에서는 접속·해제 부하 구간이 판정 구간이다
+const after = samples.filter((s) => s.t >= (churnStartRec ? churnStartRec.t : warmEnd));
 
 const slope = (pts: { x: number; y: number }[]) => { // 최소제곱 기울기 (y 단위/시간)
   const n = pts.length; if (n < 3) return null;
@@ -54,7 +55,8 @@ const cpuMed = med(after.map((s) => s.cpuCores));
 
 const wins = ld.filter((r) => r.type === "window");
 const sum = ld.find((r) => r.type === "summary");
-const winsAfter = wins.filter((w) => w.t >= warmEnd && w.latP99 !== null);
+const csRec = ld.find((r) => r.type === "churn-start"), ceRec = ld.find((r) => r.type === "churn-end");
+const winsAfter = csRec ? wins.filter((w) => w.t >= csRec.t && w.t <= (ceRec?.t ?? Infinity) + 60_000 && w.latP99 !== null) : wins.filter((w) => w.t >= warmEnd && w.latP99 !== null);
 const p99s = winsAfter.map((w) => w.latP99 as number);
 const gaps = wins.reduce((a, w) => a + w.gaps, 0), dups = wins.reduce((a, w) => a + w.dups, 0), reorders = wins.reduce((a, w) => a + w.reorders, 0);
 const unexpectedCloses = wins.reduce((a, w) => a + Object.values(w.closes as Record<string, number>).reduce((x, y) => x + y, 0) + (w.connFail ?? 0), 0);
@@ -99,6 +101,27 @@ if (meta.params.storm) {
   }
   const rec = wins.filter((x) => x.recoverP50 !== null);
   checks.push({ name: "재접속 지연 p50/max (클라이언트 관측, ms)", value: { p50: med(rec.map((x) => x.recoverP50)), max: rec.length ? Math.max(...rec.map((x) => x.recoverMax)) : null }, limit: "참고(판정 아님)", pass: true });
+}
+if (meta.params.churnRate > 0) {
+  // 소크의 기울기·종료 항목은 빼고 접속·해제 시험 기준(README ‘접속·해제 시험’)으로 판정한다
+  for (let i = checks.length - 1; i >= 0; i--) if (/RSS 기울기|종료 RSS|heapUsed 기울기|느린 소비자|주입 후/.test(checks[i]!.name)) checks.splice(i, 1);
+  const cs = ld.find((r) => r.type === "churn-start"), ce = ld.find((r) => r.type === "churn-end");
+  const steady = meta.params.public + meta.params.private;
+  const churn = sum?.churn;
+  const baseRss = med(samples.filter((x) => cs && x.t >= cs.t - 60_000 && x.t < cs.t).map((x) => x.rss / MB));
+  const endRss2 = med(samples.filter((x) => ce && x.t >= ce.t + 60_000).map((x) => x.rss / MB));
+  const baseGc = [...gcs].reverse().find((g) => cs && g.t < cs.t);
+  const endGc = [...gcs].reverse().find((g) => ce && g.t >= ce.t + 30_000);
+  const finalConns = sum?.serverStats ? sum.serverStats.conns.public + sum.serverStats.conns.private : null;
+  const opened = sum?.serverStats?.opened ?? null;
+  const expectedOpened = churn ? steady + churn.started - churn.failed : null;
+  checks.push(
+    { name: "접속·해제 시작 횟수", value: churn?.started ?? null, limit: "≥ 59,000", pass: churn ? churn.started >= 59000 : null },
+    { name: "정착 후 서버 연결 수(회수)", value: finalConns, limit: `= ${steady}`, pass: finalConns === null ? null : finalConns === steady },
+    { name: "RSS 정착 후 − 기준선", value: baseRss && endRss2 ? Number((endRss2 - baseRss).toFixed(1)) + " MB (" + baseRss.toFixed(1) + "→" + endRss2.toFixed(1) + ")" : null, limit: "≤ +10 MB", pass: baseRss && endRss2 ? endRss2 - baseRss <= 10 : null },
+    { name: "강제 GC 후 힙 정착 후 − 기준선", value: baseGc && endGc ? Number(((endGc.heapUsed - baseGc.heapUsed) / MB).toFixed(2)) + " MB" : null, limit: "≤ +2 MB", pass: baseGc && endGc ? (endGc.heapUsed - baseGc.heapUsed) / MB <= 2 : null },
+    { name: "서버 opened 회계(고정+시도−실패)", value: opened !== null && expectedOpened !== null ? { server: opened, expected: expectedOpened } : null, limit: "±1%", pass: opened !== null && expectedOpened !== null && churn ? Math.abs(opened - expectedOpened) <= 0.01 * churn.started : null },
+  );
 }
 const verdict = checks.some((c) => c.pass === false) ? "FAIL" : checks.some((c) => c.pass === null) ? "INCOMPLETE" : "PASS";
 const result = {

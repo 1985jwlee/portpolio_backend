@@ -59,8 +59,8 @@
 | 고정 연결 | 공개 180 + 비공개 20 = 200(순번·지연 검증은 소크와 같다) |
 | 워밍업 | 고정 연결이 모두 붙은 뒤 2분(기준선) |
 | 접속·해제 부하 | **초당 50회**, **20분(1,200초)** → 약 60,000회. 연결 수명 0.2~3초(무작위), 90%는 공개·10%는 비공개, **80%는 정상 종료(close 1000), 20%는 raw TCP 를 업그레이드 직후 비정상 종료** |
-| 정착 | 부하를 멈추고 90초 대기(강제 GC 60초 간격) |
-| 길이 | 총 약 24분 |
+| 정착 | 부하를 멈추고 **120초** 대기(강제 GC 60초 간격, 표본 5초). 기준선과 비교하는 값은 부하 종료 60초 후부터의 RSS, 30초 후 이후의 마지막 GC 표본 |
+| 길이 | 총 약 25분(워밍업 2 + 부하 20 + 정착 2 + 접속 램프) = `--duration=1500` |
 
 | 합격 기준(제안, 시험 전 고정) | 값 |
 |---|---|
@@ -78,6 +78,7 @@
 cd spikes/g2-ws-soak
 bun run.ts --duration=12600 --slow=10 --slowAt=1800 --label=soak3h30                     # 소크 3시간 30분
 WARMUP_MIN=0.5 bun run.ts --duration=300 --slow=0 --storm=1 --stormAt=60,150 --window=5 --label=storm   # 재접속 폭풍 5분(짧은 시험이라 워밍업 30초)
+bun run.ts --duration=1500 --public=180 --private=20 --slow=0 --churnRate=50 --churnAt=120 --churnSec=1200 --window=60 --label=churn   # 접속·해제 시험 25분
 bun analyze.ts results/<run>                                                             # 다시 분석만
 ```
 `results/<run>/` 에 `meta.json`(환경·커밋), `gateway-samples.jsonl`, `load-windows.jsonl`, `storm-events.jsonl`, `summary.json` 이 남는다.

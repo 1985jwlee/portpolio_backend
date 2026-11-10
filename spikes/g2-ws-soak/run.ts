@@ -9,7 +9,7 @@ import { join } from "node:path";
 const opt: Record<string, string> = {};
 for (const a of process.argv.slice(2)) { const m = /^--([^=]+)=(.*)$/.exec(a); if (m) opt[m[1]!] = m[2]!; }
 const num = (k: string, d: number) => (opt[k] !== undefined ? Number(opt[k]) : d);
-const params = { stormAt: (opt.stormAt ?? "60,150").split(",").map(Number), duration: num("duration", 14400), public: num("public", 900), private: num("private", 100), slow: num("slow", 10), slowAt: num("slowAt", 1800), publicRate: num("publicRate", 20), payload: num("payload", 200), port: num("port", 3100), storm: num("storm", 0), window: num("window", 60) };
+const params = { stormAt: (opt.stormAt ?? "60,150").split(",").map(Number), duration: num("duration", 14400), public: num("public", 900), private: num("private", 100), slow: num("slow", 10), slowAt: num("slowAt", 1800), publicRate: num("publicRate", 20), payload: num("payload", 200), port: num("port", 3100), storm: num("storm", 0), window: num("window", 60), churnRate: num("churnRate", 0), churnAt: num("churnAt", 120), churnSec: num("churnSec", 1200) };
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const run = `${stamp}-${opt.label ?? "run"}`;
 const dir = join(import.meta.dir, "results", run);
@@ -25,7 +25,7 @@ writeFileSync(join(dir, "meta.json"), JSON.stringify({
 function spawnGateway() {
   return Bun.spawn(["bun", "gateway.ts"], {
     cwd: import.meta.dir, stdout: "pipe", stderr: "inherit",
-    env: { ...process.env, PORT: String(params.port), PUBLIC_RATE: String(params.publicRate), PAYLOAD: String(params.payload), SAMPLE_FILE: join(dir, "gateway-samples.jsonl") },
+    env: { ...(params.churnRate > 0 ? { GC_SEC: "60", SAMPLE_SEC: "5" } : {}), ...process.env, PORT: String(params.port), PUBLIC_RATE: String(params.publicRate), PAYLOAD: String(params.payload), SAMPLE_FILE: join(dir, "gateway-samples.jsonl") },
   });
 }
 async function waitListening(p: ReturnType<typeof spawnGateway>) {
@@ -39,7 +39,7 @@ async function waitListening(p: ReturnType<typeof spawnGateway>) {
 let gw = spawnGateway();
 console.log("gateway 시작:", await waitListening(gw));
 
-const load = Bun.spawn(["bun", "load.ts", `--url=ws://127.0.0.1:${params.port}`, `--public=${params.public}`, `--private=${params.private}`, `--slow=${params.slow}`, `--slowAt=${params.slowAt}`, `--duration=${params.duration}`, `--window=${params.window}`, `--out=${join(dir, "load-windows.jsonl")}`], { cwd: import.meta.dir, stdout: "inherit", stderr: "inherit" });
+const load = Bun.spawn(["bun", "load.ts", `--url=ws://127.0.0.1:${params.port}`, `--public=${params.public}`, `--private=${params.private}`, `--slow=${params.slow}`, `--slowAt=${params.slowAt}`, `--duration=${params.duration}`, `--window=${params.window}`, `--churnRate=${params.churnRate}`, `--churnAt=${params.churnAt}`, `--churnSec=${params.churnSec}`, `--out=${join(dir, "load-windows.jsonl")}`], { cwd: import.meta.dir, stdout: "inherit", stderr: "inherit" });
 // 재접속 폭풍: 60초에 SIGTERM(정상 종료, bye+1001) → 2초 뒤 재기동, 150초에 SIGKILL(비정상) → 2초 뒤 재기동
 const stormLog = join(dir, "storm-events.jsonl");
 const stormTimers: ReturnType<typeof setTimeout>[] = [];

@@ -21,6 +21,9 @@ const DURATION = num("duration", 3600);
 const WINDOW = num("window", 60);
 const OUT = opt.out ?? "";
 const RAMP_MS = num("rampMs", 5); // 연결 사이 간격
+const CHURN_RATE = num("churnRate", 0); // 초당 접속·해제 횟수 (0 이면 끔)
+const CHURN_AT = num("churnAt", 120); // 고정 연결이 붙은 뒤 이 초 후에 시작
+const CHURN_SEC = num("churnSec", 1200);
 if (OUT) mkdirSync(dirname(OUT), { recursive: true });
 const write = (o: Record<string, unknown>) => { if (OUT) appendFileSync(OUT, JSON.stringify({ t: Date.now(), ...o }) + "\n"); };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -34,6 +37,29 @@ const pct = (h: Int32Array, n: number, p: number) => { if (!n) return null; let 
 
 let stopping = false;
 let openNow = 0;
+// 접속·해제 부하: 연결 수명 0.2~3초, 90% 공개·10% 비공개, 80% 정상 종료(close 1000)·20% 업그레이드 직후 raw TCP 비정상 종료
+const churn = { started: 0, opened: 0, cleanClosed: 0, abrupt: 0, failed: 0 };
+function churnOne() {
+  churn.started++;
+  const kind = Math.random() < 0.1 ? "private" : "public";
+  const life = 200 + Math.random() * 2800;
+  if (Math.random() < 0.2) {
+    const u = new URL(URL_.replace(/^ws/, "http"));
+    let done = false;
+    const s = connect({ host: u.hostname, port: Number(u.port || 80) }, () => {
+      s.write(`GET /ws?kind=${kind} HTTP/1.1\r\nHost: ${u.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`);
+      setTimeout(() => { if (!done) { done = true; churn.abrupt++; } s.destroy(); }, life);
+    });
+    s.on("data", () => {}); // 읽는다(느린 소비자가 아니다)
+    s.on("error", () => { if (!done) { done = true; churn.failed++; } });
+  } else {
+    const ws = new WebSocket(`${URL_}/ws?kind=${kind}`);
+    let ok = false;
+    ws.onopen = () => { ok = true; churn.opened++; setTimeout(() => { try { ws.close(1000); } catch { /* ignore */ } }, life); };
+    ws.onclose = () => { if (ok) churn.cleanClosed++; else churn.failed++; };
+    ws.onerror = () => { /* onclose 에서 처리 */ };
+  }
+}
 const jitter = (ms: number) => ms * (0.5 + Math.random());
 
 function client(kind: "public" | "private") {
@@ -108,6 +134,13 @@ async function report(final = false) {
   for (let i = 0; i < NPUB; i++) { client("public"); await sleep(RAMP_MS); }
   for (let i = 0; i < NPRIV; i++) { client("private"); await sleep(RAMP_MS); }
   const winTimer = setInterval(() => report(), WINDOW * 1000);
+  if (CHURN_RATE > 0) {
+    setTimeout(() => {
+      write({ type: "churn-start", rate: CHURN_RATE, sec: CHURN_SEC });
+      const iv = setInterval(churnOne, 1000 / CHURN_RATE);
+      setTimeout(() => { clearInterval(iv); write({ type: "churn-end", churn: { ...churn } }); }, CHURN_SEC * 1000);
+    }, CHURN_AT * 1000);
+  }
   let slowDone = false;
   const slowTimer = setInterval(() => {
     if (!slowDone && NSLOW > 0 && Date.now() - startAt >= SLOW_AT * 1000) { slowDone = true; write({ type: "slow-injected", n: NSLOW }); for (let i = 0; i < NSLOW; i++) slowConsumer(); }
@@ -119,7 +152,7 @@ async function report(final = false) {
     await report(true);
     let serverStats: unknown = null;
     try { serverStats = await (await fetch(URL_.replace(/^ws/, "http") + "/stats")).json(); } catch { /* ignore */ }
-    const summary = { type: "summary", durationSec: Math.round((Date.now() - startAt) / 1000), total, serverStats };
+    const summary = { type: "summary", durationSec: Math.round((Date.now() - startAt) / 1000), total, churn, serverStats };
     write(summary);
     console.log(JSON.stringify(summary));
     for (const s of slowSockets) s.destroy();
