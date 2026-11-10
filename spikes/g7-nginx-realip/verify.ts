@@ -96,7 +96,11 @@ async function main() {
     const t = sh(`docker run -d --name g7-nginx-t --network ${NET} -p 127.0.0.1:${PORT_T}:80 -v ${dir}/nginx.trusted.conf:/etc/nginx/nginx.conf:ro nginx:stable`);
     const n = sh(`docker run -d --name g7-nginx-u --network ${NET} -p 127.0.0.1:${PORT_U}:80 -v ${dir}/nginx.untrusted.conf:/etc/nginx/nginx.conf:ro nginx:stable`);
     if (t.code !== 0 || n.code !== 0) throw new Error("nginx 기동 실패: " + t.out + n.out);
-    for (let i = 0; i < 40; i++) { try { const r = await fetch(`http://127.0.0.1:${PORT_T}/`); if (r.status === 200) break; } catch { /* 준비 중 */ } await sleep(250); }
+    for (const port of [PORT_T, PORT_U]) { // 두 nginx 가 모두 응답할 때까지 기다린다
+      let ready = false;
+      for (let i = 0; i < 80 && !ready; i++) { try { ready = (await fetch(`http://127.0.0.1:${port}/`)).status === 200; } catch { /* 준비 중 */ } if (!ready) await sleep(250); }
+      if (!ready) throw new Error(`nginx(${port}) 가 준비되지 않음: ` + sh("docker logs g7-nginx-u 2>&1 | tail -5; docker logs g7-nginx-t 2>&1 | tail -5").out);
+    }
     for (let rep = 0; rep < 3; rep++) results.runs.push(await suite(rep));
   } finally {
     cleanup();
