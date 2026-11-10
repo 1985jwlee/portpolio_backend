@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function trial(label: string, mode: "established" | "none" | "keepalive-idle" | "close-conn" | "inflight" | "after-load" | "after-load-inflight", extraEnv: Record<string,string> = {}) {
   const port = 39650 + Math.floor(Math.random() * 40);
-  const p = spawn("bun", [".next/standalone/server.js"], { env: { ...process.env, PORT: String(port), HOSTNAME: "127.0.0.1", NODE_ENV: "production", ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
+  const p = spawn(process.env.SERVER_BIN ?? "bun", [".next/standalone/server.js"], { env: { ...process.env, PORT: String(port), HOSTNAME: "127.0.0.1", NODE_ENV: "production", ...extraEnv }, stdio: ["ignore", "pipe", "pipe"] });
   let err = ""; p.stderr!.on("data", (d) => (err += d)); let out = ""; p.stdout!.on("data", (d) => (out += d));
   let exit: any = null; p.on("exit", (c, s) => (exit = { c, s }));
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch {} await sleep(200); }

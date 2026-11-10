@@ -150,7 +150,7 @@ async function oneRun(runNo: number): Promise<R[]> {
       await Promise.all(Array.from({ length: 10 }, async () => {
         while (Date.now() < end) { const s = performance.now(); await (await get("/ko")).text(); lat.push(performance.now() - s); }
       }));
-      const rss = sh("ps", ["-o", "rss=", "-p", String(srv.proc.pid)]).stdout.trim();
+      const rss = (sh("ps", ["-o", "rss=", "-p", String(srv.proc.pid)]).stdout ?? "").trim() || (sh("sh", ["-c", `awk '/VmRSS/{print $2}' /proc/${srv.proc.pid}/status`]).stdout ?? "").trim();
       add(0, "관찰: 30초 동시 10 부하", "SKIP", { requests: lat.length, meanMs: +(lat.reduce((a, b) => a + b, 0) / lat.length).toFixed(1), rssKB: Number(rss) });
     }
 
@@ -204,7 +204,7 @@ const ran = criteria.filter((c) => c.pass !== "SKIP");
 const verdict = ran.length > 0 && ran.every((c) => c.pass === true) ? (RUNS >= 3 && !only ? "PASS" : "PASS(부분)") : "FAIL";
 const obs = all.flat().filter((r) => r.id === 0).map((r) => r.detail);
 
-const commit = sh("git", ["rev-parse", "HEAD"]).stdout.trim();
+const commit = process.env.G3_COMMIT || (sh("git", ["rev-parse", "HEAD"]).stdout ?? "").trim() || "알 수 없음";
 const result = { at: new Date().toISOString(), commit, bun: Bun.version, docker: (sh("docker", ["--version"]).stdout ?? "").trim() || "없음", runs: RUNS, only: args.only ?? null, skip: args.skip ?? null, verdict, criteria, observation: obs };
 mkdirSync("results", { recursive: true });
 const file = `results/${result.at.replace(/[:.]/g, "-")}-verify.json`;
