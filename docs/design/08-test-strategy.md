@@ -287,6 +287,7 @@ classDiagram
 | AC-037 | 검색·공유·오류 화면 | `/robots.txt`·`/sitemap.xml`(hreflang) 응답 검사, 공개 페이지 `<head>`(canonical·로케일별 메타·OG 1200×630) 검사, 방명록·흐름·지표 `noindex, follow`, 404·403·500 상태 코드+`noindex`, web 중지 시 503+`Retry-After`+`X-Fallback: 1`, `SEO_INDEXING=off` 의 전체 금지 | L2·L3 | design/14 §9, `apps/web/test/seo.test.ts`(제안), `test/compose/fallback.test.ts` |
 | AC-038 | 개인정보·쿠키 안내 | 변수를 비운 빌드에서 `/ko/privacy`·`/en/privacy` 렌더(자리표시), `CONTENT_STRICT=1` 빌드 실패, 쿠키 동의 배너 기본 비표시, 쿠키 목록이 실제 `Set-Cookie` 와 일치 | L2·L3 | design/12 §4, `scripts/content-check.ts`(제안), `apps/web/test/privacy.test.ts`(제안) |
 
+| AC-040 | 동시 접속자 상한 | 상한(50) 도달 상태에서 51 번째 방문자가 503 `overloaded` + `Retry-After` + 대기 안내를 받고, 기존 연결은 유지, 상한 아래로 내려가면 정상 접속, 대체 페이지 영향 없음 | L3 (SG-6·SG-9 와 같은 몰림 시험) | design/18 §10.4, `test/load/` (제안) |
 | AC-039 | 수동 전환 대체 페이지(별도 주소) | 빌드 산출물이 앱 주소 링크·복구 안내·GitHub 링크를 포함, 대체 페이지 axe 0·쿠키 0·외부 요청 0 | L2~L3 (실제 정적 호스트 배포는 L4) | design/16 §7, `infra/outage-page/test`(제안) |
 
 ## 5. 동시성 시험 설계
