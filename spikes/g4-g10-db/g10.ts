@@ -13,16 +13,23 @@ type R = { id: number; name: string; pass: boolean; detail: unknown };
 const norm = (dump: string) => dump.split("\n").filter((l) => !l.startsWith("--") && !l.startsWith("\\restrict") && !l.startsWith("\\unrestrict")).join("\n").trim();
 const dumpOf = (db: string) => norm(sh(`docker exec ${NAME} pg_dump -U postgres -d ${db} -s -n spike -n drizzle`).out);
 
+// 런타임 경로: drizzle-orm/bun-sql/migrator (설계의 db:migrate 가 쓸 방식)
 function migrate(work: string, url: string) {
+  const r = Bun.spawnSync(["bun", "src/migrate.ts"], { cwd: work, env: { ...process.env, DATABASE_URL: url } });
+  return { code: r.exitCode, out: (r.stdout.toString() + r.stderr.toString()).trim().slice(-400) };
+}
+// CLI 경로: drizzle-kit migrate (pg 드라이버 필요)
+function migrateCli(work: string, url: string) {
   const r = Bun.spawnSync(["bunx", "drizzle-kit", "migrate", "--config", "drizzle.config.ts"], { cwd: work, env: { ...process.env, DATABASE_URL: url } });
   return { code: r.exitCode, out: (r.stdout.toString() + r.stderr.toString()).trim().slice(-400) };
 }
 async function errnoOf(p: Promise<unknown>) { try { await p; return null; } catch (e: any) { return String(e.errno ?? e.code); } }
 
 async function once(rep: number, work: string, admin: Bun.SQL, base: ReturnType<typeof makeUrl>, observe: boolean): Promise<{ results: R[]; observation?: unknown }> {
-  const a = `g10a_${rep}`, b = `g10b_${rep}`;
+  const a = `g10a_${rep}`, b = `g10b_${rep}`, c = `g10c_${rep}`;
   await admin.unsafe(`create database ${a}`);
   await admin.unsafe(`create database ${b}`);
+  await admin.unsafe(`create database ${c}`);
   const res: R[] = [];
   let observation: unknown;
 
@@ -71,6 +78,14 @@ async function once(rep: number, work: string, admin: Bun.SQL, base: ReturnType<
   const n3 = await migRows();
   res.push({ id: 7, name: "migrate 재실행은 이력·스키마 불변", pass: m3.code === 0 && n3 === 2 && dumpOf(a) === dumpA, detail: { code: m3.code, migrationRows: n3 } });
 
+  // 1b·10. CLI 경로로 세 번째 새 DB 에 적용하고 덤프를 비교
+  const mc = migrateCli(work, base(c));
+  const C = new Bun.SQL(base(c));
+  const nC = mc.code === 0 ? Number((await C`select count(*)::int as n from drizzle.__drizzle_migrations`)[0].n) : -1;
+  await C.close();
+  res.push({ id: 11, name: "1b. drizzle-kit migrate(CLI, pg)로도 적용", pass: mc.code === 0 && nC === 2, detail: { code: mc.code, migrationRows: nC, tail: mc.code === 0 ? undefined : mc.out } });
+  res.push({ id: 10, name: "10. CLI 덤프 = 런타임 마이그레이터 덤프", pass: mc.code === 0 && dumpOf(c) === dumpA, detail: { equal: mc.code === 0 && dumpOf(c) === dumpA } });
+
   // 8. 관찰: 적용된 파일 수정
   if (observe) {
     appendFileSync(join(work, "drizzle", "0000_schema.sql"), '\n--> statement-breakpoint\nCREATE TABLE "spike"."tamper" (id int);\n');
@@ -111,10 +126,10 @@ async function main() {
     rmSync(work, { recursive: true, force: true });
   }
 
-  const ids = [1, 2, 3, 4, 5, 6, 7];
+  const ids = [1, 11, 2, 3, 4, 5, 6, 7, 10];
   const perId = ids.map((id) => ({ id, name: all[0]!.find((x) => x.id === id)!.name, passes: all.map((run) => run.find((x) => x.id === id)!.pass) }));
   const repeat = perId.every((p) => p.passes.every(Boolean));
-  const criteria = [...perId.map((p) => ({ id: p.id, name: p.name, pass: p.passes.every(Boolean), detail: `3회: ${p.passes.map((x) => (x ? "PASS" : "FAIL")).join(" ")}` })), { id: 9, name: "1~7 을 3회 반복해도 같다", pass: repeat, detail: "" }];
+  const criteria = [...perId.map((p) => ({ id: p.id, name: p.name, pass: p.passes.every(Boolean), detail: `3회: ${p.passes.map((x) => (x ? "PASS" : "FAIL")).join(" ")}` })), { id: 9, name: "1~7·1b·10 을 3회 반복해도 같다", pass: repeat, detail: "" }];
   const verdict = repeat ? "PASS" : "FAIL";
   mkdirSync(join(dir, "results"), { recursive: true });
   const file = join(dir, "results", `${new Date().toISOString().replace(/[:.]/g, "-")}-g10.json`);
