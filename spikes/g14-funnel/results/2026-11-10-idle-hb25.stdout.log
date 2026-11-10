@@ -1,0 +1,25 @@
+... 60s hb=2 state=1
+... 120s hb=5 state=1
+... 180s hb=7 state=1
+... 240s hb=10 state=1
+... 300s hb=12 state=1
+... 360s hb=15 state=1
+... 420s hb=18 state=1
+... 480s hb=20 state=1
+... 540s hb=23 state=1
+... 600s hb=25 state=1
+... 660s hb=28 state=1
+... 720s hb=31 state=1
+... 780s hb=33 state=1
+... 840s hb=36 state=1
+{
+  "hb": 25,
+  "capSec": 900,
+  "elapsedSec": 900,
+  "survivedToCap": true,
+  "closeInfo": null,
+  "hbReceived": 38,
+  "note": "관찰 상한 900s 까지 유지됨(상한 이상은 미관찰)"
+}
+
+저장: /home/user/portpolio_backend/scripts/spike/g14/results/2026-11-10T01-38-31-004Z-idle.json
