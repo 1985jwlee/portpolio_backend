@@ -301,8 +301,9 @@ flowchart LR
 
 **구성.** §2.1 의 `MetricsRegistry` · `LabelPolicy` · `HttpMetricsMiddleware`.
 
-- **라이브러리는 G5 부분 실측.** `prom-client` 15.1.3 이 Bun 1.4.4 에서 Registry·Counter·Histogram·Gauge·`/metrics` 출력은 동작(기본 지표 일부 제외, §4.1). 후보 비교는 계속 열어 둔다: `prom-client`, OpenTelemetry Prometheus 내보내기(베타). 결정 전까지 레지스트리는 **어댑터 뒤**에 두어(`MetricsBackend` 포트) 구현을 바꿀 수 있게 한다.
+- **라이브러리는 G5 개발 PC 실측(2026-11-10, [`spikes/g5-metrics`](../../../spikes/g5-metrics/README.md)), 호스트 재측정 전.** `prom-client` 15.1.3 이 Bun 1.4.4·Elysia 1.4.30 에서 Registry·Counter·Histogram·Gauge·`/metrics` 출력, 레이블 규칙(`LabelPolicy`), 카디널리티 상한이 동작(기본 지표 일부 제외, §4.1). 후보 비교는 계속 열어 둔다: `prom-client`, OpenTelemetry Prometheus 내보내기(베타). 결정 전까지 레지스트리는 **어댑터 뒤**에 두어(`MetricsBackend` 포트) 구현을 바꿀 수 있게 한다.
 - 라우트 템플릿은 Elysia 가 매칭한 패턴에서 얻는다. 매칭 실패(404)는 `route="unmatched"` 하나로 모은다(카디널리티 방지).
+- **요청 시작 시각은 `onRequest` 에서 `WeakMap<Request, number>` 에 저장한다. `derive` 에 두지 않는다.** Elysia 는 매칭되지 않은 라우트(404)에서 `derive` 를 실행하지 않아 시작 시각이 비고, `now - undefined` 가 `NaN` 이 되어 prom-client 가 `Value is not a valid number: NaN` 을 던진다. 그러면 404 의 요청 수는 세어지지만 **지연 히스토그램에는 기록되지 않는다**(G5 스파이크 첫 실행에서 발견, `spikes/g5-metrics/README.md` ‘발견 기록’, 시험 기준 12). `onResponse` 는 WeakMap 에서 읽고, 값이 없으면 지연 관측만 건너뛰되 예외를 던지지 않는다.
 - 히스토그램 버킷(제안, 초): `0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2.5, 5` — p95 300ms 판정(AC-013)에 0.3 이 경계로 들어간다.
 
 ### 3.1 시퀀스
@@ -315,7 +316,7 @@ sequenceDiagram
     participant R as MetricsRegistry
     participant P as Prometheus
     C->>M: 요청
-    M->>M: 시작 시각 기록 · in_flight +1
+    M->>M: onRequest 에서 시작 시각 기록 (요청 객체 키 WeakMap) · in_flight +1
     M->>H: next()
     alt 정상
         H-->>M: 응답 상태
@@ -502,7 +503,7 @@ flowchart TD
 | `pf_trace_watch_lag_seconds` | H | `channel` | RT-08 |
 
 - **F13 이 쓰는 같은 개념의 다른 이름**은 F13 이 이 카탈로그의 이름으로 바꿔야 한다: `pf_outbox_pending`/`pf_outbox_dead`(게이지) → `pf_outbox_depth{status}`, `pf_inbox_pending`/`pf_inbox_dead` → `pf_inbox_depth{consumer,status}`, `pf_leader{job}` → `pf_dispatcher_leader{app}`(+ `pf_job_last_success_timestamp_seconds{job}`), `pf_message_handle_seconds` → `pf_event_process_duration_seconds`. ADR-024 의 `outbox_lag_seconds` 는 `pf_event_end_to_end_seconds` 로 읽는다.
-- **프로세스 지표**: prom-client 의 기본 지표는 Bun 1.4.4 에서 일부만 의미가 있다(실측). 쓸 수 있는 것: `process_cpu_*`, `process_resident_memory_bytes`, `process_open_fds`, `nodejs_eventloop_lag_{min,max,mean,p50,p90,p99}_seconds`, `nodejs_heap_size_*`. **쓰지 않는 것**: `nodejs_eventloop_lag_seconds`(항상 0), `nodejs_gc_duration_seconds`(샘플 없음), `nodejs_active_handles*`·`active_requests*`(의미 없음). GC 가시성은 M1 에서 포기하고 `process_resident_memory_bytes` 추이로 갈음한다. `healthz` 의 이벤트 루프 지연 판정(< 1초)은 `lag_max`/`p99` 를 쓴다.
+- **프로세스 지표**: prom-client 의 기본 지표는 Bun 1.4.4 에서 일부만 의미가 있다(실측). 쓸 수 있는 것: `process_cpu_*`, `process_resident_memory_bytes`, `process_open_fds`, `nodejs_eventloop_lag_{min,max,mean,p50,p90,p99}_seconds`, `nodejs_heap_size_*`. **쓰지 않는 것**: `nodejs_eventloop_lag_seconds`(2026-11-04 기록은 항상 0 이었으나 2026-11-10 G5 재실행은 0.0033 을 냈다 — `spikes/g5-metrics` 관찰 10, 의미가 불확실하니 `lag_p99`/`lag_max` 를 쓴다), `nodejs_gc_duration_seconds`(샘플 없음), `nodejs_active_handles*`·`active_requests*`(의미 없음). GC 가시성은 M1 에서 포기하고 `process_resident_memory_bytes` 추이로 갈음한다. `healthz` 의 이벤트 루프 지연 판정(< 1초)은 `lag_max`/`p99` 를 쓴다.
 
 - **nginx 지표는 M1 에서 두지 않는다.** 액세스 로그에서 주소 필드를 뺐고(ADR-008) 로그 기반 지표 수집기(추가 컨테이너)를 쓰지 않기 때문이다. 필요해지면 `stub_status` + 내보내기 컨테이너를 별도 결정으로 추가한다.
 - 카디널리티 추정: `route` ≤ 20, `type` ≤ 10, `consumer` ≤ 3, `code` ≤ 15 → 최악 시리즈 수가 수천 이하(무료 자원에서 안전, 측정 후 확인).
