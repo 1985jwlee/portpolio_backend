@@ -1,0 +1,400 @@
+{
+  "at": "2026-11-10T08:51:46.197Z",
+  "commit": "b7f5decd5da7488dd79e3d80dade22dbd947e67a",
+  "bun": "1.4.4",
+  "runs": [
+    [
+      {
+        "id": 1,
+        "name": "/metrics 형식·파싱",
+        "pass": true,
+        "detail": {
+          "contentType": "text/plain; version=0.0.4; charset=utf-8",
+          "unparsedLines": 0,
+          "series": 125
+        }
+      },
+      {
+        "id": 2,
+        "name": "pf_http_requests_total 정확성(ping 20, entries/:id 한 시리즈 5)",
+        "pass": true,
+        "detail": {
+          "pingSeries": 1,
+          "ping": 20,
+          "entriesSeries": 1,
+          "entries": 5
+        }
+      },
+      {
+        "id": 3,
+        "name": "히스토그램 버킷 12개·50ms 라우트의 버킷 누적",
+        "pass": true,
+        "detail": {
+          "hasAllBuckets": true,
+          "le0_025": 0,
+          "le0_1": 10,
+          "count": 10
+        }
+      },
+      {
+        "id": 4,
+        "name": "outbox 적체 지표가 큐 상태를 따라감(7→3, age 42)",
+        "pass": true,
+        "detail": {
+          "depthFirst": 7,
+          "age": 42,
+          "depthAfterUpdate": 3
+        }
+      },
+      {
+        "id": 5,
+        "name": "LabelPolicy: 금지 레이블 정의 예외·미등록 dev 예외·prod 버림+집계",
+        "pass": true,
+        "detail": {
+          "defThrows": true,
+          "devThrows": true,
+          "droppedBefore": 0,
+          "droppedAfter": 1
+        }
+      },
+      {
+        "id": 8,
+        "name": "UUID 레이블 값 거부(prod 에서 버림+집계, 출력에 없음)",
+        "pass": true,
+        "detail": {
+          "droppedBefore": 0,
+          "droppedAfter": 1,
+          "uuidInOutput": false
+        }
+      },
+      {
+        "id": 6,
+        "name": "카디널리티: 시리즈 ≤ 20, UUID·IPv4 0건",
+        "pass": true,
+        "detail": {
+          "httpRequestSeries": 6,
+          "ipv4InOutput": false,
+          "uuidInOutput": false,
+          "labels": [
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/ping\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/entries/:id\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/slow\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/error\",\"status_class\":\"5xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/metrics\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"unmatched\",\"status_class\":\"4xx\"}"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "404 는 route=\"unmatched\" 한 시리즈",
+        "pass": true,
+        "detail": {
+          "series": 1,
+          "labels": {
+            "app": "spike",
+            "method": "GET",
+            "route": "unmatched",
+            "status_class": "4xx"
+          },
+          "value": 1000
+        }
+      },
+      {
+        "id": 9,
+        "name": "스크레이프 지연 p95 ≤ 50ms(시리즈 약 100개)",
+        "pass": true,
+        "detail": {
+          "p95Ms": 23.13,
+          "medianMs": 7.28,
+          "series": 143
+        }
+      }
+    ],
+    [
+      {
+        "id": 1,
+        "name": "/metrics 형식·파싱",
+        "pass": true,
+        "detail": {
+          "contentType": "text/plain; version=0.0.4; charset=utf-8",
+          "unparsedLines": 0,
+          "series": 125
+        }
+      },
+      {
+        "id": 2,
+        "name": "pf_http_requests_total 정확성(ping 20, entries/:id 한 시리즈 5)",
+        "pass": true,
+        "detail": {
+          "pingSeries": 1,
+          "ping": 20,
+          "entriesSeries": 1,
+          "entries": 5
+        }
+      },
+      {
+        "id": 3,
+        "name": "히스토그램 버킷 12개·50ms 라우트의 버킷 누적",
+        "pass": true,
+        "detail": {
+          "hasAllBuckets": true,
+          "le0_025": 0,
+          "le0_1": 10,
+          "count": 10
+        }
+      },
+      {
+        "id": 4,
+        "name": "outbox 적체 지표가 큐 상태를 따라감(7→3, age 42)",
+        "pass": true,
+        "detail": {
+          "depthFirst": 7,
+          "age": 42,
+          "depthAfterUpdate": 3
+        }
+      },
+      {
+        "id": 5,
+        "name": "LabelPolicy: 금지 레이블 정의 예외·미등록 dev 예외·prod 버림+집계",
+        "pass": true,
+        "detail": {
+          "defThrows": true,
+          "devThrows": true,
+          "droppedBefore": 0,
+          "droppedAfter": 1
+        }
+      },
+      {
+        "id": 8,
+        "name": "UUID 레이블 값 거부(prod 에서 버림+집계, 출력에 없음)",
+        "pass": true,
+        "detail": {
+          "droppedBefore": 0,
+          "droppedAfter": 1,
+          "uuidInOutput": false
+        }
+      },
+      {
+        "id": 6,
+        "name": "카디널리티: 시리즈 ≤ 20, UUID·IPv4 0건",
+        "pass": true,
+        "detail": {
+          "httpRequestSeries": 6,
+          "ipv4InOutput": false,
+          "uuidInOutput": false,
+          "labels": [
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/ping\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/entries/:id\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/slow\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/error\",\"status_class\":\"5xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/metrics\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"unmatched\",\"status_class\":\"4xx\"}"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "404 는 route=\"unmatched\" 한 시리즈",
+        "pass": true,
+        "detail": {
+          "series": 1,
+          "labels": {
+            "app": "spike",
+            "method": "GET",
+            "route": "unmatched",
+            "status_class": "4xx"
+          },
+          "value": 1000
+        }
+      },
+      {
+        "id": 9,
+        "name": "스크레이프 지연 p95 ≤ 50ms(시리즈 약 100개)",
+        "pass": true,
+        "detail": {
+          "p95Ms": 6.55,
+          "medianMs": 3.89,
+          "series": 141
+        }
+      }
+    ],
+    [
+      {
+        "id": 1,
+        "name": "/metrics 형식·파싱",
+        "pass": true,
+        "detail": {
+          "contentType": "text/plain; version=0.0.4; charset=utf-8",
+          "unparsedLines": 0,
+          "series": 125
+        }
+      },
+      {
+        "id": 2,
+        "name": "pf_http_requests_total 정확성(ping 20, entries/:id 한 시리즈 5)",
+        "pass": true,
+        "detail": {
+          "pingSeries": 1,
+          "ping": 20,
+          "entriesSeries": 1,
+          "entries": 5
+        }
+      },
+      {
+        "id": 3,
+        "name": "히스토그램 버킷 12개·50ms 라우트의 버킷 누적",
+        "pass": true,
+        "detail": {
+          "hasAllBuckets": true,
+          "le0_025": 0,
+          "le0_1": 10,
+          "count": 10
+        }
+      },
+      {
+        "id": 4,
+        "name": "outbox 적체 지표가 큐 상태를 따라감(7→3, age 42)",
+        "pass": true,
+        "detail": {
+          "depthFirst": 7,
+          "age": 42,
+          "depthAfterUpdate": 3
+        }
+      },
+      {
+        "id": 5,
+        "name": "LabelPolicy: 금지 레이블 정의 예외·미등록 dev 예외·prod 버림+집계",
+        "pass": true,
+        "detail": {
+          "defThrows": true,
+          "devThrows": true,
+          "droppedBefore": 0,
+          "droppedAfter": 1
+        }
+      },
+      {
+        "id": 8,
+        "name": "UUID 레이블 값 거부(prod 에서 버림+집계, 출력에 없음)",
+        "pass": true,
+        "detail": {
+          "droppedBefore": 0,
+          "droppedAfter": 1,
+          "uuidInOutput": false
+        }
+      },
+      {
+        "id": 6,
+        "name": "카디널리티: 시리즈 ≤ 20, UUID·IPv4 0건",
+        "pass": true,
+        "detail": {
+          "httpRequestSeries": 6,
+          "ipv4InOutput": false,
+          "uuidInOutput": false,
+          "labels": [
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/ping\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/entries/:id\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/slow\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/api/error\",\"status_class\":\"5xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"/metrics\",\"status_class\":\"2xx\"}",
+            "{\"app\":\"spike\",\"method\":\"GET\",\"route\":\"unmatched\",\"status_class\":\"4xx\"}"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "404 는 route=\"unmatched\" 한 시리즈",
+        "pass": true,
+        "detail": {
+          "series": 1,
+          "labels": {
+            "app": "spike",
+            "method": "GET",
+            "route": "unmatched",
+            "status_class": "4xx"
+          },
+          "value": 1000
+        }
+      },
+      {
+        "id": 9,
+        "name": "스크레이프 지연 p95 ≤ 50ms(시리즈 약 100개)",
+        "pass": true,
+        "detail": {
+          "p95Ms": 6.6,
+          "medianMs": 4.51,
+          "series": 141
+        }
+      }
+    ]
+  ],
+  "observation": {
+    "eventloopLagSeconds": 0.003075331,
+    "eventloopLagP99Seconds": 0.002535423,
+    "residentMemoryBytes": 74588160,
+    "gcDurationSamples": 0
+  },
+  "verdict": "PASS",
+  "criteria": [
+    {
+      "id": 1,
+      "name": "/metrics 형식·파싱",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 2,
+      "name": "pf_http_requests_total 정확성(ping 20, entries/:id 한 시리즈 5)",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 3,
+      "name": "히스토그램 버킷 12개·50ms 라우트의 버킷 누적",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 4,
+      "name": "outbox 적체 지표가 큐 상태를 따라감(7→3, age 42)",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 5,
+      "name": "LabelPolicy: 금지 레이블 정의 예외·미등록 dev 예외·prod 버림+집계",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 6,
+      "name": "카디널리티: 시리즈 ≤ 20, UUID·IPv4 0건",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 7,
+      "name": "404 는 route=\"unmatched\" 한 시리즈",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 8,
+      "name": "UUID 레이블 값 거부(prod 에서 버림+집계, 출력에 없음)",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 9,
+      "name": "스크레이프 지연 p95 ≤ 50ms(시리즈 약 100개)",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 11,
+      "name": "1~9 를 3회 반복해도 같다(반복마다 서버를 새로 띄움)",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

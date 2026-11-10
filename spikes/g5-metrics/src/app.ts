@@ -17,12 +17,16 @@ export function buildMetrics(mode: "dev" | "prod") {
 
 export function buildApp(reg: MetricsRegistry) {
   const sc = (status: unknown) => `${Math.floor(Number(status ?? 200) / 100)}xx`;
+  // 시작 시각은 onRequest 에서 잡는다: derive 는 매칭되지 않은 라우트(404)에서 실행되지 않아
+  // t0 가 비고 NaN 이 prom-client 예외로 터진다(2026-11-10 첫 실행에서 발견, README ‘발견 기록’)
+  const starts = new WeakMap<Request, number>();
   return new Elysia()
-    .derive(() => ({ t0: performance.now() }))
-    .onAfterResponse(({ t0, request, route, set }) => {
+    .onRequest(({ request }) => { starts.set(request, performance.now()); })
+    .onAfterResponse(({ request, route, set }) => {
       const labels = { app: "spike", method: request.method, route: route && route.length ? route : "unmatched", status_class: sc(set.status) };
       reg.inc("pf_http_requests_total", labels);
-      reg.observe("pf_http_request_duration_seconds", labels, (performance.now() - t0) / 1000);
+      const t0 = starts.get(request);
+      if (t0 !== undefined) reg.observe("pf_http_request_duration_seconds", labels, (performance.now() - t0) / 1000);
     })
     .get("/api/ping", () => "pong")
     .get("/api/entries/:id", ({ params }) => ({ id: params.id }))

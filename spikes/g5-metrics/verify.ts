@@ -27,6 +27,9 @@ function parse(text: string) {
 const find = (s: ReturnType<typeof parse>["series"], name: string, want: Record<string, string> = {}) => s.filter((x) => x.name === name && Object.entries(want).every(([k, v]) => x.labels[k] === v));
 
 async function once(rep: number): Promise<{ results: R[]; observation: unknown }> {
+  const errLines: string[] = []; // 시험 중 stderr 로 새는 예외를 센다(기준 12)
+  const origErr = console.error;
+  console.error = (...a: unknown[]) => { errLines.push(a.map(String).join(" ").slice(0, 120)); };
   const reg = buildMetrics("prod");
   const app = buildApp(reg).listen({ port: PORT, hostname: "127.0.0.1" });
   const base = `http://127.0.0.1:${PORT}`;
@@ -106,10 +109,15 @@ async function once(rep: number): Promise<{ results: R[]; observation: unknown }
     const seriesNow = parse((await scrape()).text).series.length;
     results.push({ id: 9, name: "스크레이프 지연 p95 ≤ 50ms(시리즈 약 100개)", pass: p95 <= 50 && seriesNow >= 100, detail: { p95Ms: Number(p95.toFixed(2)), medianMs: Number(lat[25]!.toFixed(2)), series: seriesNow } });
 
+    // 12. 404 지연 기록과 예외 누출
+    const unCount = find(p6.series, "pf_http_request_duration_seconds_count", { route: "unmatched" })[0]?.value;
+    results.push({ id: 12, name: "404 도 지연 히스토그램에 기록, 미들웨어 예외 0건(발견 후 추가)", pass: unCount === 1000 && errLines.length === 0, detail: { unmatchedDurationCount: unCount, leakedErrors: errLines.length, sample: errLines.slice(0, 2) } });
+
     // 10. 기본 지표 관찰
     const lag = find(p6.series, "nodejs_eventloop_lag_seconds")[0]?.value, lagP99 = find(p6.series, "nodejs_eventloop_lag_p99_seconds")[0]?.value, rss = find(p6.series, "process_resident_memory_bytes")[0]?.value;
     return { results, observation: { eventloopLagSeconds: lag, eventloopLagP99Seconds: lagP99, residentMemoryBytes: rss, gcDurationSamples: find(p6.series, "nodejs_gc_duration_seconds_count").length } };
   } finally {
+    console.error = origErr;
     app.stop();
     await Bun.sleep(200);
   }
@@ -119,10 +127,10 @@ async function main() {
   const runs: R[][] = [];
   let observation: unknown = null;
   for (let rep = 0; rep < 3; rep++) { const o = await once(rep); runs.push(o.results); observation = o.observation; }
-  const ids = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 12];
   const perId = ids.map((id) => ({ id, name: runs[0]!.find((x) => x.id === id)!.name, passes: runs.map((r) => r.find((x) => x.id === id)!.pass) }));
   const repeat = perId.every((p) => p.passes.every(Boolean));
-  const criteria = [...perId.map((p) => ({ id: p.id, name: p.name, pass: p.passes.every(Boolean), detail: `3회: ${p.passes.map((x) => (x ? "PASS" : "FAIL")).join(" ")}` })), { id: 11, name: "1~9 를 3회 반복해도 같다(반복마다 서버를 새로 띄움)", pass: repeat, detail: "" }];
+  const criteria = [...perId.map((p) => ({ id: p.id, name: p.name, pass: p.passes.every(Boolean), detail: `3회: ${p.passes.map((x) => (x ? "PASS" : "FAIL")).join(" ")}` })), { id: 11, name: "1~9·12 를 3회 반복해도 같다(반복마다 서버를 새로 띄움)", pass: repeat, detail: "" }];
   const verdict = repeat ? "PASS" : "FAIL";
   mkdirSync(join(dir, "results"), { recursive: true });
   const file = join(dir, "results", `${new Date().toISOString().replace(/[:.]/g, "-")}-verify.json`);

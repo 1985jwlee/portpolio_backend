@@ -20,7 +20,13 @@ Bun 1.4.4, `elysia` 1.4.30, `prom-client` 15.1.3(정확히 고정, `bun.lock` �
 | 8 | 값 검사 보조선: 레이블 값에 UUID 가 들어오면 거부(prod 에서는 버리고 `pf_metrics_dropped_total` 증가) | 거부 |
 | 9 | 스크레이프 지연: 시리즈 약 100개에서 `/metrics` 50회 응답 시간 p95 | **≤ 50ms** (제안값) |
 | 10 | 기본 지표 점검(관찰, 판정 아님): `nodejs_eventloop_lag_seconds` 가 항상 0 인가, `nodejs_eventloop_lag_p99_seconds`·`process_resident_memory_bytes` 가 유효한 값인가 | 기록 |
-| 11 | 위 1~9 를 3회 반복해도 같다(반복마다 서버를 새로 띄움) | 3/3 |
+| 12 | **(발견 후 추가)** 404 도 지연 히스토그램에 기록된다: `route="unmatched"` 의 `_count` 가 요청 수(1,000)와 같고, 시험 중 **미들웨어 예외가 stderr 로 새지 않는다**(0건) | 일치, 0건 |
+| 11 | 위 1~9·12 를 3회 반복해도 같다(반복마다 서버를 새로 띄움) | 3/3 |
+
+## 발견 기록 (2026-11-10, 첫 실행 뒤)
+- 첫 실행은 기준 1~9·11 모두 PASS 였지만 **stderr 에 `TypeError: Value is not a valid number: NaN` 이 3,000건 넘게 찍혀 있었다**(`results/2026-11-10-first-run.stdout-stderr.log`). 요청 시작 시각을 `derive` 로 잡았는데 Elysia 가 매칭되지 않은 라우트(404)에서는 `derive` 를 실행하지 않아 `t0` 가 비었고, `(now - undefined)` 가 NaN 이 되어 prom-client 가 던졌다.
+- 영향: 404 는 요청 수(`pf_http_requests_total`)는 세지만 **지연 히스토그램은 기록되지 않았다.** 처음 기준에 ‘404 지연 기록’이 없어 시험이 통과했다 — **기준의 빈틈**이다.
+- 조치: 시작 시각을 `onRequest` 에서 `WeakMap<Request, number>` 에 저장하도록 고쳤고, 기준 12를 추가한다. 결과를 본 뒤 추가한 기준이므로 ‘발견 후 추가’로 표시하고 첫 실행 결과도 그대로 둔다. 설계(design/17 OB-01 시퀀스)에도 ‘요청 시작은 onRequest’ 를 반영해야 한다.
 
 ## 구성
 | 파일 | 역할 |
