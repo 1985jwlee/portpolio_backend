@@ -205,7 +205,7 @@ const verdict = ran.length > 0 && ran.every((c) => c.pass === true) ? (RUNS >= 3
 const obs = all.flat().filter((r) => r.id === 0).map((r) => r.detail);
 
 const commit = sh("git", ["rev-parse", "HEAD"]).stdout.trim();
-const result = { at: new Date().toISOString(), commit, bun: Bun.version, docker: sh("docker", ["--version"]).stdout.trim(), runs: RUNS, only: args.only ?? null, skip: args.skip ?? null, verdict, criteria, observation: obs };
+const result = { at: new Date().toISOString(), commit, bun: Bun.version, docker: (sh("docker", ["--version"]).stdout ?? "").trim() || "없음", runs: RUNS, only: args.only ?? null, skip: args.skip ?? null, verdict, criteria, observation: obs };
 mkdirSync("results", { recursive: true });
 const file = `results/${result.at.replace(/[:.]/g, "-")}-verify.json`;
 writeFileSync(file, JSON.stringify(result, null, 2));

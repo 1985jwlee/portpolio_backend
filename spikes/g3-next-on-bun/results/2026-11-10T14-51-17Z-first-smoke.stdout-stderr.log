@@ -1,0 +1,12 @@
+== 실행 1/1
+203 | const ran = criteria.filter((c) => c.pass !== "SKIP");
+204 | const verdict = ran.length > 0 && ran.every((c) => c.pass === true) ? (RUNS >= 3 && !only ? "PASS" : "PASS(부분)") : "FAIL";
+205 | const obs = all.flat().filter((r) => r.id === 0).map((r) => r.detail);
+206 | 
+207 | const commit = sh("git", ["rev-parse", "HEAD"]).stdout.trim();
+208 | const result = { at: new Date().toISOString(), commit, bun: Bun.version, docker: sh("docker", ["--version"]).stdout.trim(), runs: RUNS, only: args.only ?? null, skip: args.skip ?? null, verdict, criteria, observation: obs };
+                                                                                                                   ^
+TypeError: undefined is not an object (evaluating 'sh("docker", ["--version"]).stdout.trim')
+      at /mnt/d/leejaewoo_projects/Portpolio/portpolio_backend/spikes/g3-next-on-bun/verify.ts:208:110
+
+Bun v1.4.4 (Linux x64)
