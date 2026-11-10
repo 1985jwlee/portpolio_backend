@@ -2,7 +2,7 @@
 - 상태: **Proposed** (2026-11-10) — 측정 ①②③④⑤⑥(만료일)⑦⑧은 끝났다. 남은 것은 ⑥ 갱신 관찰, 호스트 재부팅 후 주소, 대역폭 시간 변동의 원인, 출발지별/전체 상한 구분이다. 결정 5·6 은 **사용자 결정(2026-11-10)**, 결정 1~4 는 제안(사용자 확인 대기).
 - 날짜: 2026-11-10
 - 근거: tech-stack §11 G14 ①~⑧ · ADR-003(Funnel 노출, 미검증 🔴 세 건) · ADR-008(원 접속 주소 신뢰) · ADR-022(관문 G14) · ADR-049(대역폭이 먼저 터질 가능성, HC-8) · ADR-050(증거 규칙) · ADR-033(호스트 프로필·공유 호스트)
-- 증거: [`spikes/g14-funnel/`](../../spikes/g14-funnel/) — 스크립트(`server.ts`·`client.ts`), 원시 결과(`results/*.json`), 환경(`ENV.md`), 원문 기록(`results/notes.md`). 표기는 ADR-050 범례를 따른다. 스크립트·1차 원시 결과는 커밋 `33eea7b`, 휴대폰 페이지 `5e1ffb8`, 2차 원시 결과는 이 ADR 과 같은 커밋 묶음에 보존돼 있다(`ENV.md` 맨 아래). 측정 도중 스크립트를 보강했고 덮어써진 결과 하나가 있다 — 한계는 `ENV.md` 에 적었다.
+- 증거: [`spikes/g14-funnel/`](../../spikes/g14-funnel/) — 스크립트(`server.ts`·`client.ts`), 원시 결과(`results/*.json`), 환경(`ENV.md`), 원문 기록(`results/notes.md`). 표기는 ADR-050 범례를 따른다. 스크립트·1차 원시 결과는 커밋 `33eea7b`, 휴대폰 페이지 `5e1ffb8`, 2차 원시 결과는 `98bf45a` 에 보존돼 있다(`ENV.md` 맨 아래). 측정 도중 스크립트를 보강했고 덮어써진 결과 하나가 있다 — 한계는 `ENV.md` 에 적었다.
 - 관련 문서: [tech-stack §11](../domains/tech-stack.md) · [design/18](../design/18-hot-cache-and-surge-control.md) §8·§12
 
 ## 맥락
