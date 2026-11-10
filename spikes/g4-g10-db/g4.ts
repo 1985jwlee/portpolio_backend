@@ -13,13 +13,16 @@ const PORT = 35434;
 type R = { id: number; name: string; pass: boolean; detail: unknown };
 const errno = async (p: Promise<unknown>) => { try { await p; return null; } catch (e: any) { return String(e.errno ?? e.code); } };
 
+const step = (rep: number, id: string) => console.error(`[rep ${rep}] ${new Date().toISOString().slice(11, 19)} ${id}`);
 async function once(rep: number): Promise<R[]> {
+  step(rep, "start pg");
   const pg = await startPg(NAME, PORT);
   await applySql(pg.url, join(dir, "drizzle"));
   const res: R[] = [];
   const pool = new Bun.SQL(pg.url);
   const db = drizzle(pool);
 
+  step(rep, "1 drizzle");
   // 1. Drizzle bun-sql: 빌더·트랜잭션
   const ins = await db.insert(reaction).values({ entryId: 1, actorId: "a", emoji: "heart" }).returning();
   const sel = await db.select().from(reaction).where(eq(reaction.actorId, "a"));
@@ -30,6 +33,7 @@ async function once(rep: number): Promise<R[]> {
   const nRollback = (await db.select({ n: count() }).from(outbox).where(eq(outbox.kind, "tx-rollback")))[0]!.n;
   res.push({ id: 1, name: "Drizzle bun-sql 빌더·트랜잭션 커밋/롤백", pass: ins.length === 1 && sel.length === 1 && nCommit === 1 && rolledBack && nRollback === 0, detail: { inserted: ins.length, selected: sel.length, committed: nCommit, rolledBackRows: nRollback } });
 
+  step(rep, "2 listen");
   // 2. LISTEN/NOTIFY 전용 연결: 100개 순서대로
   const listener = new Bun.SQL(pg.url);
   const got: string[] = [];
@@ -41,6 +45,7 @@ async function once(rep: number): Promise<R[]> {
   res.push({ id: 2, name: "LISTEN 전용 연결이 NOTIFY 100개를 순서대로 수신", pass: ordered, detail: { received: got.length, ordered } });
   await sender.close();
 
+  step(rep, "3 resubscribe");
   // 3. 재구독: 컨테이너 재시작 뒤 새 NOTIFY 수신
   const got2: string[] = [];
   await listener.listen("g4ch2", (p: string) => got2.push(p));
@@ -56,6 +61,7 @@ async function once(rep: number): Promise<R[]> {
   res.push({ id: 3, name: "컨테이너 재시작 뒤 LISTEN 자동 재구독(30초 이내)", pass: recoveredSec !== null, detail: { recoveredSec, received: got2.length } });
   await listener.close();
 
+  step(rep, "4 skip locked");
   // 4. SKIP LOCKED: 1000행·8워커
   await pool.unsafe(`insert into spike.outbox (kind) select 'work' from generate_series(1, 1000)`);
   const claimed: number[] = [];
@@ -78,6 +84,7 @@ async function once(rep: number): Promise<R[]> {
   const done = Number((await pool`select count(*)::int as n from spike.outbox where kind = 'work' and status = 'done'`)[0].n);
   res.push({ id: 4, name: "SKIP LOCKED 1000행·8워커: 중복 0·누락 0", pass: claimed.length === 1000 && uniq === 1000 && done === 1000, detail: { claimedTotal: claimed.length, unique: uniq, doneInDb: done } });
 
+  step(rep, "5 late");
   // 5. 늦은 완료 거절
   const lateId = Number((await pool`insert into spike.outbox (kind, status, owner_token, lease_until) values ('late', 'processing', 'A', now() + interval '1 second') returning id`)[0].id);
   await sleep(1500);
@@ -86,6 +93,7 @@ async function once(rep: number): Promise<R[]> {
   const doneB = await pool`update spike.outbox set status = 'done' where id = ${lateId} and owner_token = 'B' returning id`;
   res.push({ id: 5, name: "임대 만료 뒤 이전 소유자의 늦은 완료는 0행", pass: reclaimed.length === 1 && lateA.length === 0 && doneB.length === 1, detail: { reclaimedByB: reclaimed.length, lateCompletionByA: lateA.length, completionByB: doneB.length } });
 
+  step(rep, "6 advisory");
   // 6. 어드바이저리 리더 선출
   const insts = Array.from({ length: 8 }, () => new Bun.SQL(pg.url));
   const resv = await Promise.all(insts.map((s) => s.reserve()));
@@ -94,7 +102,8 @@ async function once(rep: number): Promise<R[]> {
   const winners = tries.filter(Boolean).length;
   let takeoverMs: number | null = null;
   if (winners === 1) {
-    await insts[leaderIdx]!.close(); // 세션을 끊어 락을 푼다
+    await resv[leaderIdx]!.release(); // 예약한 연결을 반납해야 close() 가 끝난다(안 하면 close() 가 영원히 기다린다)
+    await insts[leaderIdx]!.close(); // 풀을 닫아 세션을 끊으면 세션 락이 풀린다
     const t1 = Date.now();
     outer: while (Date.now() - t1 < 2000) {
       for (let i = 0; i < 8; i++) {
@@ -105,8 +114,9 @@ async function once(rep: number): Promise<R[]> {
     }
   }
   res.push({ id: 6, name: "어드바이저리 락 리더 정확히 1, 리더 종료 뒤 2초 안에 승계", pass: winners === 1 && takeoverMs !== null && takeoverMs <= 2000, detail: { winners, takeoverMs } });
-  for (let i = 0; i < 8; i++) if (i !== leaderIdx) await insts[i]!.close();
+  for (let i = 0; i < 8; i++) if (i !== leaderIdx) { await resv[i]!.release(); await insts[i]!.close(); }
 
+  step(rep, "7 sqlstate");
   // 7. SQLSTATE
   const dup = await errno(pool`insert into spike.reaction (entry_id, actor_id, emoji) values (1, 'a', 'heart')`);
   res.push({ id: 7, name: "유니크 위반 errno 가 23505", pass: dup === "23505", detail: { errno: dup } });
@@ -118,7 +128,8 @@ async function once(rep: number): Promise<R[]> {
 
 async function main() {
   const all: R[][] = [];
-  try { for (let rep = 0; rep < 3; rep++) all.push(await once(rep)); } finally { stopPg(NAME); }
+  const reps = Number(process.argv.find((a) => a.startsWith("--reps="))?.slice(7) ?? 3);
+  try { for (let rep = 0; rep < reps; rep++) all.push(await once(rep)); } finally { stopPg(NAME); }
   const ids = [1, 2, 3, 4, 5, 6, 7];
   const perId = ids.map((id) => ({ id, name: all[0]!.find((x) => x.id === id)!.name, passes: all.map((run) => run.find((x) => x.id === id)!.pass) }));
   const repeat = perId.every((p) => p.passes.every(Boolean));
