@@ -17,7 +17,7 @@ const log = (o: Record<string, unknown>) => console.log(JSON.stringify({ t: new 
 const server = Bun.serve<WsData>({
   port: PORT,
   hostname: "0.0.0.0",
-  fetch(req, srv) {
+  async fetch(req, srv) {
     const url = new URL(req.url);
     if (url.searchParams.get("k") !== TOKEN) return new Response("not found", { status: 404 });
     const headers = Object.fromEntries(req.headers);
@@ -28,6 +28,13 @@ const server = Bun.serve<WsData>({
       const ok = srv.upgrade(req, { data: { id: ++seq, hb, openedAt: Date.now(), msgs: 0, bytes: 0 } });
       if (ok) return;
       return new Response("upgrade failed", { status: 400 });
+    }
+    // 휴대폰 측정 페이지와 결과 수신(서버 로그로만 남긴다 — 접속 주소는 기록하지 않는다)
+    if (url.pathname === "/lab") return new Response(Bun.file(`${import.meta.dir}/lab.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    if (url.pathname === "/report" && req.method === "POST") {
+      const body = (await req.text()).slice(0, 100_000);
+      try { log({ ev: "report", report: JSON.parse(body) }); } catch { log({ ev: "report", raw: body.slice(0, 2000) }); }
+      return new Response("ok");
     }
     if (url.pathname === "/echo") {
       return Response.json({ method: req.method, url: req.url, socketIp: srv.requestIP(req), headers, now: Date.now() });

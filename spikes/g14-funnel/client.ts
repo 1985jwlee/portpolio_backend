@@ -267,4 +267,10 @@ async function headers() {
 const commands: Record<string, () => Promise<void>> = { headers, "ws-echo": wsEcho, "ws-connect": wsConnect, "ws-watch": wsWatch, idle, throughput, http };
 const fn = commands[cmd];
 if (!fn) { console.error(`알 수 없는 명령: ${cmd}`); process.exit(1); }
+// --at=<epoch ms>: 그 시각까지 기다렸다가 시작한다(휴대폰 lab 페이지와 동시 시작용, 시계 편차 수 초는 허용)
+if (opt.at) {
+  const wait = Number(opt.at) - Date.now();
+  console.log(`시작까지 ${Math.round(wait / 1000)}초 대기`);
+  if (wait > 0) await sleep(wait);
+}
 await fn();
