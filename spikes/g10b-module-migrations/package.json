@@ -1,0 +1,8 @@
+{
+  "name": "spike-g10b-module-migrations",
+  "private": true,
+  "type": "module",
+  "description": "G10b(모듈별 마이그레이션 소유, ADR-052 결정 7) 스파이크. 제품 코드가 아니다.",
+  "dependencies": { "drizzle-orm": "0.45.4" },
+  "devDependencies": { "drizzle-kit": "0.31.11" }
+}
