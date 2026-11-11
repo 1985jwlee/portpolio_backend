@@ -13,7 +13,8 @@ step="${1:?단계를 지정하라}"
 
 dr() { # dr <스파이크 폴더> <명령>: 이미지 안에서 돌리고, 이번에 새로 생긴 results 파일만 볼륨에 복사한다.
   local dir="$1"; shift
-  docker run --rm --network host --ulimit nofile=65536:65536 \
+  local mode=(--rm); [ "${DETACH:-0}" = 1 ] && mode=(-d --name "pf-$step")   # DETACH=1: 백그라운드(SSH 가 끊겨도 산다). docker logs -f pf-<단계> 로 본다
+  docker run "${mode[@]}" --network host --ulimit nofile=65536:65536 \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$VOL:/out" -w "/repo/spikes/$dir" "$IMAGE" \
     sh -c "$* ; rc=\$?; if [ -d results ]; then mkdir -p /out/$dir; (cd results && find . -type f -newer /repo/.built -print0 | xargs -0 -r cp --parents -t /out/$dir); fi; exit \$rc"
 }
@@ -40,7 +41,7 @@ case "$step" in
   pack)   # 표준 출력으로 tar.gz 를 내보낸다: ./run.sh pack > host-results.tgz  (서버 디스크에 안 남기려면 노트북에서 ssh 로 실행)
     docker run --rm -v "$VOL:/out:ro" alpine tar czf - -C /out . ;;
   clean)
-    docker rm -f g4-pg g10-pg g10b-pg g7-upstream g7-nginx-t g7-nginx-u >/dev/null 2>&1 || true
+    docker rm -f g4-pg g10-pg g10b-pg g7-upstream g7-nginx-t g7-nginx-u pf-g2-storm pf-g2-churn pf-g2-soak >/dev/null 2>&1 || true
     docker network rm g7net >/dev/null 2>&1 || true
     docker volume rm "$VOL" >/dev/null 2>&1 || true
     docker rmi "$IMAGE" >/dev/null 2>&1 || true
