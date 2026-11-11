@@ -22,20 +22,18 @@ load_check() { local l; l=$(cut -d' ' -f1 /proc/loadavg); echo "loadavg(1m)=$l";
 case "$step" in
   prepare)
     docker volume create "$VOL" >/dev/null
-    # Dockerfile 을 stdin 으로 준다(컨텍스트 없음): buildx/BuildKit 이 없는 서버에서도 클래식 빌더로 돌고, 호스트에 git 이 필요 없다.
-    # 코드는 빌드 안에서 git clone 으로 받는다(.git 포함 → 결과에 커밋 해시가 남는다). CACHEBUST 로 재빌드 때 낡은 클론 계층을 쓰지 않는다.
-    DOCKER_BUILDKIT=0 docker build -q -t "$IMAGE" --build-arg REPO="$REPO" --build-arg BRANCH="$BRANCH" --build-arg CACHEBUST="$(date +%s)" - <<'DOCKERFILE'
-FROM docker:cli AS dockercli
-FROM oven/bun:1.4.4
-COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates procps util-linux && rm -rf /var/lib/apt/lists/* \
- && git config --system --add safe.directory '*'
-ARG REPO
-ARG BRANCH
-ARG CACHEBUST
-RUN git clone --depth 1 --branch "$BRANCH" "$REPO" /repo && touch /repo/.built
-WORKDIR /repo
-DOCKERFILE
+    # docker build 를 쓰지 않는다: buildx 가 없는 서버(Docker 29.1.3)에서 DOCKER_BUILDKIT=0 도 무시되고 실패했다(첫·둘째 서버 시도).
+    # 대신 컨테이너를 띄워 도구를 넣고 저장소를 클론한 뒤 docker commit 으로 이미지를 만든다. 호스트에는 git·buildx 가 필요 없다.
+    docker rm -f pf-prep pf-dockercli >/dev/null 2>&1 || true
+    docker run -d --name pf-prep oven/bun:1.4.4 sleep infinity >/dev/null
+    docker create --name pf-dockercli docker:cli >/dev/null
+    docker cp pf-dockercli:/usr/local/bin/docker - | docker cp - pf-prep:/usr/local/bin/
+    docker rm -f pf-dockercli >/dev/null
+    docker exec pf-prep sh -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates procps util-linux >/dev/null && rm -rf /var/lib/apt/lists/* \
+      && git config --system --add safe.directory '*' \
+      && git clone -q --depth 1 --branch '$BRANCH' '$REPO' /repo && touch /repo/.built"
+    docker commit --change 'WORKDIR /repo' --change 'CMD ["sh"]' pf-prep "$IMAGE" >/dev/null
+    docker rm -f pf-prep >/dev/null
     docker run --rm "$IMAGE" git -C /repo rev-parse HEAD
     echo "준비 완료: 이미지 $IMAGE, 결과 볼륨 $VOL (서버 파일 시스템에 코드 없음)" ;;
   g4)   load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g4.ts" ;;
@@ -53,7 +51,7 @@ DOCKERFILE
   pack)   # 표준 출력으로 tar.gz 를 내보낸다: ./run.sh pack > host-results.tgz  (서버 디스크에 안 남기려면 노트북에서 ssh 로 실행)
     docker run --rm -v "$VOL:/out:ro" alpine tar czf - -C /out . ;;
   clean)
-    docker rm -f g4-pg g10-pg g10b-pg g7-upstream g7-nginx-t g7-nginx-u pf-g2-storm pf-g2-churn pf-g2-soak >/dev/null 2>&1 || true
+    docker rm -f pf-prep pf-dockercli g4-pg g10-pg g10b-pg g7-upstream g7-nginx-t g7-nginx-u pf-g2-storm pf-g2-churn pf-g2-soak >/dev/null 2>&1 || true
     docker network rm g7net >/dev/null 2>&1 || true
     docker volume rm "$VOL" >/dev/null 2>&1 || true
     docker rmi "$IMAGE" >/dev/null 2>&1 || true
