@@ -523,7 +523,7 @@ flowchart LR
 | `moderation_action.reason` | 관리자 본인 입력, 외부 노출 없음 | 관리 사유에 개인정보가 들어가는 운영 사례가 생길 때 |
 
 ### 검사 (`check:classification`)
-- 각 모듈의 `adapter/postgres/classification.ts` 가 `테이블 → 컬럼 → 등급` 맵을 가진다.
+- 각 모듈의 `<모듈>/adapter/postgres/classification.ts` 가 `테이블 → 컬럼 → 등급` 맵을 가진다.
 - 시험이 Drizzle 스키마의 모든 컬럼(`getTableColumns`)과 맵을 대조해 **분류 누락·미존재 컬럼**을 CI 에서 실패시킨다.
 - 등급이 `ENC` 인 컬럼은 `FieldCipher` 를 거치는 쓰기 경로만 허용한다(평문 컬럼이 없음을 스키마가 보장하고, 시험이 덤프에 평문 센티널이 없음을 확인).
 - 등급이 `PSD` 인 컬럼은 로그·지표 레이블에 쓰지 않는다(`Redactor` 규칙과 08 의 로그 시험).
