@@ -69,7 +69,7 @@ modules/guestbook/
 ```
 
 - **`exports` 필드는 두 개뿐이다**: `"."` → `src/index.ts`, `"./schema"` → `src/adapter/postgres/schema.ts`. 깊은 경로 임포트는 패키지 해석 단계에서 막힌다(§5 규칙으로 이중 방어).
-- `./schema` 는 **`packages/db`(drizzle-kit 집계용)와 그 모듈 자신만** 쓴다. 쓰기/읽기 표 정의는 모듈이 소유한다(DB 정본은 Drizzle 스키마. **마이그레이션은 `modules/<m>/migrations/`, 설정은 `modules/<m>/drizzle.config.ts`, 이력 표는 모듈별** — ADR-052 결정 7, G10b 로 검증 전까지 가설).
+- `./schema` 는 **`packages/db`(drizzle-kit 집계용)와 그 모듈 자신만** 쓴다. 쓰기/읽기 표 정의는 모듈이 소유한다(DB 정본은 Drizzle 스키마. **마이그레이션은 `modules/<m>/migrations/`, 설정은 `modules/<m>/drizzle.config.ts`, 이력 표는 `pf_migrations.<모듈>`** — ADR-052 결정 7, G10b 개발 PC 통과).
 - 조립(`compose/`)만 어댑터를 임포트해 usecase 에 포트 구현을 꽂는다.
 
 ## 2. 패키지와 의존 방향
