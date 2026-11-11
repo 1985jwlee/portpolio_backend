@@ -8,6 +8,7 @@ skills-lock.json
 !.claude/file-index-ignore
 .agents/
 .codex/
+graphify-out/
 agent-system-measurements.md
 # 파이프라인 런 산출물
 .pipeline-dev/
