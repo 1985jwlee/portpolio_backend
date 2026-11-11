@@ -9,7 +9,7 @@
 
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
-| 2026-11-11 | [ADR-052](ADR-052-extractable-monolith.md) | 추출 가능한 모놀리스(제안): 모듈 계약 패키지·경계 버전 정책·ActorContext 주입·추출 게이트. 사용자 결정 3건 대기 | Proposed |
+| 2026-11-11 | [ADR-052](ADR-052-extractable-monolith.md) | 추출 가능한 모놀리스(제안): 모듈 계약 패키지·경계 버전 정책·ActorContext 주입·추출 게이트. 사용자 결정 3건 확정(결정 2 는 G10b 검증 전 가설) | Proposed |
 | 2026-11-10 | [ADR-051](ADR-051-funnel-g14-measurement-results.md) | Funnel 관문(G14) 실측: WebSocket 통과·유휴 960초+·클라이언트 IP(`X-Forwarded-For` 만 신뢰)·대역폭 합계 상한 ≈2.5MB/s·단일 출발지 동시 40+ 연결 리셋, 첫 방문 전송량 예산(열린 결정) | Proposed (⑤⑥⑦ 미완) |
 | 2026-11-06 | [ADR-050](ADR-050-evidence-rule.md) | 증거 규칙: 스크립트와 원시 결과(호스트 사양·커밋 해시)를 커밋하지 않은 수치는 사실로 쓰지 않는다. 예외는 `참고값(재현 불가)` 강등. 범례 실측/추정/제안/참고값, 스파이크는 `spikes/` 에 보존 | Accepted |
 | 2026-11-06 | [ADR-049](ADR-049-hot-cache-and-surge-control.md) | 핫 캐시와 몰림 대응: 병합 먼저·보존은 열화 모드, 단계적 열화 사다리(0~4, 그림자 모드로 시작), 기다리는 곳에 상한, 스냅샷 head 공유, 반응 총개수는 쓰기 모델 카운터 열 | Accepted (2026-11-06) |

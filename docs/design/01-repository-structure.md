@@ -30,7 +30,7 @@ portpolio_backend/
 ├─ packages/                     # 공용 라이브러리 (모듈에 의존하지 않는다)
 │  ├─ kernel/                    # 기반 클래스·오류·Result (00 §4) + ports/ (RateLimiter·PresenceCounter·KeyValueCache·EventTransport, ADR-024 · FieldCipher, ADR-026 · AuditWriter, ADR-027)
 │  ├─ protocol/                  # REST·WS·이벤트 스키마와 상수 (TypeBox 정의 + JSON Schema 내보내기)
-│  ├─ db/                        # 풀·트랜잭션·마이그레이션·드리즐 구성
+│  ├─ db/                        # 풀·트랜잭션·**마이그레이션 실행기**(모듈 폴더 목록을 받아 적용; 표 정의·마이그레이션 파일은 모듈 소유, ADR-052 결정 7)
 │  ├─ infra/                     # 보조 포트 구현: memory/ postgres/ (redis/ 는 도입 시, ADR-024)
 │  ├─ config/                    # 환경변수 스키마·로더 (process.env 를 읽는 유일한 곳)
 │  └─ testkit/                   # 시험 지원: FakeClock·FakeIdGenerator·TestDb·WorkerHarness·FaultInjector (08)
@@ -69,7 +69,7 @@ modules/guestbook/
 ```
 
 - **`exports` 필드는 두 개뿐이다**: `"."` → `src/index.ts`, `"./schema"` → `src/adapter/postgres/schema.ts`. 깊은 경로 임포트는 패키지 해석 단계에서 막힌다(§5 규칙으로 이중 방어).
-- `./schema` 는 **`packages/db`(drizzle-kit 집계용)와 그 모듈 자신만** 쓴다. 쓰기/읽기 표 정의는 모듈이 소유한다(DB 정본은 Drizzle 스키마, 마이그레이션은 `packages/db/migrations`).
+- `./schema` 는 **`packages/db`(drizzle-kit 집계용)와 그 모듈 자신만** 쓴다. 쓰기/읽기 표 정의는 모듈이 소유한다(DB 정본은 Drizzle 스키마. **마이그레이션은 `modules/<m>/migrations/`, 설정은 `modules/<m>/drizzle.config.ts`, 이력 표는 모듈별** — ADR-052 결정 7, G10b 로 검증 전까지 가설).
 - 조립(`compose/`)만 어댑터를 임포트해 usecase 에 포트 구현을 꽂는다.
 
 ## 2. 패키지와 의존 방향
@@ -169,13 +169,15 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 | **B1** 계층 방향 | `domain` ↛ `service`·`usecase`·`port`·`adapter` / `service` ↛ `usecase`·`adapter` / `port` ↛ `usecase`·`adapter` / `usecase` ↛ `adapter` | 역방향·건너뛰기 임포트 |
 | **B2** 순수성 | `domain`·`service` ↛ `node:*`, `bun`, `@pf/db`, `postgres` 계열 드라이버, 네트워크·파일 모듈 | I/O 의존 |
 | **B3** CQRS | 포트의 종류(쓰기/읽기)를 **파일명이 아니라 그 포트를 구현하는 어댑터가 건드리는 스키마 객체**로 정한다. 쓰기 스키마(`<m>`) 표를 쓰는 포트는 쓰기 포트, 읽기 스키마(`<m>_read`) 표만 읽는 포트는 읽기 포트이며 `modules/<m>/port-kinds.json`(포트 → kind·표)에 선언하고 `scripts/check-cqrs.ts` 가 어댑터의 `schema.ts` 임포트로 선언을 검증한다. `usecase/command/**` ↛ 읽기 포트 / `usecase/query/**` ↛ 쓰기 포트·`OutboxWriter`. 단 `modules/cqrs-exceptions.json`(P0 §2.4 X1~X4)에 등재된 (usecase 또는 포트, 표) 쌍은 허용. DB 역할의 GRANT 가 같은 경계를 한 번 더 강제한다(`api_rw` 는 `*_read` 에 INSERT/UPDATE/DELETE 불가, ADR-026) | 명령·조회 혼합 (00 §4.2) |
-| **B4** 모듈 공개 API | 모듈 밖에서는 `@pf/<m>` (`index`)만 임포트. `@pf/<m>/schema` 는 `packages/db` 와 자기 자신만 | 내부 경로·상대 경로로 타 모듈 침범 |
+| **B4** 모듈 공개 API | 모듈 밖에서는 `@pf/<m>` (`index`)만 임포트. `@pf/<m>/schema` 는 `packages/db` 와 자기 자신만. **(ADR-052 이후) 다른 모듈·엔트리포인트의 비조립 코드는 `@pf/<m>-contract` 만 임포트하고 구현 `@pf/<m>` 은 `apps/*/src/compose/**` 에서만** | 내부 경로·상대 경로로 타 모듈 침범 |
 | **B5** 순환 금지 | 모듈·패키지 단위 순환 | `GB → ID → GB` 같은 순환 |
 | **B6** 조립 위치 | `adapter/**` 임포트는 `apps/*/src/compose/**` 와 같은 모듈의 `adapter` 안에서만 | usecase 가 어댑터를 직접 앎 |
 | **B7** 패키지 방향 | `packages/*` ↛ `modules/*`·`apps/*` / `modules/*` ↛ `apps/*` / `kernel` 은 아무것도 임포트 안 함 | 상향 의존 |
 | **B8** 웹 격리 | `apps/web` 은 `@pf/protocol` 외 `@pf/*` 금지 | 서버 코드 번들 유입 |
 | **B9** 환경 접근 | `process.env`·`Bun.env` 참조는 `packages/config` 에서만 | 설정 우회 (규칙은 `scripts/check-purity.ts` 의 문자열 검사로 보강) |
 | **B11** 쓰기는 트랜잭션 | `.insert(`·`.update(`·`.delete(`·쓰기 `execute` 는 `UnitOfWork` 가 주는 `TxContext` 에서만. `ReadDb`/풀 핸들에는 쓰기 메서드가 없다. `check-purity` 가 `adapter/postgres` 밖 사용을 문자열로 검출 | 자동 커밋 쓰기 (ADR-025) |
+| **B13** 모듈 계약 패키지 (ADR-052) | 모듈 간·엔트리포인트 비조립 코드는 `@pf/<m>-contract`(이벤트 스키마·DTO·공개 포트·오류 코드)만 의존. 계약 패키지는 `@pf/kernel` 외 아무것도 임포트하지 않는다. 계약 변경은 `package.json` 버전 상승을 동반한다(골든 JSON 비교 CI) | 구현 임포트, 버전 없는 계약 변경 |
+| **B14** 마이그레이션 격리 (ADR-052) | `modules/<m>/migrations` 의 SQL 은 다른 모듈의 스키마 객체(표·함수·트리거)를 참조하지 않는다. 모듈은 `identity` 를 호출하지 않고 엔트리포인트가 푼 `ActorContext` 를 받는다 | 타 모듈 스키마 참조, 모듈의 identity 직접 호출 |
 | **B10** 보조 포트 구현 격리 | `@pf/infra` 는 `apps/*/src/compose/**` 에서만 임포트. `domain`·`service`·`usecase` ↛ `@pf/infra` | usecase 가 Redis·메모리 구현에 결합 (ADR-024) |
 
 **B3 를 파일명 정규식으로 쓰지 않는 이유**: 읽기 포트 `entry-view-repository.ts` 는 `*-repository` 글롭에도 걸려, `usecase/query/**` 가 읽기 포트를 임포트하면 쓰기 포트로 **오탐**한다(`*-view-repository` 를 제외하는 정규식을 쓰더라도 `*-read-repository`·`*-projection-repository` 같은 새 이름에서 다시 샌다). 그래서 이름이 아니라 스키마 객체(어느 스키마의 표를 읽고 쓰는가)를 정본으로 하고, 이름 관례(`*-repository` 쓰기, `*-view-repository` 읽기)는 사람이 읽는 힌트로만 남긴다. 시험: 읽기 포트를 쓰는 query usecase(통과), 쓰기 포트를 쓰는 query usecase(실패), 읽기 포트를 쓰는 command usecase(실패), X3 의 `GetTrace`(통과)를 한 벌씩 두는 규칙 픽스처.
@@ -214,8 +216,8 @@ flowchart LR
 | `load:api` | k6 API 부하 시나리오 실행 (08 §9) |
 | `build:fallback` | 정적 폴백 페이지 빌드(OB-08, F17) → `infra/nginx/fallback/` |
 | `worker <cmd>` | 관리 CLI 진입점: `rebuild`, `dead-requeue`, `admin write-lock on\|off`, `retention:run` (F16 §11 정본). 예: `bun run worker dead-requeue` |
-| `db:generate` / `db:generate:custom` | drizzle-kit 마이그레이션 생성 / raw SQL 마이그레이션 틀 |
-| `db:migrate` | forward-only 적용 |
+| `db:generate <모듈>` / `db:generate:custom <모듈>` | 그 모듈의 drizzle-kit 마이그레이션 생성 / raw SQL 마이그레이션 틀 (모듈별 설정, ADR-052) |
+| `db:migrate [모듈…]` | 모듈 폴더별 forward-only 적용(인자 없으면 조립된 전 모듈). 적용 순서가 결과에 영향이 없어야 한다(B14) |
 | `db:seed` | 개발 시드 (02) |
 | `compose:up` · `compose:down` | 로컬 인프라 |
 | `k3d:up` · `k3d:down` | 로컬 K8s 검증 환경 (02) |

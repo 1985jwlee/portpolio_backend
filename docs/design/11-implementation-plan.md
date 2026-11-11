@@ -52,6 +52,7 @@ flowchart LR
 | S0-5 지표·로깅 | **G5** | 개발 PC | `/metrics` 에 요청 수·지연·적체 지표, 식별자 레이블 없음 | 후보 교체 |
 | S0-6 nginx | **G7** | 개발 PC (Funnel 경유 확인은 호스트) | `nginx -V` 에 `realip`, 클라이언트 주소 헤더 정규화, TLS 방식 결정 | 모듈 포함 이미지 |
 | S0-7 마이그레이션 | **G10** | 개발 PC | `generate --custom` raw SQL 로 부분 인덱스·어드바이저리 락 객체 생성, 빈 DB 에서 재현 | SQL 직접 관리 |
+| S0-7b 모듈별 마이그레이션 | **G10b** (ADR-052 결정 7) | 개발 PC | 모듈 둘이 각자 폴더·이력 표로 적용, 순서를 바꿔도 덤프 동일, 한 모듈 재적용이 다른 모듈에 불변, 한 모듈 폴더만으로 단독 적용, 3회 동일. **기준은 시험 전 README 에 고정·커밋** | 실패 시 ‘집계 유지’ 로 복귀, 결정 2 사용자 재결정 |
 | S0-8 컨테이너 격리 결정 | (신규 관문 아님, 10 §5) | 호스트 | rootless Docker 또는 `userns-remap` 중 하나를 S0 에서 정한다(**기본값 제안: rootless**, 안 되면 `userns-remap`). compose 기본 강화(`cap_drop: [ALL]`·`no-new-privileges`·읽기 전용 FS)가 Bun·nginx·Postgres 이미지에서 기동하는지 확인 | 강화 항목별로 예외 기록 후 진행 |
 
 - 순서: **S0-0 이 맨 앞**(호스트 값이 이후 측정의 기준), 그다음 **S0-1·S0-2**(설계를 바꿀 수 있는 크기), 나머지는 병렬.
@@ -68,9 +69,10 @@ flowchart LR
 | S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check` 통과, AC-032 |
 | S1-2 | `packages/kernel`: `Result`, `AppError` 계층, `AggregateRoot`, `DomainEvent`, 포트 인터페이스 | S1-1 | 오류 계층·`Result` 단위 시험(L2), 오류→HTTP 매핑 표 시험 |
 | S1-3 | `packages/config`: 환경변수 스키마·검증·`_FILE` 지원 | S1-1 | 필수 누락 시 기동 실패 시험, 비밀값이 로그에 안 나옴 |
-| S1-4 | `packages/db`: 풀·`UnitOfWork`·마이그레이션 실행기, 첫 마이그레이션(스키마 생성) | S0-4, S0-7 | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만, AC-023. **`migration immutable` 잡(09 §CI)이 적용된 파일을 고친 변경과 과거 `when` 의 새 항목을 실제로 거절함**(고치기 전 실패 → 통과 순서로 시험, ADR-050) |
-| S1-5 | `.dependency-cruiser.cjs` **B1~B10** 규칙(B10 = `@pf/infra` 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
+| S1-4 | `packages/db`: 풀·`UnitOfWork`·**모듈 폴더 목록을 받는 마이그레이션 실행기**(모듈별 이력 표, ADR-052), 첫 마이그레이션(스키마 생성) | S0-4, S0-7, S0-7b | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만, AC-023. **`migration immutable` 잡(09 §CI)이 적용된 파일을 고친 변경과 과거 `when` 의 새 항목을 실제로 거절함**(고치기 전 실패 → 통과 순서로 시험, ADR-050) |
+| S1-5 | `.dependency-cruiser.cjs` **B1~B10·B13·B14** 규칙(B10 = `@pf/infra` 격리, B13 = 계약만 의존, B14 = 마이그레이션 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
+| S1-18 | **계약 패키지·버전·추출 게이트** (ADR-052): 모듈별 `@pf/<m>-contract` 골격, `@pf/protocol` 에서 모듈별 이벤트·DTO 분리, 골든 JSON 변경 시 `package.json` 버전 상승 검사(`bun run check:contract-version`), 모듈별 ‘선언 의존만으로 타입체크·번들’ 검사 | S1-5 | 버전 안 올린 계약 변경이 CI 에서 실패, 모듈 하나가 계약·kernel 만으로 단독 번들 |
 | S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 (근거: ADR-027, EV-14, AC-020, FR-090) |
 | S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
 | S1-16 | **추적표 점검**: `docs/traceability.md` 와 명세·시험 이름의 정합 검사(`bun run check:trace`) — 추적표의 AC 가 명세에 존재하는지, `검증` 상태인 AC 에 시험 이름이 있고 시험 파일에 그 이름이 존재하는지, 시험 이름이 존재하지 않는 AC 를 가리키지 않는지 | S1-1 | 없는 AC 를 가리키는 시험·시험 없는 `검증` 행을 CI 가 실패시키는 시험, 추적표 초기 행 39개와 명세 AC 개수 일치 (요구: AC-032) |
