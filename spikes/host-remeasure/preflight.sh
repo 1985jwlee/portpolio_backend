@@ -12,7 +12,7 @@ echo "== 이름이 겹치는 컨테이너/네트워크 (없어야 한다)"
 docker ps -a --format '{{.Names}}' | grep -E '^(g4-pg|g10-pg|g10b-pg|g7-|g14-)' || echo "컨테이너 겹침 없음"
 docker network ls --format '{{.Name}}' | grep -E '^g7net$' || echo "네트워크 g7net 겹침 없음"
 echo "== G7 이 쓸 서브넷 172.28.0.0/16 과 겹치는 기존 네트워크 (없어야 한다)"
-docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}' | grep -E ' 172\.(2[89]|[0-9]{1,2})\.|172\.28' || echo "겹침 없음"
+docker network ls -q | xargs -r docker network inspect --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}' | grep -E '172\.28\.' || echo "겹침 없음"
 echo "== 이미 받아 둔 이미지"
 docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(oven/bun|postgres|nginx|docker|alpine/git)' | sort || true
 echo "== 지금 돌고 있는 컨테이너 수"; docker ps -q | wc -l

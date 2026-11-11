@@ -6,7 +6,6 @@
 set -euo pipefail
 REPO="${REPO:-https://github.com/1985jwlee/portpolio_backend.git}"
 BRANCH="${BRANCH:-docs/adr-spec-readme}"
-CONTEXT="${CONTEXT:-$REPO#$BRANCH}"   # 리허설에서는 로컬 디렉터리를 줄 수 있다
 IMAGE="${IMAGE:-pf-spike}"
 VOL="${VOL:-pf-results}"
 step="${1:?단계를 지정하라}"
@@ -23,7 +22,20 @@ load_check() { local l; l=$(cut -d' ' -f1 /proc/loadavg); echo "loadavg(1m)=$l";
 case "$step" in
   prepare)
     docker volume create "$VOL" >/dev/null
-    DOCKER_BUILDKIT=1 docker build -q -t "$IMAGE" -f spikes/host-remeasure/Dockerfile.bundle --build-arg BUILDKIT_CONTEXT_KEEP_GIT_DIR=1 "$CONTEXT"
+    # Dockerfile 을 stdin 으로 준다(컨텍스트 없음): buildx/BuildKit 이 없는 서버에서도 클래식 빌더로 돌고, 호스트에 git 이 필요 없다.
+    # 코드는 빌드 안에서 git clone 으로 받는다(.git 포함 → 결과에 커밋 해시가 남는다). CACHEBUST 로 재빌드 때 낡은 클론 계층을 쓰지 않는다.
+    DOCKER_BUILDKIT=0 docker build -q -t "$IMAGE" --build-arg REPO="$REPO" --build-arg BRANCH="$BRANCH" --build-arg CACHEBUST="$(date +%s)" - <<'DOCKERFILE'
+FROM docker:cli AS dockercli
+FROM oven/bun:1.4.4
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates procps util-linux && rm -rf /var/lib/apt/lists/* \
+ && git config --system --add safe.directory '*'
+ARG REPO
+ARG BRANCH
+ARG CACHEBUST
+RUN git clone --depth 1 --branch "$BRANCH" "$REPO" /repo && touch /repo/.built
+WORKDIR /repo
+DOCKERFILE
     docker run --rm "$IMAGE" git -C /repo rev-parse HEAD
     echo "준비 완료: 이미지 $IMAGE, 결과 볼륨 $VOL (서버 파일 시스템에 코드 없음)" ;;
   g4)   load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g4.ts" ;;
