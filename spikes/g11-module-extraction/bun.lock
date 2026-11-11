@@ -1,0 +1,66 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "spike-g11-module-extraction",
+    },
+    "apps/guestbook-service": {
+      "name": "@pf/guestbook-service",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pf/guestbook": "workspace:*",
+        "@pf/guestbook-contract": "workspace:*",
+        "@pf/kernel": "workspace:*",
+      },
+    },
+    "modules/guestbook": {
+      "name": "@pf/guestbook",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pf/guestbook-contract": "workspace:*",
+        "@pf/kernel": "workspace:*",
+      },
+    },
+    "modules/guestbook-client": {
+      "name": "@pf/guestbook-client",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pf/guestbook-contract": "workspace:*",
+        "@pf/kernel": "workspace:*",
+      },
+    },
+    "modules/guestbook-contract": {
+      "name": "@pf/guestbook-contract",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pf/kernel": "workspace:*",
+      },
+    },
+    "modules/realtime": {
+      "name": "@pf/realtime",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pf/guestbook-contract": "workspace:*",
+        "@pf/kernel": "workspace:*",
+      },
+    },
+    "packages/kernel": {
+      "name": "@pf/kernel",
+      "version": "1.0.0",
+    },
+  },
+  "packages": {
+    "@pf/guestbook": ["@pf/guestbook@workspace:modules/guestbook"],
+
+    "@pf/guestbook-client": ["@pf/guestbook-client@workspace:modules/guestbook-client"],
+
+    "@pf/guestbook-contract": ["@pf/guestbook-contract@workspace:modules/guestbook-contract"],
+
+    "@pf/guestbook-service": ["@pf/guestbook-service@workspace:apps/guestbook-service"],
+
+    "@pf/kernel": ["@pf/kernel@workspace:packages/kernel"],
+
+    "@pf/realtime": ["@pf/realtime@workspace:modules/realtime"],
+  }
+}
