@@ -44,7 +44,7 @@ flowchart LR
         SES[("identity.session")]
     end
     subgraph gw["apps/ws-gateway"]
-        RT["SocketRuntime<br/>Elysia 또는 Bun.serve"]
+        RT["SocketRuntime<br/>Bun.serve (ADR-053)"]
         PUB["PublicSocketHandler"]
         PRV["PrivateSocketHandler"]
         HUB["PublicHub"]
@@ -417,7 +417,7 @@ flowchart TB
         Q["SendQueue 64건 / 256KB"]
         C["MessageCodec"]
     end
-    subgraph rt["SocketRuntime 구현 (G2 에서 하나 확정)"]
+    subgraph rt["SocketRuntime 구현 (ADR-053: BunServeRuntime 확정)"]
         A["ElysiaRuntime<br/>Elysia ws 핸들러 위임"]
         B["BunServeRuntime<br/>Bun.serve websocket"]
     end
