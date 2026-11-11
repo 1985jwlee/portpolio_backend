@@ -27,7 +27,7 @@ case "$step" in
     fi
     docker build -q -t "$RUNNER" -f "$WORK/repo/spikes/host-remeasure/Dockerfile.runner" "$WORK/repo/spikes/host-remeasure"
     touch "$WORK/.start"
-    docker run --rm -v "$WORK:/w" alpine/git -C /w/repo rev-parse HEAD | tee "$WORK/commit.txt"
+    docker run --rm -v "$WORK:/w" alpine/git -c safe.directory='*' -C /w/repo rev-parse HEAD | tee "$WORK/commit.txt"
     echo "준비 완료: $WORK" ;;
   g4)   load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g4.ts" ;;
   g10)  load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g10.ts" ;;
