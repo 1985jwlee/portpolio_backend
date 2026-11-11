@@ -1,0 +1,38 @@
+{
+  "run": "2026-11-11T12-48-21-355Z-storm",
+  "startedAt": "2026-11-11T12:48:21.355Z",
+  "params": {
+    "stormAt": [
+      60,
+      150
+    ],
+    "duration": 300,
+    "public": 900,
+    "private": 100,
+    "slow": 0,
+    "slowAt": 1800,
+    "publicRate": 20,
+    "payload": 200,
+    "port": 3100,
+    "storm": 1,
+    "window": 5,
+    "churnRate": 0,
+    "churnAt": 120,
+    "churnSec": 1200
+  },
+  "host": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.8.0-149-generic",
+    "cpuModel": "Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz",
+    "cpus": 6,
+    "totalMem": 67043037184,
+    "loadavgAtStart": [
+      0.59,
+      0.56,
+      0.29
+    ]
+  },
+  "commit": "e714a39e8db59a53b772221a1c40d169fccb9195",
+  "dirty": false
+}
