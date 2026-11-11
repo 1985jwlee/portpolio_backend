@@ -1,0 +1,32 @@
+{
+  "id": "SC-B-r2",
+  "scen": "SC",
+  "variant": "B",
+  "rep": 2,
+  "attempt": 0,
+  "wallSec": 129,
+  "loadCpu": 0.235,
+  "gatewayCpuMedian": 0.207,
+  "opens": 50,
+  "expectedOpens": 50,
+  "valid": true,
+  "healthyP99MedianMs": 3,
+  "healthyP99MaxMs": 9,
+  "windows": 8,
+  "gaps": 0,
+  "dups": 0,
+  "reorders": 0,
+  "healthyCloses": 0,
+  "connFail": 0,
+  "slowKilled": 10,
+  "closed4408": 10,
+  "serverCloseCodes": {
+    "4408": 10
+  },
+  "killedAfterSec": 2,
+  "rssBeforeMb": 44,
+  "rssEndMb": 44.2,
+  "rssGrowthMb": 0.3,
+  "rssLastThirdSlopeMbPerMin": 0.53,
+  "msgsReceived": 9516384
+}

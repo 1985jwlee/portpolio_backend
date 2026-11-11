@@ -1,0 +1,32 @@
+{
+  "id": "SB-A-r1",
+  "scen": "SB",
+  "variant": "A",
+  "rep": 1,
+  "attempt": 0,
+  "wallSec": 160.1,
+  "loadCpu": 0.091,
+  "gatewayCpuMedian": 0.064,
+  "opens": 100,
+  "expectedOpens": 100,
+  "valid": true,
+  "healthyP99MedianMs": 4,
+  "healthyP99MaxMs": 4,
+  "windows": 11,
+  "gaps": 0,
+  "dups": 0,
+  "reorders": 0,
+  "healthyCloses": 0,
+  "connFail": 0,
+  "slowKilled": 10,
+  "closed4408": 10,
+  "serverCloseCodes": {
+    "4408": 10
+  },
+  "killedAfterSec": 16,
+  "rssBeforeMb": 39.7,
+  "rssEndMb": 40.7,
+  "rssGrowthMb": 1,
+  "rssLastThirdSlopeMbPerMin": 0.3,
+  "msgsReceived": 2659679
+}

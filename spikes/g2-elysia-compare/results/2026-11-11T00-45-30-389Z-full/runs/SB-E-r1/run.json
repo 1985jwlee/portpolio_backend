@@ -1,0 +1,32 @@
+{
+  "id": "SB-E-r1",
+  "scen": "SB",
+  "variant": "E",
+  "rep": 1,
+  "attempt": 0,
+  "wallSec": 161.6,
+  "loadCpu": 0.09,
+  "gatewayCpuMedian": 0.06,
+  "opens": 100,
+  "expectedOpens": 100,
+  "valid": true,
+  "healthyP99MedianMs": 2,
+  "healthyP99MaxMs": 5,
+  "windows": 11,
+  "gaps": 0,
+  "dups": 0,
+  "reorders": 0,
+  "healthyCloses": 0,
+  "connFail": 0,
+  "slowKilled": 10,
+  "closed4408": 0,
+  "serverCloseCodes": {
+    "1006": 10
+  },
+  "killedAfterSec": 19,
+  "rssBeforeMb": 39,
+  "rssEndMb": 39.5,
+  "rssGrowthMb": 0.6,
+  "rssLastThirdSlopeMbPerMin": -0.27,
+  "msgsReceived": 2674745
+}
