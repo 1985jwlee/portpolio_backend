@@ -404,6 +404,12 @@ ADR-022 측정에서 Elysia 의 WebSocket 백프레셔 옵션은 **라우트 옵
 
 **G2 재시험(2026-11-04, 로컬)**: 앱 레벨 큐(`gw.ts` 방식)는 느린 연결 10/10 을 4408 로 격리했고 RSS 가 평탄(33MB)했다. `Bun.serve` 네이티브 `backpressureLimit`+`closeOnBackpressureLimit` 은 10/10 을 끊지만 **코드 1006** 으로만 끊어 4408 통지가 불가하고, Elysia 라우트 옵션은 여전히 0/10 이며 RSS 50→154MB 증가, Elysia 최상위 옵션은 10/10 을 1006 으로 끊었고 앞선 p99 531~886ms 악화는 이번 조건(100연결·초당 200건·1KB)에서 **재현되지 않았다**(이전 조건은 초당 2000건이라 같지 않음 → "해결"이 아니라 "이 부하에서는 안 보였다"로만 기록). 읽지 않는 연결은 close 프레임을 받지 못하므로 클라이언트는 4408 코드에 의존한 분기를 두지 않는다(04 §4). 결론은 그대로 **앱 레벨 큐 유지**다.
 
+**S0-2 비교 시험(2026-11-11, 34회, 개발 PC 한 곳, 사전 고정 기준)**: 증거 [`spikes/g2-elysia-compare`](../../../spikes/g2-elysia-compare/ENV.md).
+- **Elysia 라우트 옵션(C)은 6회 모두 무시**됐다(격리 0/10, RSS +161~172MB) — 위 두 측정을 재현한다.
+- **Elysia 최상위 옵션(D)·`Bun.serve` 네이티브 옵션(E)** 은 10/10 격리하지만 클라이언트는 **`1006` 만** 본다(4408 불가). 이번 조건에서는 앞서 보고된 p99 531~886ms 악화가 **재현되지 않았다**(D 1~4ms). 사전 고정한 비율 규칙(K3)은 정수 ms 중앙값에서 D·E 를 탈락시켰으나 절대값은 상한 안이라 **‘더 느리다’ 의 증거가 아니다**.
+- **앱 큐를 Elysia 위에 올린 구성(B)은 `Bun.serve`(A)와 거의 같았다**(SA 비율 1.38, SC 1.5 — 기준선 가까이). 단 B 는 **`ws.raw`(Bun 원본 `ServerWebSocket`)로 내려가** `getBufferedAmount()` 를 읽고 보냈다. `ElysiaWS` 래퍼는 `getBufferedAmount` 를 노출하지 않고, 이벤트마다 **새 래퍼**를 만들어(`adapter/bun/index.mjs`) 연결 상태를 `ws` 에 붙일 수 없으며(`WeakMap<ws.raw>` 우회), `ws.data` 는 Elysia 컨텍스트다. 즉 **‘ElysiaRuntime’ 은 사실상 `raw` 접근을 감수하는 어댑터**이고, `BunServeRuntime` 은 공개 API 만으로 된다. 래퍼 `send` 의 검증·직렬화 비용은 재지 않았다.
+- 한계: 호스트 재측정 없음, 합성 부하, loopback.
+
 ```mermaid
 flowchart TB
     subgraph app["앱 코드 (런타임 중립)"]
