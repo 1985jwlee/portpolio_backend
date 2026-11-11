@@ -89,6 +89,20 @@ async function once(rep: number): Promise<R[]> {
     const b4 = build(iso4.tmp, iso4.entry);
     res.push({ id: 4, name: "계약 복사본을 뺀 realtime 빌드는 실패", pass: b4.code !== 0, detail: { code: b4.code, tail: b4.out.slice(-200) } });
 
+    step(rep, "4b/4c 발견 후 추가");
+    const iso4b = isolate(dir, "@pf/guestbook-client", ["@pf/guestbook-contract"]); created.push(iso4b.tmp);
+    const b4b = build(iso4b.tmp, iso4b.entry);
+    res.push({ id: 9, name: "4b. 런타임 임포트가 있는 guestbook-client 는 계약 없이 빌드 실패", pass: b4b.code !== 0, detail: { code: b4b.code, tail: b4b.out.slice(-160) } });
+    const tscCount = (omit: string[]) => {
+      const iso = isolate(dir, "@pf/realtime", omit); created.push(iso.tmp);
+      writeFileSync(join(iso.tmp, "shim.d.ts"), 'declare module "node:crypto" { export const createHmac: any; export const timingSafeEqual: any; }\n');
+      writeFileSync(join(iso.tmp, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ESNext", module: "ESNext", moduleResolution: "bundler", strict: true, noEmit: true, skipLibCheck: true, types: [] }, include: ["pkg/src", "shim.d.ts"] }));
+      const t = run(["bunx", "tsc", "-p", join(iso.tmp, "tsconfig.json")]);
+      return t.out.split("\n").filter((l) => l.includes("TS2307") && l.includes("@pf/"));
+    };
+    const withC = tscCount([]), withoutC = tscCount(["@pf/guestbook-contract"]);
+    res.push({ id: 10, name: "4c. 격리 타입체크: 계약 있으면 @pf TS2307 없음, 없으면 계약에 대한 TS2307", pass: withC.length === 0 && withoutC.some((l) => l.includes("@pf/guestbook-contract")), detail: { withContract: withC, withoutContract: withoutC } });
+
     step(rep, "5 버전 게이트");
     const v = join(work, "ver");
     const schemaPath = (r: string) => join(r, "modules/guestbook-contract/src/schemas.ts");
@@ -141,15 +155,17 @@ async function main() {
   const ids = [1, 2, 3, 4, 5, 6, 7];
   const perId = ids.map((id) => ({ id, name: all[0]!.find((x) => x.id === id)!.name, passes: all.map((run) => run.find((x) => x.id === id)?.pass ?? false) }));
   const repeat = perId.every((p) => p.passes.every(Boolean));
+  const supplement = [9, 10].map((id) => ({ id, name: all[0]!.find((x) => x.id === id)!.name, pass: all.every((run) => run.find((x) => x.id === id)?.pass === true) }));
   const criteria = [...perId.map((p) => ({ id: p.id, name: p.name, pass: p.passes.every(Boolean), detail: `3회: ${p.passes.map((x) => (x ? "PASS" : "FAIL")).join(" ")}` })), { id: 8, name: "1~7 을 3회 반복해도 같다", pass: repeat, detail: "" }];
   const verdict = repeat ? "PASS" : "FAIL";
   mkdirSync(join(dir, "results"), { recursive: true });
   const file = join(dir, "results", `${new Date().toISOString().replace(/[:.]/g, "-")}-g11.json`);
   const git = Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: dir }).stdout.toString().trim();
   const dirty = Bun.spawnSync(["git", "status", "--porcelain", "--", "."], { cwd: dir }).stdout.toString().split("\n").filter((x) => x && !x.includes("results/") && !x.includes("node_modules")).length > 0;
-  writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), commit: git || null, dirty, bun: Bun.version, loadavg: loadavg(), runs: all, verdict, criteria }, null, 2));
+  writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), commit: git || null, dirty, bun: Bun.version, loadavg: loadavg(), runs: all, verdict, criteria, supplement }, null, 2));
   console.log(`판정: ${verdict}`);
   for (const c of criteria) console.log(`${c.pass ? "PASS" : "FAIL"}  #${c.id} ${c.name}  ${c.detail}`);
+  console.log("보완(발견 후 추가, 판정 제외):"); for (const x of supplement) console.log(`${x.pass ? "PASS" : "FAIL"}  #${x.id} ${x.name}`);
   for (const run of all) for (const r of run) if (!r.pass) console.log("실패 상세:", JSON.stringify(r).slice(0, 700));
   console.log("저장:", file);
 }
