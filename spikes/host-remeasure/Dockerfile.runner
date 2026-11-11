@@ -1,7 +1,0 @@
-# 호스트 재측정 실행기: Bun + docker CLI + git. 서버에는 Docker 만 있으면 된다(서버에 Bun 설치 없음).
-# 작성: AI 초안 (Authorship: G).
-FROM docker:cli AS dockercli
-FROM oven/bun:1.4.4
-COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates procps && rm -rf /var/lib/apt/lists/* \
- && git config --system --add safe.directory '*'

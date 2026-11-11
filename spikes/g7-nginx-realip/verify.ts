@@ -91,10 +91,12 @@ async function main() {
 
   try {
     sh(`docker network create --subnet ${SUBNET} ${NET}`);
-    const u = sh(`docker run -d --name g7-upstream --network ${NET} --network-alias upstream -v ${dir}:/app:ro -w /app oven/bun:1.4.4 bun upstream.ts`);
+    // 호스트 경로 bind mount 대신 create → cp → start: 코드가 호스트 파일 시스템에 없어도(실행기 이미지 안에만 있어도) 돈다
+    const started = (create: string, ...copies: [string, string][]) => { const c = sh(create); if (c.code !== 0) return c; for (const [src, dst] of copies) { const k = sh(`docker cp ${src} ${dst}`); if (k.code !== 0) return k; } return sh(`docker start ${create.match(/--name (\S+)/)![1]}`); };
+    const u = started(`docker create --name g7-upstream --network ${NET} --network-alias upstream -w /tmp oven/bun:1.4.4 bun upstream.ts`, [`${dir}/upstream.ts`, "g7-upstream:/tmp/upstream.ts"]);
     if (u.code !== 0) throw new Error("upstream 기동 실패: " + u.out);
-    const t = sh(`docker run -d --name g7-nginx-t --network ${NET} -p 127.0.0.1:${PORT_T}:80 -v ${dir}/nginx.trusted.conf:/etc/nginx/nginx.conf:ro nginx:stable`);
-    const n = sh(`docker run -d --name g7-nginx-u --network ${NET} -p 127.0.0.1:${PORT_U}:80 -v ${dir}/nginx.untrusted.conf:/etc/nginx/nginx.conf:ro nginx:stable`);
+    const t = started(`docker create --name g7-nginx-t --network ${NET} -p 127.0.0.1:${PORT_T}:80 nginx:stable`, [`${dir}/nginx.trusted.conf`, "g7-nginx-t:/etc/nginx/nginx.conf"]);
+    const n = started(`docker create --name g7-nginx-u --network ${NET} -p 127.0.0.1:${PORT_U}:80 nginx:stable`, [`${dir}/nginx.untrusted.conf`, "g7-nginx-u:/etc/nginx/nginx.conf"]);
     if (t.code !== 0 || n.code !== 0) throw new Error("nginx 기동 실패: " + t.out + n.out);
     for (const port of [PORT_T, PORT_U]) { // 두 nginx 가 모두 응답할 때까지 기다린다
       let ready = false;
