@@ -1,0 +1,523 @@
+{
+  "at": "2026-11-11T02:55:52.410Z",
+  "commit": "c312248bacb9786790d0655061eca1ae2d956ac4",
+  "dirty": false,
+  "bun": "1.4.4",
+  "loadavg": [
+    8.26,
+    3.94,
+    3.1
+  ],
+  "runs": [
+    [
+      {
+        "id": 1,
+        "name": "깨끗한 트리: imports·version 위반 0",
+        "pass": true,
+        "detail": {
+          "imports": "OK imports",
+          "version": "OK version"
+        }
+      },
+      {
+        "id": 2,
+        "name": "임포트 위반 5종 주입: 기대한 규칙 ID 로 모두 검출",
+        "pass": true,
+        "detail": [
+          {
+            "case": "a",
+            "expect": "G-b",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "b",
+            "expect": "G-a",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "c",
+            "expect": "G-c",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "d",
+            "expect": "G-d",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "e",
+            "expect": "G-e",
+            "code": 1,
+            "detected": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "name": "6개 단위가 선언한 의존만으로 격리 빌드",
+        "pass": true,
+        "detail": [
+          {
+            "pkg": "@pf/kernel",
+            "deps": [],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-contract",
+            "deps": [
+              "@pf/kernel"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-client",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/realtime",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-service",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract",
+              "@pf/guestbook"
+            ],
+            "code": 0
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "계약 복사본을 뺀 realtime 빌드는 실패",
+        "pass": false,
+        "detail": {
+          "code": 0,
+          "tail": "Bundled 1 module in 8ms\n\n  out.js  299 bytes  (entry point)"
+        }
+      },
+      {
+        "id": 5,
+        "name": "버전 게이트: 변경+유지 → V-1 실패 / 변경+승급 → 통과 / 불변+승급 → 통과",
+        "pass": true,
+        "detail": {
+          "unchangedVersion": {
+            "code": 1,
+            "out": "V-1 @pf/guestbook-contract: 계약이 바뀌었는데 버전이 오르지 않음 (잠금 1.0.0, 현재 1.0.0)"
+          },
+          "bumped": {
+            "code": 0
+          },
+          "onlyBump": {
+            "code": 0
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "인프로세스 = 별도 프로세스(격리 폴더, kernel·계약·guestbook 만)",
+        "pass": true,
+        "detail": {
+          "port": true,
+          "same": true,
+          "present": [
+            "guestbook",
+            "guestbook-contract",
+            "kernel"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "토큰: 유효 200 / 변조·만료·aud·alg none·없음 모두 401",
+        "pass": true,
+        "detail": {
+          "valid": 200,
+          "tampered": 401,
+          "expired": 401,
+          "wrongAud": 401,
+          "algNone": 401,
+          "missing": 401
+        }
+      }
+    ],
+    [
+      {
+        "id": 1,
+        "name": "깨끗한 트리: imports·version 위반 0",
+        "pass": true,
+        "detail": {
+          "imports": "OK imports",
+          "version": "OK version"
+        }
+      },
+      {
+        "id": 2,
+        "name": "임포트 위반 5종 주입: 기대한 규칙 ID 로 모두 검출",
+        "pass": true,
+        "detail": [
+          {
+            "case": "a",
+            "expect": "G-b",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "b",
+            "expect": "G-a",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "c",
+            "expect": "G-c",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "d",
+            "expect": "G-d",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "e",
+            "expect": "G-e",
+            "code": 1,
+            "detected": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "name": "6개 단위가 선언한 의존만으로 격리 빌드",
+        "pass": true,
+        "detail": [
+          {
+            "pkg": "@pf/kernel",
+            "deps": [],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-contract",
+            "deps": [
+              "@pf/kernel"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-client",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/realtime",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-service",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract",
+              "@pf/guestbook"
+            ],
+            "code": 0
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "계약 복사본을 뺀 realtime 빌드는 실패",
+        "pass": false,
+        "detail": {
+          "code": 0,
+          "tail": "Bundled 1 module in 5ms\n\n  out.js  299 bytes  (entry point)"
+        }
+      },
+      {
+        "id": 5,
+        "name": "버전 게이트: 변경+유지 → V-1 실패 / 변경+승급 → 통과 / 불변+승급 → 통과",
+        "pass": true,
+        "detail": {
+          "unchangedVersion": {
+            "code": 1,
+            "out": "V-1 @pf/guestbook-contract: 계약이 바뀌었는데 버전이 오르지 않음 (잠금 1.0.0, 현재 1.0.0)"
+          },
+          "bumped": {
+            "code": 0
+          },
+          "onlyBump": {
+            "code": 0
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "인프로세스 = 별도 프로세스(격리 폴더, kernel·계약·guestbook 만)",
+        "pass": true,
+        "detail": {
+          "port": true,
+          "same": true,
+          "present": [
+            "guestbook",
+            "guestbook-contract",
+            "kernel"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "토큰: 유효 200 / 변조·만료·aud·alg none·없음 모두 401",
+        "pass": true,
+        "detail": {
+          "valid": 200,
+          "tampered": 401,
+          "expired": 401,
+          "wrongAud": 401,
+          "algNone": 401,
+          "missing": 401
+        }
+      }
+    ],
+    [
+      {
+        "id": 1,
+        "name": "깨끗한 트리: imports·version 위반 0",
+        "pass": true,
+        "detail": {
+          "imports": "OK imports",
+          "version": "OK version"
+        }
+      },
+      {
+        "id": 2,
+        "name": "임포트 위반 5종 주입: 기대한 규칙 ID 로 모두 검출",
+        "pass": true,
+        "detail": [
+          {
+            "case": "a",
+            "expect": "G-b",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "b",
+            "expect": "G-a",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "c",
+            "expect": "G-c",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "d",
+            "expect": "G-d",
+            "code": 1,
+            "detected": true
+          },
+          {
+            "case": "e",
+            "expect": "G-e",
+            "code": 1,
+            "detected": true
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "name": "6개 단위가 선언한 의존만으로 격리 빌드",
+        "pass": true,
+        "detail": [
+          {
+            "pkg": "@pf/kernel",
+            "deps": [],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-contract",
+            "deps": [
+              "@pf/kernel"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-client",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/realtime",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract"
+            ],
+            "code": 0
+          },
+          {
+            "pkg": "@pf/guestbook-service",
+            "deps": [
+              "@pf/kernel",
+              "@pf/guestbook-contract",
+              "@pf/guestbook"
+            ],
+            "code": 0
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "name": "계약 복사본을 뺀 realtime 빌드는 실패",
+        "pass": false,
+        "detail": {
+          "code": 0,
+          "tail": "Bundled 1 module in 3ms\n\n  out.js  299 bytes  (entry point)"
+        }
+      },
+      {
+        "id": 5,
+        "name": "버전 게이트: 변경+유지 → V-1 실패 / 변경+승급 → 통과 / 불변+승급 → 통과",
+        "pass": true,
+        "detail": {
+          "unchangedVersion": {
+            "code": 1,
+            "out": "V-1 @pf/guestbook-contract: 계약이 바뀌었는데 버전이 오르지 않음 (잠금 1.0.0, 현재 1.0.0)"
+          },
+          "bumped": {
+            "code": 0
+          },
+          "onlyBump": {
+            "code": 0
+          }
+        }
+      },
+      {
+        "id": 6,
+        "name": "인프로세스 = 별도 프로세스(격리 폴더, kernel·계약·guestbook 만)",
+        "pass": true,
+        "detail": {
+          "port": true,
+          "same": true,
+          "present": [
+            "guestbook",
+            "guestbook-contract",
+            "kernel"
+          ]
+        }
+      },
+      {
+        "id": 7,
+        "name": "토큰: 유효 200 / 변조·만료·aud·alg none·없음 모두 401",
+        "pass": true,
+        "detail": {
+          "valid": 200,
+          "tampered": 401,
+          "expired": 401,
+          "wrongAud": 401,
+          "algNone": 401,
+          "missing": 401
+        }
+      }
+    ]
+  ],
+  "verdict": "FAIL",
+  "criteria": [
+    {
+      "id": 1,
+      "name": "깨끗한 트리: imports·version 위반 0",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 2,
+      "name": "임포트 위반 5종 주입: 기대한 규칙 ID 로 모두 검출",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 3,
+      "name": "6개 단위가 선언한 의존만으로 격리 빌드",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 4,
+      "name": "계약 복사본을 뺀 realtime 빌드는 실패",
+      "pass": false,
+      "detail": "3회: FAIL FAIL FAIL"
+    },
+    {
+      "id": 5,
+      "name": "버전 게이트: 변경+유지 → V-1 실패 / 변경+승급 → 통과 / 불변+승급 → 통과",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 6,
+      "name": "인프로세스 = 별도 프로세스(격리 폴더, kernel·계약·guestbook 만)",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 7,
+      "name": "토큰: 유효 200 / 변조·만료·aud·alg none·없음 모두 401",
+      "pass": true,
+      "detail": "3회: PASS PASS PASS"
+    },
+    {
+      "id": 8,
+      "name": "1~7 을 3회 반복해도 같다",
+      "pass": false,
+      "detail": ""
+    }
+  ]
+}
