@@ -20,3 +20,8 @@ ADR-050 의 ‘실측’ 조건(스크립트·원시 결과·환경·커밋 해�
 - 실제 Funnel 경유 헤더는 이 시험이 아니라 [ADR-051](../../docs/adr/ADR-051-funnel-g14-measurement-results.md) 에서 실측했다. 여기서는 그 헤더를 **흉내 낸 요청**으로 nginx 쪽만 검증한다.
 - G7 ③(TLS 자동화)은 Funnel 이 TLS 를 끝내므로 해당 없음.
 - IPv6 는 주소 문자열 정규화만 확인했고 IPv6 클라이언트의 실제 경로는 확인하지 않았다.
+
+## 호스트 재측정 (2026-11-11 실행, 2026-11-12 기록)
+호스트(집 서버 qdServer): Xeon Bronze 3204 6코어 1.9GHz, Ubuntu 24.04, 커널 6.8.0-149(재부팅 후), Docker 29.1.3, Bun 1.4.4(`oven/bun:1.4.4` 컨테이너), 소스 커밋 `e714a39`. 서버에 코드를 두지 않고 `spikes/host-remeasure/run.sh` 로 컨테이너에서 실행했다. 원시 결과: `spikes/host-remeasure/results/`(커밋 `0a0d520`). 개발 PC 결과와 교차 비교하지 않는다 — 합격/불합격만 말한다.
+- **G7 ①②: PASS** — 기준 1~10. 세 이미지(`nginx:stable` 1.30.6, `stable-alpine` 1.30.6, `mainline` 1.31.8) 모두 realip 포함, 기준 2~9 가 `nginx:stable` 에서 3회 모두 통과. `host-remeasure/results/g7-nginx-realip/2026-11-11T12-46-53-069Z-verify.json`
+- 한계: 여전히 헤더를 흉내 낸 요청이다. 실제 Funnel 경유 요청·호스트 compose 대역·IPv6 경로는 미실행(Funnel 꺼짐).

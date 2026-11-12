@@ -31,3 +31,7 @@ ADR-050 의 ‘실측’ 조건(스크립트·원시 결과·환경·커밋 해�
 - 같은 모듈을 두 인스턴스가 동시에 적용하는 경우는 다루지 않았다(운영 규칙 ②: 마이그레이션 잡은 단일 실행).
 - 개발 PC 한 곳. 하네스의 `dirty` 판정은 `results/` 를 제외한다.
 - 모듈별 `drizzle-kit generate` 는 저장소 루트에서 `--config` 로 실행했다. 모듈 폴더 안에서 실행하는 경우의 상대 경로는 확인하지 않았다.
+
+## 호스트 재측정 (2026-11-11 실행, 2026-11-12 기록)
+호스트(집 서버 qdServer): Xeon Bronze 3204 6코어 1.9GHz, Ubuntu 24.04, 커널 6.8.0-149(재부팅 후), Docker 29.1.3, Bun 1.4.4(`oven/bun:1.4.4` 컨테이너), 소스 커밋 `e714a39`. 서버에 코드를 두지 않고 `spikes/host-remeasure/run.sh` 로 컨테이너에서 실행했다. 원시 결과: `spikes/host-remeasure/results/`(커밋 `0a0d520`). 개발 PC 결과와 교차 비교하지 않는다 — 합격/불합격만 말한다.
+- **G10b: PASS** — 기준 1~8, 기준 2~7 이 3회 모두 통과. 시작 시 loadavg 0.93/0.61/0.30. `host-remeasure/results/g10b-module-migrations/2026-11-11T12-47-37-666Z-g10b.json`
