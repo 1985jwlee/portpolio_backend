@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 호스트 재측정 실행기 — 서버에 코드를 받지 않는다. 코드는 이미지(pf-spike) 안에만 있고 결과는 도커 볼륨(pf-results)에 모인다.
 # 사용: BRANCH=<브랜치> ./run.sh <단계>     (이 스크립트 한 파일만 서버에 있으면 된다. 파일 없이 쓰려면 README 의 ‘한 파일도 두지 않는 방법’)
-#   단계: prepare | g4 | g5 | g7 | g10 | g10b | g11 | g3-browser | g2-storm | g2-churn | g2-soak | profile | pack | clean
+#   단계: prepare | g4 | g5 | g7 | g10 | g10b | g11 | g3-browser | g3-sigterm | g2-storm | g2-churn | g2-soak | profile | pack | clean
 # 작성: AI 초안 (Authorship: G).
 set -euo pipefail
 IMAGE="${IMAGE:-pf-spike}"
@@ -31,8 +31,9 @@ case "$step" in
     docker rm -f pf-dockercli >/dev/null
     docker exec pf-prep sh -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates procps util-linux >/dev/null && rm -rf /var/lib/apt/lists/* && mkdir /repo"
     docker cp - pf-prep:/repo   # stdin = git archive tar (.git 없음)
+    # 풀린 파일의 시각이 .built 보다 새로 찍혀 예전 results 가 ‘이번 결과’로 복사됐다(첫 서버 실행에서 발견) — 모두 과거로 돌린 뒤 .built 를 찍는다.
     # 스파이크가 결과에 남기는 git rev-parse HEAD / git status 용 얇은 git 대역: 커밋은 archive 를 만든 커밋(COMMIT), archive 는 HEAD 그대로라 변경 없음.
-    docker exec pf-prep sh -c "echo '$COMMIT' > /repo/.commit && touch /repo/.built"
+    docker exec pf-prep sh -c "echo '$COMMIT' > /repo/.commit && find /repo -type f -exec touch -d 2000-01-01 {} + && touch /repo/.built"
     docker exec -i pf-prep sh -c 'cat > /usr/local/bin/git && chmod +x /usr/local/bin/git' <<'GITSHIM'
 #!/bin/sh
 while [ "$1" = -C ]; do shift 2; done
@@ -48,6 +49,7 @@ GITSHIM
   g7)   load_check; dr g7-nginx-realip "bun verify.ts" ;;
   g10b) load_check; dr g10b-module-migrations "bun install --frozen-lockfile && bun g10b.ts" ;;
   g3-browser) load_check; dr g3-next-on-bun "bun install --frozen-lockfile && bunx playwright install --with-deps chromium && bun verify.ts --only=6,7 --skip=10" ;;
+  g3-sigterm) load_check; dr g3-next-on-bun "bun install --frozen-lockfile && bun verify.ts --only=12,13 --skip=10" ;;
   g11)  load_check; dr g11-module-extraction "bun install --frozen-lockfile && bun g11.ts" ;;
   g2-storm) load_check; dr g2-ws-soak "WARMUP_MIN=0.5 bun run.ts --duration=300 --slow=0 --storm=1 --stormAt=60,150 --window=5 --label=storm" ;;
   g2-churn) load_check; dr g2-ws-soak "bun run.ts --duration=1500 --public=180 --private=20 --slow=0 --churnRate=50 --churnAt=120 --churnSec=1200 --window=60 --label=churn" ;;
