@@ -1,6 +1,7 @@
 // G3 시험. README 의 기준 표와 번호가 같다. 기준을 바꾸려면 README 를 먼저 고치고 커밋한다.
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import net from "node:net";
 
 const PORT = 39600;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -163,6 +164,48 @@ async function oneRun(runNo: number): Promise<R[]> {
     add(9, "SIGTERM 10초 안 종료, 코드 143 또는 0, 처리 중 응답 완료", !!srv.exit && (srv.exit.code === 143 || srv.exit.code === 0 || srv.exit.signal === "SIGTERM") && ok, { exit: srv.exit, sec: +((performance.now() - ts) / 1000).toFixed(1), inflightOk: ok });
   } finally {
     await srv.stop();
+  }
+
+  // 12·13 기준 9b (발견 후 추가, 2026-11-12): 연결 확립 뒤 SIGTERM. 서버는 기준마다 새로 띄운다.
+  const okCode = (e: Server["exit"]) => !!e && (e.code === 143 || e.code === 0 || e.signal === "SIGTERM");
+  const sock = () => new Promise<net.Socket>((res, rej) => { const c = net.connect(PORT, "127.0.0.1", () => res(c)); c.on("error", rej); });
+  const collect = (c: net.Socket) => { const o = { buf: "" }; c.on("data", (d) => (o.buf += d)); c.on("error", () => {}); return o; };
+  const waitFor = async (f: () => boolean, ms: number) => { const t = performance.now(); while (!f() && performance.now() - t < ms) await sleep(50); return f(); };
+  const complete = (b: string) => b.includes("\r\n0\r\n\r\n");
+  if (want(12)) {
+    const s2 = new Server(); s2.start();
+    if (!(await s2.ready())) { add(12, "9b-1 keep-alive 유휴 연결 + SIGTERM", false, "서버 기동 실패"); await s2.stop(); }
+    else {
+      const c = await sock(); const o = collect(c);
+      c.write("GET /ko HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n");
+      const got = await waitFor(() => complete(o.buf), 10_000);
+      const ts = performance.now(); s2.proc.kill("SIGTERM");
+      await waitFor(() => !!s2.exit, 20_000);
+      const sec = +((performance.now() - ts) / 1000).toFixed(1);
+      c.destroy();
+      add(12, "9b-1 keep-alive 유휴 연결 + SIGTERM: 10초 안·143/0", got && okCode(s2.exit) && sec <= 10, { responseComplete: got, exit: s2.exit, sec });
+      await s2.stop();
+    }
+  }
+  if (want(13)) {
+    const s3 = new Server(); s3.start();
+    if (!(await s3.ready())) { add(13, "9b-2 처리 중 요청 + SIGTERM", false, "서버 기동 실패"); await s3.stop(); }
+    else {
+      const c = await sock(); const o = collect(c);
+      c.write("GET /ko HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n"); // 헤더 미완결 = 연결 확립 + 요청 진행 중
+      await sleep(300);
+      const ts = performance.now(); s3.proc.kill("SIGTERM");
+      await sleep(500);
+      let writeErr: string | null = null;
+      try { c.write("\r\n"); } catch (e: any) { writeErr = String(e?.code ?? e); }
+      const got = await waitFor(() => complete(o.buf), 10_000);
+      await waitFor(() => !!s3.exit, 20_000);
+      const sec = +((performance.now() - ts) / 1000).toFixed(1);
+      const status = /^HTTP\/1\.1 (\d+)/.exec(o.buf)?.[1] ?? null;
+      c.destroy();
+      add(13, "9b-2 처리 중 요청 + SIGTERM: 200 완결·10초 안·143/0", status === "200" && got && okCode(s3.exit) && sec <= 10, { status, responseComplete: got, writeErr, exit: s3.exit, sec });
+      await s3.stop();
+    }
   }
   return out;
 }
