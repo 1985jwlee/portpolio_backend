@@ -1,0 +1,69 @@
+{
+  "cmd": "throughput",
+  "base": "https://qd.tail91f132.ts.net",
+  "startedAt": "2026-11-12T14:48:00.884Z",
+  "finishedAt": "2026-11-12T14:49:49.003Z",
+  "options": {
+    "conns": "1",
+    "secs": "5",
+    "par": "1"
+  },
+  "client": {
+    "bun": "1.4.2",
+    "platform": "win32",
+    "release": "10.0.26200",
+    "cpus": 16,
+    "loadavg": [
+      0,
+      0,
+      0
+    ]
+  },
+  "server": {
+    "bun": "1.3.11",
+    "platform": "linux",
+    "release": "6.8.0-149-generic",
+    "cpuModel": "Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz",
+    "cpus": 6,
+    "loadavg": [
+      0.03,
+      0.01,
+      0
+    ],
+    "totalMem": 67043037184,
+    "freeMem": 48430432256,
+    "uptimeSec": 94213
+  },
+  "commit": "c2f6069d367be4933c86a4fb14a39b20a006db95",
+  "dirty": false,
+  "result": {
+    "conns": 1,
+    "size": 65536,
+    "secs": 5,
+    "ws": {
+      "msgs": 0,
+      "errors": 1,
+      "mbPerSec": 0,
+      "rtt": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      }
+    },
+    "httpDownload": {
+      "requestedBytesEach": 52428800,
+      "par": 1,
+      "each": [
+        {
+          "receivedBytes": 52428800,
+          "sec": 107.49,
+          "mbPerSec": 0.47
+        }
+      ],
+      "aggregateMbPerSec": 0.47,
+      "totalSec": 107.49
+    }
+  }
+}
