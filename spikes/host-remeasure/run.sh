@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 호스트 재측정 실행기 — 서버에 코드를 받지 않는다. 코드는 이미지(pf-spike) 안에만 있고 결과는 도커 볼륨(pf-results)에 모인다.
 # 사용: BRANCH=<브랜치> ./run.sh <단계>     (이 스크립트 한 파일만 서버에 있으면 된다. 파일 없이 쓰려면 README 의 ‘한 파일도 두지 않는 방법’)
-#   단계: prepare | g4 | g5 | g7 | g10 | g10b | g11 | g2-storm | g2-churn | g2-soak | profile | pack | clean
+#   단계: prepare | g4 | g5 | g7 | g10 | g10b | g11 | g3-browser | g2-storm | g2-churn | g2-soak | profile | pack | clean
 # 작성: AI 초안 (Authorship: G).
 set -euo pipefail
 REPO="${REPO:-https://github.com/1985jwlee/portpolio_backend.git}"
@@ -41,6 +41,7 @@ case "$step" in
   g5)   load_check; dr g5-metrics "bun install --frozen-lockfile && bun verify.ts" ;;
   g7)   load_check; dr g7-nginx-realip "bun verify.ts" ;;
   g10b) load_check; dr g10b-module-migrations "bun install --frozen-lockfile && bun g10b.ts" ;;
+  g3-browser) load_check; dr g3-next-on-bun "bun install --frozen-lockfile && bunx playwright install --with-deps chromium && bun verify.ts --only=6,7 --skip=10" ;;
   g11)  load_check; dr g11-module-extraction "bun install --frozen-lockfile && bun g11.ts" ;;
   g2-storm) load_check; dr g2-ws-soak "WARMUP_MIN=0.5 bun run.ts --duration=300 --slow=0 --storm=1 --stormAt=60,150 --window=5 --label=storm" ;;
   g2-churn) load_check; dr g2-ws-soak "bun run.ts --duration=1500 --public=180 --private=20 --slow=0 --churnRate=50 --churnAt=120 --churnSec=1200 --window=60 --label=churn" ;;
