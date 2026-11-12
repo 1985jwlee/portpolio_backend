@@ -3,7 +3,7 @@
 G2·G4·G5·G7·G10·G10b·G11 의 개발 PC 결과(WSL2 loopback, i5-12400)를 **라이브 호스트**(네이티브 Ubuntu 24.04, Xeon Bronze 3204 6코어 1.9GHz, 공유 서버)에서 다시 잰다. 증거 규칙은 [ADR-050](../../docs/adr/ADR-050-evidence-rule.md). 이 폴더는 제품 코드가 아니고, **측정 기준은 각 스파이크 README 에 이미 고정된 것을 그대로 쓴다**(바꾸지 않는다).
 
 ## 원칙
-- **서버에 코드를 받지 않는다.** `run.sh prepare` 가 Dockerfile 을 stdin 으로 `docker build` 에 주고(컨텍스트 없음), 빌드 안에서 `git clone` 으로 저장소를 받아 이미지(`pf-spike`) 안에 둔다 — Bun + docker CLI + git + 저장소 코드 전체. 서버에는 git 도 BuildKit/buildx 도 필요 없고(클래식 빌더, `DOCKER_BUILDKIT=0`) 소스는 서버 파일 시스템에 풀리지 않는다. 결과는 도커 볼륨 `pf-results` 에 모이고 `pack` 이 tar.gz 를 표준 출력으로 내보낸다. 서버에 남는 것은 이미지·볼륨뿐이고 `clean` 이 지운다.
+- **서버에 코드를 받지 않는다, 서버는 원격 저장소에도 접속하지 않는다.** PC 에서 `prepare-push.sh` 가 `git archive HEAD`(푸시 불필요, 커밋된 HEAD 만) 를 ssh 표준 입력으로 흘리면, `run.sh prepare` 가 oven/bun 컨테이너에 도구를 넣고 그 tar 를 `docker cp` 로 `/repo` 에 풀어 `docker commit` 으로 이미지(`pf-spike`)를 만든다. 서버에는 git 도 BuildKit/buildx 도 필요 없고 소스는 서버 파일 시스템에 풀리지 않는다(이미지 레이어 안에만). `.git` 이 없으므로 스파이크가 결과에 남기는 `git rev-parse HEAD`·`git status` 는 이미지 안의 얇은 대역이 답한다 — 커밋은 archive 를 만든 커밋이고, archive 는 HEAD 그대로라 ‘변경 없음’이다(그래서 `prepare-push.sh` 는 추적 파일에 커밋 안 된 변경이 있으면 중단한다). 결과는 도커 볼륨 `pf-results` 에 모이고 `pack` 이 tar.gz 를 표준 출력으로 내보낸다. 서버에 남는 것은 이미지·볼륨뿐이고 `clean` 이 지운다.
 - 서버에는 Docker 만 있으면 된다(Bun 설치 없음). 스파이크가 부르는 `docker run`(Postgres·nginx)은 호스트 소켓(`/var/run/docker.sock`)을 통한다. 그래서 G7 은 호스트 경로 bind mount 를 `docker create → docker cp → docker start` 로 바꿨다(검사 내용·판정 기준 불변).
 - `--network host` 로 돌려 스파이크의 `127.0.0.1:<포트>` 가 호스트 포트와 같다. 실행기는 root 이고 소켓을 쥐므로 **호스트 root 와 같은 권한**이다(G14 의 `docker` 그룹 사용과 같은 수준 — 공유 서버라 시작 전에 확인).
 - 공유 서버다(Jenkins·Gitea·MinIO·MySQL 등). 시작 전 `loadavg(1m) > 3` 이면 중단한다(`FORCE=1` 로 무시). 판정은 스크립트가 낸다 — 부하는 결과 JSON 의 `loadavg` 로 남는다.
@@ -19,12 +19,12 @@ G2·G4·G5·G7·G10·G10b·G11 의 개발 PC 결과(WSL2 loopback, i5-12400)를 
 제외: Elysia 대 Bun.serve 비교(`g2-elysia-compare`, 약 2시간) — ADR-053 이 결정했고 호스트에서 `Bun.serve` 구현이 기준을 못 넘을 때만 다시 본다. G3(Next on Bun)는 사용자가 따로 했다.
 
 ## 사용 — 서버에 파일을 두지 않는 방법 (노트북에서 ssh 로)
-`run.sh`·`preflight.sh` 는 stdin 으로 흘려 보낸다. 아래 `S` 는 `quadrature@14.7.12.4`, 브랜치는 푸시된 것이어야 한다.
+`run.sh`·`preflight.sh` 는 stdin 으로 흘려 보낸다(`prepare` 만 예외 — stdin 을 소스 tar 가 쓰므로 `prepare-push.sh` 가 `run.sh` 를 인자로 넘긴다). 아래 `S` 는 `quadrature@14.7.12.4`. 푸시는 필요 없고 측정할 변경은 커밋돼 있어야 한다.
 ```bash
 # 1) 사전 점검 (읽기 전용) — 출력을 붙여 넣는다
 ssh S 'bash -s' < spikes/host-remeasure/preflight.sh
-# 2) 준비: 이미지 빌드(코드가 이미지로 들어감) + 결과 볼륨
-ssh S 'BRANCH=docs/adr-spec-readme bash -s prepare' < spikes/host-remeasure/run.sh
+# 2) 준비: 이 PC 의 HEAD 소스를 git archive 로 흘려 이미지를 만든다 + 결과 볼륨
+spikes/host-remeasure/prepare-push.sh S
 # 3) 짧은 것부터 차례로, 각각 출력을 확인
 for s in g4 g10 g7 g5 g10b g11; do ssh S "bash -s $s" < spikes/host-remeasure/run.sh; done
 # 4) 긴 것은 백그라운드로 (SSH 가 끊겨도 산다). 진행은 docker logs -f pf-g2-soak

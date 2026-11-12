@@ -4,8 +4,6 @@
 #   단계: prepare | g4 | g5 | g7 | g10 | g10b | g11 | g3-browser | g2-storm | g2-churn | g2-soak | profile | pack | clean
 # 작성: AI 초안 (Authorship: G).
 set -euo pipefail
-REPO="${REPO:-https://github.com/1985jwlee/portpolio_backend.git}"
-BRANCH="${BRANCH:-docs/adr-spec-readme}"
 IMAGE="${IMAGE:-pf-spike}"
 VOL="${VOL:-pf-results}"
 step="${1:?단계를 지정하라}"
@@ -21,21 +19,29 @@ load_check() { local l; l=$(cut -d' ' -f1 /proc/loadavg); echo "loadavg(1m)=$l";
 
 case "$step" in
   prepare)
+    # 소스는 표준 입력의 tar 로 받는다(PC: prepare-push.sh = git archive HEAD | ssh). 서버는 원격 저장소에 접속하지 않는다.
+    [ -t 0 ] && { echo "표준 입력으로 git archive tar 가 필요하다: spikes/host-remeasure/prepare-push.sh 를 쓴다"; exit 2; }
+    : "${COMMIT:?COMMIT(커밋 해시)가 필요하다 - prepare-push.sh 가 넣는다}"
     docker volume create "$VOL" >/dev/null
-    # docker build 를 쓰지 않는다: buildx 가 없는 서버(Docker 29.1.3)에서 DOCKER_BUILDKIT=0 도 무시되고 실패했다(첫·둘째 서버 시도).
-    # 대신 컨테이너를 띄워 도구를 넣고 저장소를 클론한 뒤 docker commit 으로 이미지를 만든다. 호스트에는 git·buildx 가 필요 없다.
+    # docker build 를 쓰지 않는다: buildx 없는 서버(Docker 29.1.3)에서 실패했다. 컨테이너를 띄워 도구를 넣고 소스를 복사한 뒤 docker commit 으로 이미지를 만든다.
     docker rm -f pf-prep pf-dockercli >/dev/null 2>&1 || true
     docker run -d --name pf-prep oven/bun:1.4.4 sleep infinity >/dev/null
     docker create --name pf-dockercli docker:cli >/dev/null
     docker cp pf-dockercli:/usr/local/bin/docker - | docker cp - pf-prep:/usr/local/bin/
     docker rm -f pf-dockercli >/dev/null
-    docker exec pf-prep sh -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates procps util-linux >/dev/null && rm -rf /var/lib/apt/lists/* \
-      && git config --system --add safe.directory '*' \
-      && git clone -q --depth 1 --branch '$BRANCH' '$REPO' /repo && touch /repo/.built"
+    docker exec pf-prep sh -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates procps util-linux >/dev/null && rm -rf /var/lib/apt/lists/* && mkdir /repo"
+    docker cp - pf-prep:/repo   # stdin = git archive tar (.git 없음)
+    # 스파이크가 결과에 남기는 git rev-parse HEAD / git status 용 얇은 git 대역: 커밋은 archive 를 만든 커밋(COMMIT), archive 는 HEAD 그대로라 변경 없음.
+    docker exec pf-prep sh -c "echo '$COMMIT' > /repo/.commit && touch /repo/.built"
+    docker exec -i pf-prep sh -c 'cat > /usr/local/bin/git && chmod +x /usr/local/bin/git' <<'GITSHIM'
+#!/bin/sh
+while [ "$1" = -C ]; do shift 2; done
+case "$1" in rev-parse) cat /repo/.commit ;; status) : ;; *) exit 1 ;; esac
+GITSHIM
     docker commit --change 'WORKDIR /repo' --change 'CMD ["sh"]' pf-prep "$IMAGE" >/dev/null
     docker rm -f pf-prep >/dev/null
     docker run --rm "$IMAGE" git -C /repo rev-parse HEAD
-    echo "준비 완료: 이미지 $IMAGE, 결과 볼륨 $VOL (서버 파일 시스템에 코드 없음)" ;;
+    echo "준비 완료: 이미지 $IMAGE, 결과 볼륨 $VOL (서버 파일 시스템에 코드 없음, 서버는 원격 저장소에 접속하지 않음)" ;;
   g4)   load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g4.ts" ;;
   g10)  load_check; dr g4-g10-db "bun install --frozen-lockfile && bun g10.ts" ;;
   g5)   load_check; dr g5-metrics "bun install --frozen-lockfile && bun verify.ts" ;;
