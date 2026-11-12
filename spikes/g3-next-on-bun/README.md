@@ -2,7 +2,7 @@
 
 [tech-stack §11](../../docs/domains/tech-stack.md) 관문 G3, [design/11 S0-3](../../docs/design/11-implementation-plan.md), nonce CSP·동적 렌더 결정은 [design/10 §2](../../docs/design/10-security.md), `proxy.ts` matcher 는 [design/01 §8.5](../../docs/design/01-repository-structure.md). **제품 코드가 아니다**(스파이크). 증거 규칙은 [ADR-050](../../docs/adr/ADR-050-evidence-rule.md).
 
-> 이전 로컬 결과(tech-stack §11.1 G3: 빌드 약 5.9초·standalone 41MB·Docker 341MB 등)는 재현 스크립트가 없어 ‘참고값(재현 불가)’ 이다. 이 폴더가 재현 스크립트를 대신하고, 호스트(네이티브 Ubuntu 24.04, Xeon 1.9GHz)에서 다시 재는 것이 S0-3 의 남은 항목이다.
+> 이전 로컬 결과(tech-stack §11.1 G3: 빌드 약 5.9초·standalone 41MB·Docker 341MB 등)는 재현 스크립트가 없어 ‘참고값(재현 불가)’ 이다. 이 폴더가 재현 스크립트를 대신하고, 호스트(네이티브 Ubuntu 24.04, Xeon 1.9GHz)에서 다시 재는 것이 S0-3 의 남은 항목이었고, 2026-11-12 에 기준 1~13 을 호스트에서 모두 쟀다(기준 11 은 3회 반복이라 각 실행의 3회로 갈음). 조건은 [ENV.md](ENV.md).
 
 ## 이 시험이 묻는 것
 Next 는 Bun 실행을 공식 보증하지 않는다(Node ≥ 20.9). **“우리가 쓰는 기능 조합이 Bun 에서 정상인가”** 만 본다 — 빌드, standalone 실행, 로케일 협상(`proxy.ts`), 요청별 nonce CSP 와 하이드레이션, `next/image`(sharp), 우아한 종료, Docker 이미지. 실패하면 web 만 Node 22 LTS 로 바꾼다.
@@ -47,6 +47,7 @@ Bun 1.4.4, `next` 16.4.5, `react`·`react-dom` 19.3.1, `next-intl` 4.14.10, `@pl
 - **하네스 결함:** 결과를 쓰는 마지막 줄이 `docker` 없는 PC 에서 `docker --version` 의 빈 stdout 때문에 예외로 죽었다(시험 본체는 끝까지 돌았다). 한 줄 고쳤고 기준과 무관하다.
 - **기준 9 실패(1/3), 서버 쪽 발견:** SIGTERM 은 듣고 종료 코드도 143 이지만, **요청이 처리 중이거나 막 처리된 시점에 SIGTERM 이 오면 종료에 6.7~13.6초가 걸린다**(접속이 없거나 유휴 연결만 남았을 때는 0.1초). 응답은 정상 도착한다. `KEEP_ALIVE_TIMEOUT=1000` 으로도 8.9초라 keep-alive 만으로는 설명되지 않는다. **원인은 모른다**(Next 인지 Bun 의 `node:http` 호환인지) — Node 22 로 같은 조건을 재야 가른다. 원문: [results/notes.md](results/notes.md).
 - **호스트에서 다시 쟀다(2026-11-11):** 기준 1~5·8·9 가 3/3 PASS, 기준 9 는 매번 6.1초(코드 143), 기준 10 도 3/3 PASS. 같은 빌드를 Node 22 로 띄운 값도 같다(6.1~6.2초, `KEEP_ALIVE_TIMEOUT=1000` 이면 둘 다 2.1초) → **Bun 비호환이 아니라 Next 서버가 keep-alive 연결을 기다리는 동작**이다. 위 ‘keep-alive 만으로는 설명되지 않는다’ 는 노트북 값 기준 해석이었고 정정한다([results/notes.md](results/notes.md) §3.1). 환경은 [ENV.md](ENV.md).
+- **호스트에서 기준 6·7·12·13 도 쟀다(2026-11-12):** 6·7 PASS 3/3, 12 PASS 3/3(유휴 keep-alive 0.1초, 143), 13 PASS 3/3(처리 중 요청 6.8초, 200 완결, 143). `spikes/host-remeasure` 의 `g3-browser`·`g3-sigterm` 단계, 원시 결과와 조건은 [ENV.md](ENV.md) ‘호스트 재측정 2026-11-12’.
 - **기준 9 시험 설계 결함:** ‘처리 중 요청’ 을 보낸 직후 곧바로 SIGTERM 을 보내 요청이 연결되기 전에 거부되는 경합이 있다(본 시험 2회차). 결과를 본 뒤 기준을 바꾸지 않으려고 이번에는 고치지 않았다. 다음 판에서 ‘연결 확립 뒤 SIGTERM’ 으로 바꾸고 ‘발견 후 수정’ 으로 표시한다.
 - **환경 의존:** Chromium 공유 라이브러리가 없어 `apt-get download` + `dpkg -x` 로 홈에 풀어 `LD_LIBRARY_PATH` 로 지정했다([ENV.md](ENV.md)). `bunx` 는 수동 설치에 없어 `bun x` 를 썼다.
 
@@ -63,7 +64,7 @@ bun verify.ts --only=5 --runs=1         # 한 기준만 빠르게
 docker run --rm -v "$PWD:/app" -w /app oven/bun:1.4 bun install && \
 docker run --rm -v "$PWD:/app" -w /app --network host oven/bun:1.4 bun verify.ts --skip=6,7,10
 ```
-호스트에서는 브라우저(6·7)와 Docker 중첩(10)을 컨테이너 안에서 못 돌리므로 **개발 PC 에서 6·7·10 을, 호스트에서 1~5·8·9와 관찰값을** 잰다. 어느 기준을 어디서 돌렸는지 `ENV.md` 에 적는다.
+이전에는 호스트에서 브라우저(6·7)를 못 돌려 개발 PC 에서 쟀다. 지금은 `spikes/host-remeasure` 의 컨테이너 실행기(`g3-browser`)로 호스트에서도 6·7 을 잰다(2026-11-12 PASS). Docker 중첩(10)은 호스트에서 앞서 쟀다. 어느 기준을 어디서 돌렸는지는 `ENV.md` 에 적는다.
 
 ## 한계 (결과에 병기한다)
 - 최소 앱이다. 실제 앱의 번들 크기·페이지 수·R3F(3D)·shadcn 컴포넌트는 없다. 이 시험이 통과해도 ‘이 기능 조합에서 문제를 못 찾았다’일 뿐이다.

@@ -1,0 +1,81 @@
+{
+  "at": "2026-11-12T13:00:37.982Z",
+  "commit": "ad4840f35a615a6eb87a67316d8bb4348834ac7e",
+  "bun": "1.4.4",
+  "docker": "Docker version 29.9.3, build 5457199",
+  "runs": 3,
+  "only": "6,7",
+  "skip": "10",
+  "verdict": "PASS(부분)",
+  "criteria": [
+    {
+      "id": 6,
+      "name": "하이드레이션: 버튼 3회 → 3, CSP 위반 0",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "count": "3",
+          "csp": []
+        },
+        {
+          "count": "3",
+          "csp": []
+        },
+        {
+          "count": "3",
+          "csp": []
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "style-src-attr 열면 0건, 빼면 ≥ 1건",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "open": 0,
+          "closed": 1,
+          "sample": "Applying inline style violates the following Content Security Policy directive 'style-src 'self' 'nonce-NmJhZTc2ZmYtOTI5MC00OTg4LWJjZWUtZGQ3NjlkYTc2YTI3''. Eith"
+        },
+        {
+          "open": 0,
+          "closed": 1,
+          "sample": "Applying inline style violates the following Content Security Policy directive 'style-src 'self' 'nonce-ZTkzNThkNGMtNWU4Ni00YzUyLWE3NzEtOGI1YTkzZjBiZjJi''. Eith"
+        },
+        {
+          "open": 0,
+          "closed": 1,
+          "sample": "Applying inline style violates the following Content Security Policy directive 'style-src 'self' 'nonce-ZDJkMTdiZTktZTljZi00ZjdjLWIwNTctZDcyOWJiNzg4NWQ2''. Eith"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Docker",
+      "pass": "SKIP",
+      "perRun": [
+        "SKIP"
+      ],
+      "detail": [
+        "생략"
+      ]
+    }
+  ],
+  "observation": [
+    {
+      "requests": 6395,
+      "meanMs": 46.9,
+      "rssKB": 259468
+    }
+  ]
+}
