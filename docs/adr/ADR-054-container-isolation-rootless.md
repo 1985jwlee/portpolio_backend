@@ -1,5 +1,5 @@
 # ADR-054: 컨테이너 격리는 rootless Docker 를 기본으로 한다 (S0-8)
-- 상태: **Proposed** (2026-11-13) — 사용자 확인 대기
+- 상태: **Accepted** (2026-11-13) — 사용자 수락. 결정 4개 항목과 ‘근거와 한계’ 의 미시험 항목(사설 대역 송신 차단, 재부팅 후 유지, 실제 compose)을 함께 수용했다
 - 날짜: 2026-11-13
 - 근거: design/10 §5 ‘집 PC 침해 피해 범위 한정’(데몬 층) · design/11 S0-8 · ADR-033(공유 호스트) · ADR-050(증거 규칙)
 - 증거: [`spikes/s0-8-rootless/ENV.md`](../../spikes/s0-8-rootless/ENV.md) — 스크립트·결과·환경. 호스트 1회 시험.
@@ -8,7 +8,7 @@
 ## 맥락
 design/10 은 컨테이너 루트가 호스트 루트로 이어지지 않게 하려고 `rootless Docker` 또는 `userns-remap` 중 하나를 S0-8 에서 정하라고 했고 기본값 제안은 rootless 였다. 호스트는 Ubuntu 의 `docker.io` 29.1.3 root 데몬을 쓰고 Jenkins·Gitea·MySQL 등이 같이 돈다.
 
-## 결정 (제안)
+## 결정
 1. **pf 서비스는 rootless Docker(전용 사용자 데몬)에서 돌린다.** 호스트 root 데몬과 분리하고 기존 서비스는 건드리지 않는다. `userns-remap` 은 데몬 설정을 바꿔 공유 서버의 모든 컨테이너에 영향을 주므로 채택하지 않는다.
 2. **compose 기본 강화**(`cap_drop: [ALL]`, `no-new-privileges`, `read_only`)는 서비스별로 아래 예외를 둔다(실측, 한 번).
 

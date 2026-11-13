@@ -53,7 +53,7 @@ flowchart LR
 | S0-6 nginx | **G7** | 개발 PC (Funnel 경유 확인은 호스트) | `nginx -V` 에 `realip`, 클라이언트 주소 헤더 정규화, TLS 방식 결정 | 모듈 포함 이미지 |
 | S0-7 마이그레이션 | **G10** | 개발 PC | `generate --custom` raw SQL 로 부분 인덱스·어드바이저리 락 객체 생성, 빈 DB 에서 재현 | SQL 직접 관리 |
 | S0-7b 모듈별 마이그레이션 | **G10b** (ADR-052 결정 7) | 개발 PC | 모듈 둘이 각자 폴더·이력 표로 적용, 순서를 바꿔도 덤프 동일, 한 모듈 재적용이 다른 모듈에 불변, 한 모듈 폴더만으로 단독 적용, 3회 동일. **기준은 시험 전 README 에 고정·커밋** | **통과(개발 PC, 2026-11-11, `dc4bbe8`)**. 실패했다면 ‘집계 유지’ 로 복귀·결정 2 재결정이었다. 실제 모듈·GRANT 단계와의 결합은 S1-4 에서 확인 |
-| S0-8 컨테이너 격리 결정 | (신규 관문 아님, 10 §5) | 호스트 | rootless Docker 또는 `userns-remap` 중 하나를 S0 에서 정한다(**기본값 제안: rootless**, 안 되면 `userns-remap`). compose 기본 강화(`cap_drop: [ALL]`·`no-new-privileges`·읽기 전용 FS)가 Bun·nginx·Postgres 이미지에서 기동하는지 확인 | 강화 항목별로 예외 기록 후 진행 **호스트 시험함(2026-11-13): rootless 기동·강화 옵션 확인, [ADR-054](../adr/ADR-054-container-isolation-rootless.md) Proposed(사용자 확인 대기)** |
+| S0-8 컨테이너 격리 결정 | (신규 관문 아님, 10 §5) | 호스트 | rootless Docker 또는 `userns-remap` 중 하나를 S0 에서 정한다(**기본값 제안: rootless**, 안 되면 `userns-remap`). compose 기본 강화(`cap_drop: [ALL]`·`no-new-privileges`·읽기 전용 FS)가 Bun·nginx·Postgres 이미지에서 기동하는지 확인 | 강화 항목별로 예외 기록 후 진행 **호스트 시험함(2026-11-13): rootless 기동·강화 옵션 확인, [ADR-054](../adr/ADR-054-container-isolation-rootless.md) Accepted(2026-11-13)** |
 
 - 순서: **S0-0 이 맨 앞**(호스트 값이 이후 측정의 기준), 그다음 **S0-1·S0-2**(설계를 바꿀 수 있는 크기), 나머지는 병렬.
 - 소크(S0-2)는 오래 걸리므로 **먼저 띄워 두고** S1 을 진행한다. 결과는 S4 시작 전에 필요하다.
@@ -72,7 +72,7 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 | G7 Funnel 실경유·IPv6·compose 대역 | 미실행(헤더 흉내까지) | Funnel 개방과 nginx compose 구성이 필요 | S8 배포 구성이 생긴 뒤 Funnel→nginx→원점 경로에서 클라이언트 IP 확보 확인 | ADR-008 원 접속 주소 신뢰 |
 | 수 시간 소크 | 82분으로 갈음(결과 전 결정, G2 README) | 0.5MB/h 이하 누수는 구분 못 함 | S4 이후 운영 중 RSS 관찰, 또는 필요 시 3시간 30분 소크 | ws-gateway 메모리 예산 |
 | G2 Elysia 비교의 호스트 재측정 | 제외(ADR-053 결정) | 약 85분, 호스트 G2 PASS | **호스트에서 `Bun.serve` 구현이 기준을 못 넘을 때만**(S4-2 통합 시험) | 없음 |
-| S0-8 컨테이너 격리 | 시험함, [ADR-054](../adr/ADR-054-container-isolation-rootless.md) **Proposed** | 사용자 확인 대기. 사설 대역 송신 차단·재부팅 후 유지·실제 compose 는 미시험 | ADR-054 수락, 이후 S8 compose 작성 때 실제 서비스로 재확인. AppArmor 프로필(sudo)·Docker 정적 바이너리 체크섬 고정 | 컨테이너 강화 옵션의 서비스별 예외 |
+| S0-8 컨테이너 격리 | 시험함, [ADR-054](../adr/ADR-054-container-isolation-rootless.md) **Accepted**(2026-11-13) | 사설 대역 송신 차단·재부팅 후 유지·실제 compose 는 미시험 | 이후 S8 compose 작성 때 실제 서비스로 재확인. AppArmor 프로필(sudo)·Docker 정적 바이너리 체크섬 고정 | 컨테이너 강화 옵션의 서비스별 예외 |
 | 호스트 무결성 점검 | 미실시(**사용자 직접**) | 2026-11-11 G2 소크 중 컨테이너의 무허가 프로세스(CPU 6코어 점유)가 확인됨. 정체·침입 경로 미확인 | 프로세스·cron·systemd·컨테이너·자격증명 점검. **서버에 배포하기 전(S8)** 필수 | 서버 측정값 전체의 전제, 배포 신뢰 |
 | 호스트 위생(사용자 판단) | 미확인 | 점검 시 `0.0.0.0` 로 열린 3306·13306(MySQL)·3389·445·139 가 보였음. 공유기 포워딩 여부는 서버에서 못 봄 | 공유기 포트포워딩 확인, 침해된 `gitea-compromised` 컨테이너·이미지 정리 여부 결정, 이 PC 의 서버 접속 허용 키 중 불필요한 것 삭제, 다른 PC 의 ssh 로그인 실패(원인 미확인) | 호스트 보안 기준선 |
 
