@@ -10,6 +10,7 @@
 | 날짜 | ID | 요지 | 상태 |
 |---|---|---|---|
 | 2026-11-11 | [ADR-053](ADR-053-ws-gateway-bun-serve.md) | ws-gateway 소켓 계층은 `Bun.serve` 로 구현(BunServeRuntime). Elysia 래퍼는 `getBufferedAmount` 미노출·이벤트마다 새 래퍼라 `ws.raw` 우회에 의존. 사용자 결정 [권장수용] | Accepted |
+| 2026-11-13 | [ADR-054](ADR-054-container-isolation-rootless.md) | 컨테이너 격리는 rootless Docker 를 기본으로(S0-8). Bun 은 `cap_drop ALL` 그대로 기동, nginx·Postgres 는 cap 예외 필요, Ubuntu 24.04 는 AppArmor 프로필(sudo 1회)이 선행. Proposed |
 | 2026-11-11 | [ADR-052](ADR-052-extractable-monolith.md) | 추출 가능한 모놀리스(제안): 모듈 계약 패키지·경계 버전 정책·ActorContext 주입·추출 게이트. 사용자 결정 3건·개별 제안 4묶음 확정, 결정 7 은 G10b 통과 | Accepted |
 | 2026-11-10 | [ADR-051](ADR-051-funnel-g14-measurement-results.md) | Funnel 관문(G14) 실측: WebSocket 통과·유휴 960초+·클라이언트 IP(`X-Forwarded-For` 만 신뢰)·대역폭 합계 상한 ≈2.5MB/s·단일 출발지 동시 40+ 연결 리셋, 첫 방문 전송량 예산(열린 결정) | Proposed (⑤⑥⑦ 미완) |
 | 2026-11-06 | [ADR-050](ADR-050-evidence-rule.md) | 증거 규칙: 스크립트와 원시 결과(호스트 사양·커밋 해시)를 커밋하지 않은 수치는 사실로 쓰지 않는다. 예외는 `참고값(재현 불가)` 강등. 범례 실측/추정/제안/참고값, 스파이크는 `spikes/` 에 보존 | Accepted |
