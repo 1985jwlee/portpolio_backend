@@ -1,0 +1,9 @@
+{
+  "name": "spike-g2-elysia-compare",
+  "private": true,
+  "type": "module",
+  "description": "S0-2: Elysia 라우트 옵션 대 Bun.serve WebSocket 지연·백프레셔 비교. 제품 코드가 아니다.",
+  "dependencies": {
+    "elysia": "1.4.30"
+  }
+}

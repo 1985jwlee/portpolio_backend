@@ -1,0 +1,28 @@
+... 60s hb=0 state=1
+... 120s hb=0 state=1
+... 180s hb=0 state=1
+... 240s hb=0 state=1
+... 300s hb=0 state=1
+... 360s hb=0 state=1
+... 420s hb=0 state=1
+... 480s hb=0 state=1
+... 540s hb=0 state=1
+... 600s hb=0 state=1
+... 660s hb=0 state=1
+... 720s hb=0 state=1
+... 780s hb=0 state=1
+... 840s hb=0 state=1
+{
+  "hb": 0,
+  "capSec": 900,
+  "elapsedSec": 889.2,
+  "survivedToCap": false,
+  "closeInfo": {
+    "code": 1006,
+    "reason": ""
+  },
+  "hbReceived": 0,
+  "note": "끊긴 시각이 유휴 타임아웃의 상한 추정"
+}
+
+저장: /home/user/portpolio_backend/scripts/spike/g14/results/2026-11-10T01-38-31-004Z-idle.json

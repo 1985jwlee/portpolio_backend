@@ -1,0 +1,123 @@
+{
+  "run": "2026-11-10T05-30-48-198Z-soak3h30",
+  "verdict": "PASS",
+  "durationAtTargetMin": 82.1,
+  "samples": 454,
+  "afterWarmupSamples": 398,
+  "rssMb": {
+    "warmEnd": 32.7,
+    "end": 28.1
+  },
+  "cpuCoresMedian": 0.061,
+  "checks": [
+    {
+      "name": "RSS 기울기(워밍업 이후)",
+      "value": -2.612,
+      "limit": "≤ 2 MB/h",
+      "pass": true
+    },
+    {
+      "name": "종료 RSS / 워밍업 종료 RSS",
+      "value": 0.859,
+      "limit": "≤ 1.2",
+      "pass": true
+    },
+    {
+      "name": "강제 GC 뒤 heapUsed 기울기",
+      "value": 0.012,
+      "limit": "≤ 0.5 MB/h",
+      "pass": true
+    },
+    {
+      "name": "순번 gap·중복·역전(정상 연결)",
+      "value": {
+        "gaps": 0,
+        "dups": 0,
+        "reorders": 0
+      },
+      "limit": "전부 0",
+      "pass": true
+    },
+    {
+      "name": "정상 연결의 예기치 않은 종료",
+      "value": 0,
+      "limit": "0",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 최댓값",
+      "value": 32,
+      "limit": "≤ 100 ms",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 중앙값",
+      "value": 11,
+      "limit": "≤ 50 ms",
+      "pass": true
+    },
+    {
+      "name": "이벤트 루프 지연 p99 중앙값",
+      "value": 0.68,
+      "limit": "≤ 20 ms",
+      "pass": true
+    },
+    {
+      "name": "느린 소비자 격리(서버가 4408 로 끊은 수)",
+      "value": 10,
+      "limit": "= 10 (정상 연결은 0)",
+      "pass": true
+    },
+    {
+      "name": "주입 후/전 p99 비율",
+      "value": 1.21,
+      "limit": "≤ 1.5",
+      "pass": true
+    }
+  ],
+  "slowEval": {
+    "slowKilledAfterSec": 1545,
+    "injectedAt": "2026-11-10T06:00:49.074Z",
+    "n": 10,
+    "p99BeforeMedian": 14,
+    "p99AfterMedian": 17,
+    "ratio": 1.21,
+    "serverClosed4408": 10
+  },
+  "load": {
+    "totalMsgs": 81561183,
+    "serverStats": {
+      "upSec": 4940,
+      "rss": 29188096,
+      "heapUsed": 726665,
+      "heapTotal": 1317888,
+      "external": 130425,
+      "arrayBuffers": 0,
+      "conns": {
+        "public": 900,
+        "private": 100
+      },
+      "queueMax": 0,
+      "opened": 1010,
+      "peak": 1010,
+      "sent": 81974607,
+      "sendDropped": 0,
+      "closed4408": 10,
+      "inbound": 0,
+      "published": 90569,
+      "closes": {
+        "4408": 10
+      }
+    }
+  },
+  "criteria": {
+    "warmupMin": 10,
+    "rssSlopeMbPerHourMax": 2,
+    "rssEndOverWarmMax": 1.2,
+    "heapSlopeMbPerHourMax": 0.5,
+    "latWindowP99MaxMs": 100,
+    "latMedianP99MaxMs": 50,
+    "lagP99MedianMaxMs": 20,
+    "slowP99RatioMax": 1.5
+  }
+}

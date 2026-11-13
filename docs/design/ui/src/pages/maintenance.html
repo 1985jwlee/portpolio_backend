@@ -1,0 +1,28 @@
+<section class="section">
+  <div class="wrap stack" style="--stack:1.5rem">
+    <div class="row" style="justify-content:space-between">
+      <h1>점검 화면 두 가지</h1>
+      <div class="seg" role="group" aria-label="화면 종류"><button type="button" id="t-lock" aria-pressed="true">쓰기 잠금</button><button type="button" id="t-fb" aria-pressed="false">서버 점검(정적 폴백)</button></div>
+    </div>
+
+    <div id="v-lock" class="stack" style="--stack:1.25rem;max-width:46rem">
+      <div class="conn-banner" role="status" style="border-color:var(--color-warn);background:var(--color-warn-subtle)"><svg class="node node-warn" aria-hidden="true"><use href="#n-warn"/></svg><div><strong>지금은 글쓰기를 잠시 멈췄습니다.</strong><div class="small" style="margin-top:.25rem">이유: 스팸이 늘어 확인하고 있어요. <span class="subtle">(관리자가 입력한 이유 예시)</span></div><div class="small muted" style="margin-top:.25rem">글 읽기는 계속 할 수 있습니다. 잠시 뒤에 다시 시도해 주세요.</div></div></div>
+      <form class="card stack" style="--stack:1rem" aria-labelledby="c-h" onsubmit="return false">
+        <h2 id="c-h" style="font-size:var(--text-base)">글 남기기</h2>
+        <div class="field"><label for="n">이름</label><input class="input" id="n" disabled placeholder="손님-a3f9"></div>
+        <div class="field"><label for="b">내용</label><textarea class="textarea" id="b" disabled aria-describedby="lk"></textarea><span class="help" id="lk">쓰기 잠금 중에는 입력할 수 없어요.</span></div>
+        <div class="row" style="justify-content:flex-end"><button class="btn btn-primary" type="button" aria-disabled="true">남기기</button></div>
+      </form>
+      <article class="card entry"><div class="entry-meta"><span class="entry-name">손님-a3f9</span><time class="xs subtle">3분 전</time></div><p class="entry-body">구조 설명이 읽기 편했어요.</p></article>
+    </div>
+
+    <div id="v-fb" class="stack" style="--stack:1.25rem" hidden>
+      <div class="conn-banner" role="status"><svg class="node node-pending" aria-hidden="true"><use href="#n-pending"/></svg><div><strong>서버를 점검하고 있습니다.</strong><div class="small muted" style="margin-top:.25rem">소개와 아키텍처 페이지는 그대로 볼 수 있어요. 데모 화면은 점검이 끝나면 다시 열립니다.</div></div></div>
+      <div class="grid cols-3">
+        <a class="card" href="about.html"><h3>자기소개</h3><p class="small muted">경력과 연락처를 봅니다.</p></a>
+        <a class="card" href="architecture.html"><h3>아키텍처</h3><p class="small muted">구성도와 설계 결정을 읽습니다.</p></a>
+        <div class="card disabled-card" aria-disabled="true"><h3>방명록 · 흐름 · 지표</h3><p class="small muted"><span class="badge">점검 중</span></p></div>
+      </div>
+    </div>
+  </div>
+</section>

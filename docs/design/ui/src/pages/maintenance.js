@@ -1,0 +1,1 @@
+(function(){var a=document.getElementById('t-lock'),b=document.getElementById('t-fb');function show(lock){a.setAttribute('aria-pressed',String(lock));b.setAttribute('aria-pressed',String(!lock));document.getElementById('v-lock').hidden=!lock;document.getElementById('v-fb').hidden=lock;}a.onclick=function(){show(true)};b.onclick=function(){show(false)};})();

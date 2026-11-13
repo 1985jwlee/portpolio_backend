@@ -1,0 +1,65 @@
+<section class="section">
+  <div class="wrap stack" style="--stack:2.5rem">
+    <div class="stack" style="--stack:.5rem">
+      <h1>이벤트 흐름</h1>
+      <p class="lede">글 한 건이 저장되고, 전달되고, 처리되는 단계를 실시간으로 봅니다. 아래 보내기는 방명록에 실제 공개 글을 남깁니다.</p>
+    </div>
+
+    <section class="card stack" style="--stack:1.25rem" aria-labelledby="mine-h">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="mine-h" style="font-size:var(--text-lg)">내 동작</h2>
+        <form class="row" id="send-form" aria-label="글 보내기">
+          <label class="sr-only" for="msg">보낼 문구</label>
+          <select class="select" id="msg" style="width:auto;min-height:2.5rem"><option>구조가 궁금해서 들렀어요.</option><option>흐름 화면 시험 글입니다.</option><option>안녕하세요!</option></select>
+          <button class="btn btn-primary" type="submit" id="send">보내기</button>
+        </form>
+      </div>
+
+      <div id="track-wrap">
+        <div class="trace-head"><span class="mono small" id="trace-id">trace · 대기 중</span><span class="small muted" id="trace-total"></span></div>
+        <ol class="rail" id="rail">
+          <li data-step="written"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">written</span><span class="step-ko">글 저장</span><span class="step-state">대기</span><span class="step-time">–</span></li>
+          <li data-step="outboxed"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">outboxed</span><span class="step-ko">이벤트 기록</span><span class="step-state">대기</span><span class="step-time">–</span></li>
+          <li data-step="dispatched"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">dispatched</span><span class="step-ko">전달</span><span class="step-state">대기</span><span class="step-time">–</span></li>
+          <li data-step="received"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">received</span><span class="step-ko">수신함 저장</span><span class="step-state">대기</span><span class="step-time">–</span></li>
+          <li data-step="processed"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">processed</span><span class="step-ko">처리 완료</span><span class="step-state">대기</span><span class="step-time">–</span></li>
+        </ol>
+        <p class="sr-only" id="track-summary" role="status" aria-live="polite"></p>
+      </div>
+
+      <ul class="legend" aria-label="상태 모양 안내">
+        <li><svg class="node node-pending" aria-hidden="true"><use href="#n-pending"/></svg>대기</li>
+        <li><svg class="node node-active" aria-hidden="true"><use href="#n-active"/></svg>진행 중</li>
+        <li><svg class="node node-done" aria-hidden="true"><use href="#n-done"/></svg>완료</li>
+        <li><svg class="node node-warn" aria-hidden="true"><use href="#n-warn"/></svg>재시도</li>
+        <li><svg class="node node-error" aria-hidden="true"><use href="#n-error"/></svg>실패</li>
+        <li><svg class="node node-dead" aria-hidden="true"><use href="#n-dead"/></svg>격리됨 (dead)</li>
+        <li><svg class="node node-warn" aria-hidden="true"><use href="#n-delay"/></svg>지연</li>
+      </ul>
+
+      <div id="recent" hidden>
+        <h3 style="font-size:var(--text-sm);margin-bottom:.5rem" class="muted">최근 흐름</h3>
+        <ul class="recent-list" id="recent-list"></ul>
+      </div>
+    </section>
+
+    <section class="card stack" style="--stack:1.25rem" aria-labelledby="all-h">
+      <div class="row" style="justify-content:space-between">
+        <div class="stack" style="--stack:.25rem"><h2 id="all-h" style="font-size:var(--text-lg)">전체 방문자</h2><p class="small muted">익명 요약 · 개수만 표시합니다</p></div>
+        <div class="row">
+          <div class="seg" role="group" aria-label="집계 창"><button type="button" data-win="5m" aria-pressed="true">5분</button><button type="button" data-win="1h" aria-pressed="false">1시간</button></div>
+          <button class="btn btn-secondary" type="button" id="table-toggle" aria-pressed="false">표로 보기</button>
+        </div>
+      </div>
+      <div id="bars" class="bars" role="list" aria-label="단계별 개수"></div>
+      <div id="tbl" class="table-wrap" hidden><table><caption class="sr-only">단계별 개수</caption><thead><tr><th scope="col">단계</th><th scope="col">설명</th><th scope="col" style="text-align:right">개수</th></tr></thead><tbody></tbody></table></div>
+      <p class="mock-note" style="background:transparent">다른 방문자의 글 내용이나 식별자는 이 화면에 나오지 않습니다. 서버가 개수만 집계해서 보냅니다.</p>
+    </section>
+  </div>
+</section>
+
+<div class="mock-ctl" role="group" aria-label="목업 전용 컨트롤">
+  <strong>목업 전용</strong>
+  <label>시나리오 <select id="scn"><option value="ok">정상</option><option value="retry">일시 오류 후 복구</option><option value="dead">끝내 격리(dead)</option><option value="delay">응답 지연</option></select></label>
+  <span class="xs subtle">실제 화면에는 시나리오 선택이 없습니다. 장애는 사용자가 만들지 않아요.</span>
+</div>

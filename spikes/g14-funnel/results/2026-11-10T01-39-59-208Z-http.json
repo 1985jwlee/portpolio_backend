@@ -1,0 +1,61 @@
+{
+  "cmd": "http",
+  "base": "https://qd.tail91f132.ts.net",
+  "startedAt": "2026-11-10T01:39:59.208Z",
+  "finishedAt": "2026-11-10T01:40:03.075Z",
+  "options": {
+    "conc": "10",
+    "total": "300",
+    "runs": "1"
+  },
+  "client": {
+    "bun": "1.4.4",
+    "platform": "linux",
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "cpus": 6,
+    "loadavg": [
+      4.44,
+      2.48,
+      1.37
+    ]
+  },
+  "server": {
+    "bun": "1.3.11",
+    "platform": "linux",
+    "release": "6.8.0-139-generic",
+    "cpuModel": "Intel(R) Xeon(R) Bronze 3204 CPU @ 1.90GHz",
+    "cpus": 6,
+    "loadavg": [
+      0.37,
+      0.2,
+      0.23
+    ],
+    "totalMem": 67043045376,
+    "freeMem": 41544073216,
+    "uptimeSec": 5293901
+  },
+  "commit": "71802e26e57eb748fdd53d217ca05f81d79d6ea9",
+  "dirty": false,
+  "result": {
+    "path": "/echo",
+    "conc": 10,
+    "total": 300,
+    "runs": [
+      {
+        "run": 1,
+        "sec": 3.77,
+        "rps": 79.5,
+        "status": {
+          "200": 300
+        },
+        "latencyMs": {
+          "n": 300,
+          "p50": 72.06,
+          "p95": 194.93,
+          "p99": 1349.14,
+          "max": 1355.19
+        }
+      }
+    ]
+  }
+}

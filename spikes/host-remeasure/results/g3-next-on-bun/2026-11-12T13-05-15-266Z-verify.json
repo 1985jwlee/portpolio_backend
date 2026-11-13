@@ -1,0 +1,108 @@
+{
+  "at": "2026-11-12T13:05:15.266Z",
+  "commit": "ea0d06d6287695548dc0a839c23e3826f8d83e2c",
+  "bun": "1.4.4",
+  "docker": "Docker version 29.9.3, build 5457199",
+  "runs": 3,
+  "only": "12,13",
+  "skip": "10",
+  "verdict": "PASS(부분)",
+  "criteria": [
+    {
+      "id": 12,
+      "name": "9b-1 keep-alive 유휴 연결 + SIGTERM: 10초 안·143/0",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "responseComplete": true,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 0.1
+        },
+        {
+          "responseComplete": true,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 0.1
+        },
+        {
+          "responseComplete": true,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 0.1
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "9b-2 처리 중 요청 + SIGTERM: 200 완결·10초 안·143/0",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "status": "200",
+          "responseComplete": true,
+          "writeErr": null,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.8
+        },
+        {
+          "status": "200",
+          "responseComplete": true,
+          "writeErr": null,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.8
+        },
+        {
+          "status": "200",
+          "responseComplete": true,
+          "writeErr": null,
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.8
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Docker",
+      "pass": "SKIP",
+      "perRun": [
+        "SKIP"
+      ],
+      "detail": [
+        "생략"
+      ]
+    }
+  ],
+  "observation": [
+    {
+      "requests": 6434,
+      "meanMs": 46.6,
+      "rssKB": 253124
+    }
+  ]
+}

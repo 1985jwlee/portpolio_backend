@@ -1,0 +1,231 @@
+{
+  "at": "2026-11-10T15:08:13.245Z",
+  "commit": "3e4a823+작업트리(verify.ts,diag-sigterm.ts)",
+  "bun": "1.4.4",
+  "docker": "없음",
+  "runs": 3,
+  "only": null,
+  "skip": "6,7,10",
+  "verdict": "PASS",
+  "criteria": [
+    {
+      "id": 1,
+      "name": "bun --bun next build + standalone 산출",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "code": 0,
+          "files": true,
+          "buildErrs": 0,
+          "buildSec": 13.3
+        },
+        {
+          "code": 0,
+          "files": true,
+          "buildErrs": 0,
+          "buildSec": 12.3
+        },
+        {
+          "code": 0,
+          "files": true,
+          "buildErrs": 0,
+          "buildSec": 12.3
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "/ko /en 서버 렌더 + stderr 예외 0",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "stderr": ""
+        },
+        {
+          "stderr": ""
+        },
+        {
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "/ → /ko, Accept-Language en → /en",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "s1": 307,
+          "l1": "/ko",
+          "s2": 307,
+          "l2": "/en"
+        },
+        {
+          "s1": 307,
+          "l1": "/ko",
+          "s2": 307,
+          "l2": "/en"
+        },
+        {
+          "s1": 307,
+          "l1": "/ko",
+          "s2": 307,
+          "l2": "/en"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "/healthz /api/time 리다이렉트 없이 200",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "h": 200,
+          "t": 200
+        },
+        {
+          "h": 200,
+          "t": 200
+        },
+        {
+          "h": 200,
+          "t": 200
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "요청별 nonce 10종 + script 누락 0 + 동적 렌더",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "nonces": 10,
+          "missing": 0,
+          "cacheHit": 0,
+          "sMax": 0
+        },
+        {
+          "nonces": 10,
+          "missing": 0,
+          "cacheHit": 0,
+          "sMax": 0
+        },
+        {
+          "nonces": 10,
+          "missing": 0,
+          "cacheHit": 0,
+          "sMax": 0
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "next/image 최적화(sharp)",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "status": 200,
+          "ct": "image/webp",
+          "buf": 244,
+          "orig": 253707
+        },
+        {
+          "status": 200,
+          "ct": "image/webp",
+          "buf": 244,
+          "orig": 253707
+        },
+        {
+          "status": 200,
+          "ct": "image/webp",
+          "buf": 244,
+          "orig": 253707
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "SIGTERM 10초 안 종료, 코드 143 또는 0, 처리 중 응답 완료",
+      "pass": true,
+      "perRun": [
+        true,
+        true,
+        true
+      ],
+      "detail": [
+        {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.1,
+          "inflightOk": true
+        },
+        {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.1,
+          "inflightOk": true
+        },
+        {
+          "exit": {
+            "code": 143,
+            "signal": null
+          },
+          "sec": 6.1,
+          "inflightOk": true
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Docker",
+      "pass": "SKIP",
+      "perRun": [
+        "SKIP"
+      ],
+      "detail": [
+        "생략"
+      ]
+    }
+  ],
+  "observation": [
+    {
+      "requests": 6325,
+      "meanMs": 47.5,
+      "rssKB": 230976
+    }
+  ]
+}

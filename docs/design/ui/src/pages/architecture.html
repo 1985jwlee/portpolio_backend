@@ -1,0 +1,66 @@
+<section class="section">
+  <div class="wrap stack" style="--stack:3rem">
+    <div class="stack" style="--stack:.5rem">
+      <h1>아키텍처</h1>
+      <p class="lede">하나의 코드베이스를 세 개의 프로세스로 나눠 띄우고, 글 한 건이 읽기 화면에 돌아오기까지 다섯 걸음을 거칩니다.</p>
+    </div>
+
+    <figure class="stack" style="--stack:1rem" aria-labelledby="arch-cap">
+      <div class="diagram-wrap card" role="img" aria-labelledby="arch-cap arch-steps">
+        <svg class="arch" viewBox="0 0 960 440" aria-hidden="true" focusable="false">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0l10 5-10 5z" fill="currentColor"/></marker></defs>
+          <g class="lines" fill="none" stroke-width="1.6" marker-end="url(#ah)">
+            <path class="ln" d="M130 200H170"/>
+            <path class="ln" d="M280 190L330 60"/>
+            <path class="ln flow" d="M280 200H330"/>
+            <path class="ln" d="M280 215L330 320"/>
+            <path class="ln flow" d="M450 170L780 135"/>
+            <path class="ln flow" d="M600 225L800 165"/>
+            <path class="ln flow" d="M690 255L780 268"/>
+            <path class="ln dash" d="M560 262L455 318"/>
+            <path class="ln flow" d="M780 285L455 330"/>
+            <path class="ln" d="M335 312L245 232"/>
+          </g>
+          <g class="nodes">
+            <g><rect x="20" y="170" width="110" height="60" rx="10"/><text x="75" y="205" text-anchor="middle">브라우저</text></g>
+            <g><rect x="170" y="170" width="110" height="60" rx="10"/><text x="225" y="196" text-anchor="middle" class="mono">nginx</text><text x="225" y="214" text-anchor="middle" class="sub">진입 · 속도 제한</text></g>
+            <g><rect x="330" y="30" width="120" height="60" rx="10"/><text x="390" y="56" text-anchor="middle" class="mono">web</text><text x="390" y="74" text-anchor="middle" class="sub">Next.js</text></g>
+            <g class="hl"><rect x="330" y="150" width="120" height="70" rx="10"/><text x="390" y="180" text-anchor="middle" class="mono">api</text><text x="390" y="198" text-anchor="middle" class="sub">명령 · 조회</text></g>
+            <g class="hl"><rect x="330" y="300" width="120" height="70" rx="10"/><text x="390" y="330" text-anchor="middle" class="mono">ws-gateway</text><text x="390" y="348" text-anchor="middle" class="sub">실시간 전달</text></g>
+            <g class="hl"><rect x="560" y="225" width="130" height="70" rx="10"/><text x="625" y="255" text-anchor="middle" class="mono">worker</text><text x="625" y="273" text-anchor="middle" class="sub">전달 · 프로젝션</text></g>
+            <g><rect x="780" y="100" width="160" height="70" rx="10"/><text x="860" y="130" text-anchor="middle" class="mono">postgres</text><text x="860" y="148" text-anchor="middle" class="sub">쓰기 · outbox</text></g>
+            <g><rect x="780" y="245" width="160" height="70" rx="10"/><text x="860" y="275" text-anchor="middle" class="mono">postgres</text><text x="860" y="293" text-anchor="middle" class="sub">읽기 모델</text></g>
+            <g class="dim"><rect x="560" y="370" width="380" height="50" rx="10" stroke-dasharray="5 4"/><text x="750" y="400" text-anchor="middle" class="sub">prometheus · grafana — 모든 앱의 /metrics 수집</text></g>
+          </g>
+          <g class="steps">
+            <g><circle cx="560" cy="150" r="13"/><text x="560" y="155" text-anchor="middle">1</text></g>
+            <g><circle cx="700" cy="125" r="13"/><text x="700" y="130" text-anchor="middle">2</text></g>
+            <g><circle cx="740" cy="212" r="13"/><text x="740" y="217" text-anchor="middle">3</text></g>
+            <g><circle cx="735" cy="288" r="13"/><text x="735" y="293" text-anchor="middle">4</text></g>
+            <g><circle cx="560" cy="318" r="13"/><text x="560" y="323" text-anchor="middle">5</text></g>
+          </g>
+        </svg>
+      </div>
+      <figcaption id="arch-cap" class="small muted">강조된 선과 번호가 글 한 건의 경로입니다. 점선은 깨우기 신호입니다.</figcaption>
+      <ol class="steps-list" id="arch-steps">
+        <li><span class="stepno" aria-hidden="true">1</span><div><strong>api</strong>가 글 작성 요청을 받습니다.</div></li>
+        <li><span class="stepno" aria-hidden="true">2</span><div>글 저장과 <strong>outbox</strong> 기록이 <strong>한 트랜잭션</strong>으로 끝납니다. 둘 중 하나만 남는 일은 없습니다.</div></li>
+        <li><span class="stepno" aria-hidden="true">3</span><div><strong>worker</strong>가 outbox를 선점해 구독 모듈의 <strong>inbox</strong>에 넣습니다. 같은 메시지가 두 번 와도 한 번만 처리합니다.</div></li>
+        <li><span class="stepno" aria-hidden="true">4</span><div>프로젝터가 <strong>읽기 모델</strong>을 갱신하고 변경 이력을 남깁니다.</div></li>
+        <li><span class="stepno" aria-hidden="true">5</span><div><strong>ws-gateway</strong>가 변경 이력을 읽어 열려 있는 브라우저에 보냅니다. 연결이 끊겼다 돌아오면 놓친 변경부터 이어받습니다.</div></li>
+      </ol>
+    </figure>
+
+    <section class="stack" style="--stack:1.25rem" aria-labelledby="adr-h">
+      <div class="row" style="justify-content:space-between"><h2 id="adr-h">설계 결정</h2><a class="small" href="#">결정 기록 전체 보기</a></div>
+      <div class="grid cols-3">
+        <a class="card" href="#"><span class="mono tag">ADR-001</span><h3>모듈러 모놀리스</h3><p class="small muted">하나의 코드베이스에서 api, ws-gateway, worker를 따로 띄웁니다. 경계는 모듈 단위로 지킵니다.</p></a>
+        <a class="card" href="#"><span class="mono tag">ADR-005 · 020</span><h3>outbox와 inbox</h3><p class="small muted">저장과 발행을 한 트랜잭션에, 수신과 처리를 멱등하게 나눕니다.</p></a>
+        <a class="card" href="#"><span class="mono tag">ADR-021</span><h3>동시성 제어</h3><p class="small muted">처리 전에 상태를 먼저 선점하고, 임대 시간과 낙관적 버전으로 경합을 가립니다.</p></a>
+        <a class="card" href="#"><span class="mono tag">ADR-025</span><h3>쿼리 계층</h3><p class="small muted">기본은 타입 안전한 빌더, 쓰기는 항상 트랜잭션 안에서 실행합니다.</p></a>
+        <a class="card" href="#"><span class="mono tag">ADR-026</span><h3>데이터 보호</h3><p class="small muted">데이터를 등급으로 나누고, 신고 메모처럼 위험한 필드만 암호화합니다.</p></a>
+        <a class="card" href="#"><span class="mono tag">ADR-027</span><h3>서버 기록</h3><p class="small muted">IP와 본문 없이 남기는 로그, 행위와 같은 트랜잭션에 쓰는 감사 기록입니다.</p></a>
+      </div>
+    </section>
+  </div>
+</section>

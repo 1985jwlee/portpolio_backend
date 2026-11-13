@@ -1,0 +1,36 @@
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy stack" style="--stack:1.25rem">
+      <h1 class="display">이 사이트가<br>곧 백엔드 작품입니다.</h1>
+      <p class="lede">방명록에 글을 남기면, 그 글이 outbox와 inbox를 거쳐 실시간으로 화면에 돌아오는 과정을 단계별로 볼 수 있어요.</p>
+      <div class="row">
+        <a class="btn btn-primary" href="guestbook.html">방명록에 글 남기기</a>
+        <a class="btn btn-secondary" href="flow.html">흐름 보기</a>
+      </div>
+    </div>
+    <figure class="hero-rail card" aria-labelledby="hero-cap">
+      <div class="hero-req"><span class="mono">POST /api/entries</span><span class="badge badge-success mono">201</span><span class="mono subtle" style="margin-left:auto">+61ms</span></div>
+      <figcaption id="hero-cap" class="small muted">글 한 건이 지나는 다섯 단계 <span class="subtle">(예시 값, 실제 측정이 아닙니다)</span></figcaption>
+      <ol class="rail" id="hero-rail" aria-hidden="true">
+        <li data-line="" data-state="pending"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">written</span><span class="step-ko">글 저장</span><span class="step-state"></span><span class="step-time">+0ms</span></li>
+        <li data-line="" data-state="pending"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">outboxed</span><span class="step-ko">이벤트 기록</span><span class="step-state"></span><span class="step-time">+3ms</span></li>
+        <li data-line="" data-state="pending"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">dispatched</span><span class="step-ko">전달</span><span class="step-state"></span><span class="step-time">+18ms</span></li>
+        <li data-line="" data-state="pending"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">received</span><span class="step-ko">수신함 저장</span><span class="step-state"></span><span class="step-time">+42ms</span></li>
+        <li data-line="" data-state="pending"><svg class="node node-pending"><use href="#n-pending"/></svg><span class="step-name">processed</span><span class="step-ko">처리 완료</span><span class="step-state"></span><span class="step-time">+61ms</span></li>
+      </ol>
+      <p class="sr-only">예시 흐름: written에서 processed까지 다섯 단계가 순서대로 완료됩니다.</p>
+    </figure>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2 class="sr-only">이 사이트에서 볼 수 있는 것</h2>
+    <div class="grid cols-4">
+      <a class="card" href="flow.html"><span class="mono tag">outbox → inbox</span><h3>이벤트 흐름</h3><p class="small muted">내가 보낸 글이 어느 단계에 있는지, 실패하면 어떻게 다시 시도하는지 봅니다.</p></a>
+      <a class="card" href="guestbook.html"><span class="mono tag">WebSocket</span><h3>실시간 방명록</h3><p class="small muted">다른 방문자의 글과 반응이 새로고침 없이 나타나고, 연결이 끊겨도 놓친 변경을 이어받습니다.</p></a>
+      <a class="card" href="ops.html"><span class="mono tag">Prometheus · Grafana</span><h3>운영 지표</h3><p class="small muted">이 사이트의 요청 수, 지연, 적체를 공개 대시보드로 확인합니다.</p></a>
+      <a class="card" href="architecture.html"><span class="mono tag">ADR</span><h3>아키텍처</h3><p class="small muted">왜 이렇게 만들었는지, 설계 결정 기록과 구성도를 읽습니다.</p></a>
+    </div>
+  </div>
+</section>

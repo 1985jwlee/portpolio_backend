@@ -1,1 +1,116 @@
 # portpolio_backend
+
+**"이런 시스템을 혼자 설계·구현·배포할 수 있다"를, 직접 눌러볼 수 있는 라이브 사이트와 기록된 결정으로 증명하는 포트폴리오.**
+
+> 현재 상태: **설계 단계.** 구현 코드는 아직 없고, 결정은 [`docs/adr/`](docs/adr/README.md), 첫 마일스톤의 요구는 [`specs/portfolio-site.spec.md`](specs/portfolio-site.spec.md) 에 있다.
+> 면책: 이 프로젝트의 **결제·정산·포인트는 모의(시뮬레이션) / 테스트넷**이며 실제 금전 거래는 없다.
+
+## 목적
+
+- 백엔드 중심 풀스택 엔지니어로서 **실시간 통신, 이벤트 기반 정합성, 인프라·관측**까지 혼자 끝까지 만들 수 있음을 보인다.
+- 대상 독자는 **다양한 스타트업의 채용 담당자·방문자**다. 이력서 서사는 "게임 9년 + 실시간/결제/인프라까지 혼자 설계·구현·배포"이다.
+- **사이트 자체가 백엔드 작품**이다. 소개 문서가 아니라 방문자가 직접 써보는 라이브 데모가 증거가 된다.
+
+## 목표
+
+1. **직접 눌러볼 수 있는 라이브 URL**을 **0원(카드 불필요)** 으로 상시 공개한다. → [ADR-003](docs/adr/ADR-003-free-hosting.md)
+2. 결정을 말이 아니라 **기록**으로 남긴다. 선택 근거, 기각한 대안, "실서비스라면 이렇게 줄인다"까지 ADR 에 쓴다.
+3. 수치는 **측정 후에만** 쓴다. 근거 없는 TPS·지연 숫자를 README 에 적지 않는다. → [ADR-013](docs/adr/ADR-013-milestone-scope-and-numbers.md)
+4. 각 단계는 **단독으로 포트폴리오에 쓸 수 있는 완료 기준(DoD)** 을 가진다. 중간에 멈춰도 결과물이 남는다.
+
+## 증명하려는 역량
+
+| 역량 | 보여주는 방식 | 근거 |
+|---|---|---|
+| 이벤트 기반 정합성 | outbox + inbox, 멱등 소비, 재시도·dead-letter 를 실시간으로 시각화 | [ADR-005](docs/adr/ADR-005-outbox-idempotent-consumer.md), [ADR-020](docs/adr/ADR-020-inbox.md) |
+| 아키텍처 | CQRS, domain · service · usecase 계층, 모듈러 모놀리스 | [ADR-018](docs/adr/ADR-018-cqrs.md), [ADR-019](docs/adr/ADR-019-layered-architecture.md) |
+| 동시성 제어 | 처리 전 상태 선점(CAS) + 임대 + 낙관적 버전 | [ADR-021](docs/adr/ADR-021-concurrency-control.md) |
+| 실시간 통신 | WebSocket, 재접속·세션 복구, 서버 권위 상태 | [ADR-004](docs/adr/ADR-004-tech-stack.md), [ADR-014](docs/adr/ADR-014-deployment-and-zero-downtime.md) |
+| 관측성 | Prometheus + Grafana 를 공개 임베드 | [ADR-007](docs/adr/ADR-007-observability.md) |
+| 인증·악용 방어 | 익명 세션 + GitHub 로그인, 속도 제한, 사후 신고·숨김 | [ADR-008](docs/adr/ADR-008-visitor-identity-and-abuse.md) |
+| 인프라 판단 | 무료 호스팅 조사(도메인 미구입, 집 PC + Tailscale Funnel), Compose 라이브 + K8s(k3d) 검증 | [ADR-003](docs/adr/ADR-003-free-hosting.md), [ADR-002](docs/adr/ADR-002-runtime-compose-live-k3d-verified.md) |
+
+## 기술 스택
+
+Bun + ElysiaJS (TypeScript) · PostgreSQL 18 + Drizzle · Next.js (App Router) + three.js (React Three Fiber) · WebSocket · nginx · Prometheus + Grafana · Docker Compose (라이브) / k3d + Gateway API (검증). 버전·도구 전체는 [tech-stack.md](docs/domains/tech-stack.md), 이유는 [ADR-022](docs/adr/ADR-022-tech-stack-definition.md).
+
+## 로드맵
+
+각 Phase 는 독립 DoD 를 가진다. **M1 + Phase 3 + Phase 4 완료 시점부터 이력서 제출 가능**, 이후는 순서대로 병행·중단 가능.
+
+> **Phase 번호는 식별자이고 구현 순서가 아니다.** 구현 순서는 아래 '순서' 열이다 — 타임딜(Phase 3)이 신호 대비 비용이 가장 좋고, 룰 엔진·3D 클라이언트·KataGo 실행 가능성의 위험이 큰 **바둑(Phase 1~2)은 뒤로** 둔다([P0 D24](docs/design/phases/00-platform-evolution.md)). 모든 영역의 설계는 동결하지 않고 끝까지 완성하며, **각 Phase 착수 전에 '설계 재검토' 단계**(앞 Phase 구현에서 배운 것 반영, 독립 검토 포함)를 거친다.
+
+| 순서 | 단계 | 내용 | DoD | 결정 |
+|---|---|---|---|---|
+| 0 | Phase 0 | 모노레포, 모듈 경계, ADR 템플릿, CI, 로컬 k3d + Gateway API 최소 배포 | `git push` → CI 통과 → 로컬 K8s 에 hello 서비스 배포 | ADR-001·002 |
+| 1 | **M1** (Phase 0 직후) | 사이트 셸 + 방명록·이모지 + 이벤트 시각화 + WebSocket + 지표 대시보드 + 정적 폴백 | 명세의 인수 기준 AC-001~039 통과(공개는 A층 완성 시 먼저, B·C층은 이어서 — 2026-11-06 개정, [ADR-013](docs/adr/ADR-013-milestone-scope-and-numbers.md)), 집 PC 단일 호스트(Tailscale Funnel, `*.ts.net` 주소) + 별도 주소의 수동 전환 정적 대체 페이지, 라이브 URL | [명세](specs/portfolio-site.spec.md), ADR-003~008·013 |
+| 2 | Phase 3 | 타임딜: Redis Lua 재고 선점(빠른 게이트) + Postgres CHECK(하드 게이트) → outbox → 멱등 소비, k6 부하 시험. **모의 화폐 원장(`ledger`) 도입 — 첫 GitHub 로그인 시 POINT 100,000 지급(USDC 는 원장 고정액 지급 없이 환경별 공급 — U24), USDC→POINT 단방향 교환(POINT→외부 환전 없음), 혼합 결제(포인트 먼저 차감 후 USDC; 시세는 고정 환율 소스의 스냅샷), 최소 에스크로(hold / release / refund)와 환불; 카드 결제·분쟁·정산·실제 시세는 Phase 5**. **라이브는 POINT 단독 결제로 닫는다(D1)** — USDC 다리·교환·혼합 결제는 코드와 로컬·시험 환경 시연까지만 두고, 라이브 노출은 6d 의 devnet 입금→원장 반영 브리지가 생긴 뒤이며 그때까지 라이브에서 100,000원 초과 상품은 숨기거나 'USDC 입금 후 구매 가능'으로 표기한다. **Redis 도입과 Streams 채택 판정은 이 단계** | 초과 판매 0건 + 부하 결과표 (+ 라이브: POINT 단독 구매·환불 시연 / 혼합 결제·교환 시연은 로컬·시험 환경) | ADR-010·013, [설계 P2](docs/design/phases/02-commerce.md), ADR-031·038·040·048 |
+| 3 | Phase 4 🎯 | 프로덕션화 — **간판: 롤링 배포 중 소켓 무손실 + 단일 호스트 포화점(knee) 실측**. 워크로드 분리, probe, 관측, CD, 에셋 캐시, 패키징. k3d 의 HPA·PDB 는 부가 증명(단일 호스트의 HPA 는 실제 용량 확장이 아니다) | README + 영상만으로 "무엇을·왜·얼마나 잘" 이해 가능 | ADR-002·007·014, [설계 P0](docs/design/phases/00-platform-evolution.md) §10, ADR-033 |
+| 4 | Phase 5 | 결제·정산(모의): PG 테스트 모드, 에스크로 흐름, 시세 피드. **착수 전 필드 암호화를 KEK/DEK 로 상향** | 결제 → 에스크로 → 정산 재현, 환율 고정 시점 기록 | ADR-011·016, [설계 P2](docs/design/phases/02-commerce.md), ADR-039~041 |
+| 5 | Phase 6 (6a~6d) | 확장(순서대로, 중단 가능): **6a CS 채팅**(범용 `chat` 코어 + `/ws/room` 도입) → **6b Passkey** → **6c WMS** → **6d Solana USDC 에스크로(devnet, 진행 확정 U13)** | 항목별 독립 DoD | ADR-016, [설계 P4](docs/design/phases/04-chat.md)·[P3](docs/design/phases/03-fulfillment.md), ADR-032·042~047 |
+| 6 | Phase 1 | 바둑 실시간 코어. 1-A 서버·프로토콜(룰 엔진, 룸·대국·관전, 재접속, 대국 채팅 룸 종류 추가(채팅 코어·`/ws/room` 은 6a 에서 먼저 도입), SGF) → 1-B three.js 3D 클라이언트. **대국 명령은 REST, WS 는 push 전용(`/ws/room`)** | 두 브라우저에서 3D 대국 완료, 새로고침·끊김 후 복구, 관전자 동기화, **대국 채팅(끊김 후 순서대로 복구 · 중복 전송은 한 건 · 관전자 방은 대국 중 플레이어에게 비공개)**, 데모 영상 | ADR-004·012·014, [설계 P1](docs/design/phases/01-baduk.md)·[P4](docs/design/phases/04-chat.md)·[P0](docs/design/phases/00-platform-evolution.md), ADR-032·034·035·045 |
+| 7 | Phase 2 | KataGo 워커 + 바둑 보상 (보상 `PENDING → CONFIRMED/FLAGGED`; **모의 포인트 원장 `ledger` 는 Phase 3 에서 이미 도입**, 바둑 보상은 두 번째 포인트 출처). **분석 큐는 Postgres inbox 선점(Redis 없음)** | 대국 종료 → 비동기 분석 → 보상 확정 end-to-end, 실패·재시도 확인 | ADR-009, [설계 P1](docs/design/phases/01-baduk.md) §9~10, ADR-036·037 |
+| 8 | Phase 6e | **마작**(게임 규칙 플러그인, Phase 1 의 게임 프레임 재사용) — **보류**(U13 2026-11-05: 경계만 유지, 6d 는 진행) | 항목별 독립 DoD | ADR-016, [설계 P1](docs/design/phases/01-baduk.md), ADR-034·035 |
+
+## 개발 방식
+
+이 저장소는 **모든 것을 먼저 설계한 뒤 AI 를 이용해 구현한다**는 방식을 증명한다. 방식 자체는 원래 작업 순서(명세 → 설계 → 스택·환경 검증 → 개발 루프 → 배포)이고, **AI 는 각 단계를 가속하는 도구**다. 결정은 사람이 하고 AI 는 초안·시험 스크립트·구현을 맡는다. 설계가 구현을 실제로 이끌었는지는 아래 기록으로 확인한다.
+
+```mermaid
+flowchart TD
+  A["① 명세 확정<br/>사람: 요구·범위 결정<br/>AI: 질문·누락 점검·EARS 정리"] --> B
+  B["② 설계 확정<br/>사람: 구조·경계 결정<br/>AI: 초안·대안 비교·ADR 작성"] --> C
+  C["③ 스택·환경 검증<br/>사람: 스택 선택·합격 기준 고정<br/>AI: 시험 스크립트 작성·실행"]
+  C -->|"불합격·설계 영향"| A
+  C -->|"합격"| D
+
+  subgraph D["④ 기능 개발 루프 (기능마다 반복)"]
+    D1["계획"] --> D2["코드 작성 (AI)"] --> D3["리뷰"] --> D4["테스트 작성·통과"] --> D5["E2E 루프"]
+    D3 -->|"지적"| D2
+    D5 -->|"실패"| D2
+    D6["사람: AI 코드의 맥락을 이해하고<br/>원하는 부분을 직접 수정"] -.-> D2
+  end
+
+  D --> E["⑤ 배포"]
+```
+
+| 단계 | 사람이 하는 일 | AI 가 가속하는 일 | 증거 위치 |
+|---|---|---|---|
+| ① 명세 | 요구·범위 결정 | 질문·누락 점검, EARS 정리 | [명세](specs/portfolio-site.spec.md) |
+| ② 설계 | 구조·경계 결정, 제안 승인 | 초안·대안 비교, ADR 작성 | [`docs/design/`](docs/design/00-system-overview.md), [ADR 색인](docs/adr/README.md) |
+| ③ 스택·환경 검증 | 스택 선택, 합격 기준을 시험 전에 고정 | 시험 스크립트 작성·실행 | `spikes/*` (스크립트·원시 결과·환경·커밋 해시), [ADR-050](docs/adr/ADR-050-evidence-rule.md) |
+| ④ 개발 루프 | 맥락 이해 후 직접 수정 | 계획·코드·리뷰·테스트 작성 | [추적표](docs/traceability.md), [편차 로그](docs/deviation-log.md), 커밋의 `Authorship` 트레일러(H/A/G)와 분리 커밋 |
+| ⑤ 배포 | 승인 | CI/CD 구성 | [CI/CD 설계](docs/design/09-ci-cd.md) |
+
+> 현재 ①~③ 이 진행된 상태이고 ④⑤ 는 아직 시작 전이다. 속도에 대한 수치는 [목표 3](#목표)에 따라 **측정한 뒤에만** 이 표 옆에 적는다.
+
+| 보고 싶은 것 | 위치 |
+|---|---|
+| 요구 → 설계 → 구현 작업 → 시험 → 코드 사슬 | [추적표](docs/traceability.md) |
+| 구현하다가 설계가 틀렸다고 드러난 사례 | [설계 대비 구현 편차 로그](docs/deviation-log.md) |
+| 사람이 결정한 것과 AI 권장을 수용한 것 | [결정 목록](docs/design/phases/00-platform-evolution.md) §16 |
+| 결정의 근거와 기각한 대안 | [ADR 색인](docs/adr/README.md) |
+| 수치의 증거 규칙(스크립트·원시 결과 없는 수치는 참고값) | [ADR-050](docs/adr/ADR-050-evidence-rule.md) |
+
+## 저장소 안내
+
+| 경로 | 내용 |
+|---|---|
+| `docs/adr/` | 결정 기록 (인덱스: `docs/adr/README.md`) |
+| `specs/portfolio-site.spec.md` | M1 요구사항(EARS)·인수 기준·가정·결정 로그 |
+| `docs/design/` | 구현 수준 설계 (출발점: [00 전체 시스템·공통 규약](docs/design/00-system-overview.md)). 저장소 골격 [01](docs/design/01-repository-structure.md) · 개발 환경 [02](docs/design/02-dev-environment.md) · API [03](docs/design/03-api-contract.md) · WebSocket [04](docs/design/04-ws-protocol.md) · 이벤트 [05](docs/design/05-event-catalog.md) · 인증 [06](docs/design/06-auth.md) · 프론트엔드 [07](docs/design/07-frontend.md) · 시험 [08](docs/design/08-test-strategy.md) · CI/CD [09](docs/design/09-ci-cd.md) · 보안 [10](docs/design/10-security.md) · 구현 계획 [11](docs/design/11-implementation-plan.md) · 콘텐츠 [12](docs/design/12-content.md) · 보안사고 대응 [13](docs/design/13-incident-response.md) · SEO·오류 화면 [14](docs/design/14-seo-and-error-pages.md) · 시각 디자인 [15](docs/design/15-visual-design.md) · 서버 중단 대체 페이지 [16](docs/design/16-outage-fallback-page.md) · 모의 면책·약관 초안 [17](docs/design/17-mock-disclaimer-and-terms-draft.md) · 핫 캐시·몰림 대응 [18](docs/design/18-hot-cache-and-surge-control.md) |
+| `docs/design/features/` | 기능 단위 상세 설계: [기능 카탈로그](docs/design/features/00-feature-catalog.md)와 모듈별 F10~F17(클래스·시퀀스·순서도) |
+| `docs/domains/` | 도메인 문서 정본: [기술 스택](docs/domains/tech-stack.md), [아키텍처](docs/domains/architecture.md), [데이터베이스 구조](docs/domains/database-schema.md) |
+| `.claude/`(일부), `CLAUDE.md` | 개발용 설정·검증 데이터 일부만 추적한다. `.claude/AGENT.md`(에이전트 운영 가이드)와 에이전트·스킬 등 엔진 본체, `.codex/`, `.agents/` 는 **추적하지 않는다**(`.gitignore`, 로컬 전용) |
+
+## 주소 안내
+
+도메인은 구입하지 않고 Tailscale Funnel 의 `*.ts.net` 주소를 쓴다(주소 형식은 고를 수 없다). 라이브 공개 시 **앱 주소와 정적 대체 페이지 주소를 여기에 함께 적는다**(자동 절체가 없어 앱이 멈추면 연결 오류가 나므로 두 번째 주소가 안내 창구다. 설계: [design/16](docs/design/16-outage-fallback-page.md)).
+
+- 앱: `https://<호스트>.<tailnet 이름>.ts.net` (공개 시 기입)
+- 대체(안내) 페이지: `<별도 정적 호스트 주소>` (공개 시 기입)
+
+## 라이선스
+
+- **코드, 설정, 설계 문서, ADR**: [MIT](LICENSE)
+- **개인 콘텐츠**(자기소개·경력 문구, 사진, 개인 글 등 `apps/web/content/**`): **모든 권리 유보** — 범위와 서드파티 목록은 [CONTENT-LICENSE.md](CONTENT-LICENSE.md), 결정 배경은 [ADR-029](docs/adr/ADR-029-license-and-content-rights.md)

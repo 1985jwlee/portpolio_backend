@@ -1,0 +1,32 @@
+{
+  "id": "SC-E-r0",
+  "scen": "SC",
+  "variant": "E",
+  "rep": 0,
+  "attempt": 0,
+  "wallSec": 129,
+  "loadCpu": 0.236,
+  "gatewayCpuMedian": 0.202,
+  "opens": 50,
+  "expectedOpens": 50,
+  "valid": true,
+  "healthyP99MedianMs": 2,
+  "healthyP99MaxMs": 6,
+  "windows": 8,
+  "gaps": 0,
+  "dups": 0,
+  "reorders": 0,
+  "healthyCloses": 0,
+  "connFail": 0,
+  "slowKilled": 10,
+  "closed4408": 0,
+  "serverCloseCodes": {
+    "1006": 10
+  },
+  "killedAfterSec": 2,
+  "rssBeforeMb": 40.7,
+  "rssEndMb": 41.1,
+  "rssGrowthMb": 0.4,
+  "rssLastThirdSlopeMbPerMin": 1.42,
+  "msgsReceived": 9507466
+}

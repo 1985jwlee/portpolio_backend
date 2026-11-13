@@ -1,0 +1,7 @@
+{
+  "name": "spike-g11-module-extraction",
+  "private": true,
+  "type": "module",
+  "description": "G11(모듈 추출 가능성, ADR-052 결정 5) 스파이크. 합성 모듈이며 제품 코드가 아니다.",
+  "workspaces": ["packages/*", "modules/*", "apps/*"]
+}

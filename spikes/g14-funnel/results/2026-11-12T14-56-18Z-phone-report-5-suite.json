@@ -1,0 +1,92 @@
+{
+  "source": "서버 로그(docker logs g14-echo)의 ev=report 줄을 그대로 옮김",
+  "loggedAt": "2026-11-12T14:57:12.865Z",
+  "commit": "ad4840f 이후 작업 트리의 g14-funnel (서버에는 git archive HEAD 로 올림, 3차 측정)",
+  "report": {
+    "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1",
+    "conn": null,
+    "startedAt": "2026-11-12T14:56:18.745Z",
+    "wsConnect": {
+      "ok": 10,
+      "fail": 0,
+      "ms": {
+        "n": 10,
+        "p50": 329,
+        "p95": 496,
+        "max": 496
+      }
+    },
+    "wsRtt": {
+      "n": 30,
+      "p50": 82,
+      "p95": 162,
+      "max": 434
+    },
+    "firstVisit": [
+      {
+        "got": 600000,
+        "ttfb": 90,
+        "sec": 0.381
+      },
+      {
+        "got": 600000,
+        "ttfb": 119,
+        "sec": 0.417
+      },
+      {
+        "got": 600000,
+        "ttfb": 86,
+        "sec": 0.281
+      }
+    ],
+    "download": [
+      {
+        "par": 1,
+        "bytesEach": 8000000,
+        "aggMBps": 2.31,
+        "eachMBps": [
+          2.31
+        ],
+        "sec": 3.3
+      },
+      {
+        "par": 4,
+        "bytesEach": 4000000,
+        "aggMBps": 1.02,
+        "eachMBps": [
+          0.34,
+          0.25,
+          0.26,
+          0.25
+        ],
+        "sec": 15
+      },
+      {
+        "par": 16,
+        "bytesEach": 1500000,
+        "aggMBps": 0.95,
+        "eachMBps": [
+          0.11,
+          0.06,
+          0.07,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06,
+          0.06
+        ],
+        "sec": 24.2
+      }
+    ],
+    "label": "suite",
+    "finishedAt": "2026-11-12T14:57:12.865Z"
+  }
+}

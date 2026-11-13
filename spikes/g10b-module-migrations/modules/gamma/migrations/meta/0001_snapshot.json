@@ -1,0 +1,46 @@
+{
+  "id": "61675fdc-1e0f-44b7-a7c3-47b56a7d7199",
+  "prevId": "921d35c9-816f-490e-95f1-489bd8b05987",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "gamma.outbox": {
+      "name": "outbox",
+      "schema": "gamma",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "gamma": "gamma"
+  },
+  "views": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

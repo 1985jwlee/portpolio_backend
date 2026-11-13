@@ -1,0 +1,104 @@
+{
+  "run": "2026-11-11T12-48-21-355Z-storm",
+  "verdict": "PASS",
+  "durationAtTargetMin": 4.9,
+  "samples": 29,
+  "afterWarmupSamples": 26,
+  "rssMb": {
+    "warmEnd": 32.3,
+    "end": 32.4
+  },
+  "cpuCoresMedian": 0.397,
+  "checks": [
+    {
+      "name": "순번 gap·중복·역전(정상 연결)",
+      "value": {
+        "gaps": 0,
+        "dups": 0,
+        "reorders": 0
+      },
+      "limit": "전부 0",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 최댓값",
+      "value": 25,
+      "limit": "≤ 100 ms",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 중앙값",
+      "value": 25,
+      "limit": "≤ 50 ms",
+      "pass": true
+    },
+    {
+      "name": "이벤트 루프 지연 p99 중앙값",
+      "value": 0.71,
+      "limit": "≤ 20 ms",
+      "pass": true
+    },
+    {
+      "name": "재접속 복구(SIGTERM) — 서버 복귀 후 99% 재접속까지",
+      "value": {
+        "sec": 3.5,
+        "closesInWindow": 3808
+      },
+      "limit": "≤ 30s (창 해상도 5s)",
+      "pass": true
+    },
+    {
+      "name": "재접속 복구(SIGKILL) — 서버 복귀 후 99% 재접속까지",
+      "value": {
+        "sec": 3.6,
+        "closesInWindow": 3757
+      },
+      "limit": "≤ 30s (창 해상도 5s)",
+      "pass": true
+    },
+    {
+      "name": "재접속 지연 p50/max (클라이언트 관측, ms)",
+      "value": {
+        "p50": 3368,
+        "max": 6528
+      },
+      "limit": "참고(판정 아님)",
+      "pass": true
+    }
+  ],
+  "slowEval": null,
+  "load": {
+    "totalMsgs": 5330194,
+    "serverStats": {
+      "upSec": 154,
+      "rss": 33718272,
+      "heapUsed": 691715,
+      "heapTotal": 1334272,
+      "external": 109875,
+      "arrayBuffers": 0,
+      "conns": {
+        "public": 900,
+        "private": 100
+      },
+      "queueMax": 0,
+      "opened": 1000,
+      "peak": 1000,
+      "sent": 2746117,
+      "sendDropped": 0,
+      "closed4408": 0,
+      "inbound": 0,
+      "published": 3064,
+      "closes": {}
+    }
+  },
+  "criteria": {
+    "warmupMin": 0.5,
+    "rssSlopeMbPerHourMax": 2,
+    "rssEndOverWarmMax": 1.2,
+    "heapSlopeMbPerHourMax": 0.5,
+    "latWindowP99MaxMs": 100,
+    "latMedianP99MaxMs": 50,
+    "lagP99MedianMaxMs": 20,
+    "slowP99RatioMax": 1.5
+  }
+}

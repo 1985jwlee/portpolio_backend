@@ -1,0 +1,11 @@
+.hero{padding-block:3.5rem 3rem}
+.hero-grid{display:grid;gap:2.5rem;align-items:center}
+@media (min-width:64rem){.hero-grid{grid-template-columns:5fr 7fr;gap:3.5rem}.hero{padding-block:5rem 4rem}}
+.display{font-size:clamp(2.25rem,1.4rem + 3.6vw,var(--text-4xl));letter-spacing:-0.035em;line-height:1.12;font-weight:var(--font-weight-bold)}
+.hero-rail{padding:1.5rem}
+.hero-rail figcaption{margin-bottom:1.25rem}
+.tag{display:inline-block;margin-bottom:.75rem;font-size:var(--text-xs);color:var(--color-subtle)}
+.grid.cols-4 .card h3{margin-bottom:.375rem}
+.rail li[data-state="active"] .node{color:var(--flow-active)}
+
+.hero-req{display:flex;align-items:center;gap:.5rem;padding-bottom:1rem;margin-bottom:1rem;border-bottom:1px dashed var(--color-border-strong);font-size:var(--text-sm)}

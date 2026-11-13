@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>G14 lab</title>
+<style>body{font:14px system-ui;margin:12px}button{font-size:18px;padding:10px 18px}pre{white-space:pre-wrap;word-break:break-all}</style></head>
+<body>
+<h3>G14 휴대폰 측정</h3>
+<p>Wi-Fi 를 끄고 모바일 데이터로 연 뒤 버튼을 누르세요. 약 1~2분 걸립니다. 결과는 서버 로그로 전송됩니다.</p>
+<button id="go">측정 시작</button>
+<pre id="out"></pre>
+<script>
+const Q = new URLSearchParams(location.search);
+const K = Q.get('k');
+const AT = Number(Q.get('at') || 0);
+const P = (s) => s + (s.includes('?') ? '&' : '?') + 'k=' + K;
+const out = document.getElementById('out');
+const log = (m) => { out.textContent += m + '\n'; };
+const R = {
+  ua: navigator.userAgent,
+  conn: navigator.connection ? { type: navigator.connection.effectiveType, downlink: navigator.connection.downlink, rtt: navigator.connection.rtt } : null,
+  startedAt: new Date().toISOString(),
+};
+const q = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return +s[Math.min(s.length - 1, Math.floor(p * s.length))].toFixed(1); };
+const st = (a) => ({ n: a.length, p50: q(a, 0.5), p95: q(a, 0.95), max: q(a, 1) });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const wsURL = (p) => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + P(p);
+
+function openWs(timeout) {
+  return new Promise((res, rej) => {
+    const ws = new WebSocket(wsURL('/ws'));
+    const t = setTimeout(() => rej(new Error('timeout')), timeout || 10000);
+    ws.onopen = () => { clearTimeout(t); res(ws); };
+    ws.onerror = () => { clearTimeout(t); rej(new Error('error')); };
+  });
+}
+async function dl(n) {
+  const t0 = performance.now();
+  const r = await fetch(P('/bytes?n=' + n) + '&r=' + Math.random());
+  const ttfb = performance.now() - t0;
+  const rd = r.body.getReader();
+  let got = 0;
+  for (;;) { const x = await rd.read(); if (x.done) break; got += x.value.length; }
+  return { got, ttfb: +ttfb.toFixed(0), sec: (performance.now() - t0) / 1000 };
+}
+async function par(p, n) {
+  const t0 = performance.now();
+  const each = await Promise.all(Array.from({ length: p }, () => dl(n)));
+  const sec = (performance.now() - t0) / 1000;
+  const bytes = each.reduce((a, e) => a + e.got, 0);
+  return { par: p, bytesEach: n, aggMBps: +(bytes / 1048576 / sec).toFixed(2), eachMBps: each.map((e) => +(e.got / 1048576 / e.sec).toFixed(2)), sec: +sec.toFixed(1) };
+}
+async function report(label) {
+  R.label = label; R.finishedAt = new Date().toISOString();
+  await fetch(P('/report'), { method: 'POST', body: JSON.stringify(R) });
+  log('서버 로그로 전송했습니다. 끝났습니다.');
+}
+async function suite() {
+  const conn = []; let fail = 0;
+  for (let i = 0; i < 10; i++) {
+    const t = performance.now();
+    try { const w = await openWs(); conn.push(performance.now() - t); w.close(1000); } catch (e) { fail++; }
+    await sleep(300);
+  }
+  R.wsConnect = { ok: 10 - fail, fail, ms: st(conn) }; log('ws 접속 ' + JSON.stringify(R.wsConnect));
+  try {
+    const w = await openWs(); const rtts = [];
+    for (let i = 0; i < 30; i++) {
+      const t = performance.now();
+      await new Promise((r) => { w.onmessage = (e) => { if (!String(e.data).includes('hello')) r(); }; w.send('x'); });
+      rtts.push(performance.now() - t);
+    }
+    w.close(1000); R.wsRtt = st(rtts);
+  } catch (e) { R.wsRtt = { error: String(e) }; }
+  log('ws 왕복 ' + JSON.stringify(R.wsRtt));
+  R.firstVisit = [];
+  for (let i = 0; i < 3; i++) R.firstVisit.push(await dl(600000));
+  log('600KB 전송 ' + JSON.stringify(R.firstVisit.map((x) => ({ ttfb: x.ttfb, sec: +x.sec.toFixed(2) }))));
+  R.download = [];
+  for (const c of [[1, 8000000], [4, 4000000], [16, 1500000]]) { const x = await par(c[0], c[1]); R.download.push(x); log(JSON.stringify(x)); }
+  await report('suite');
+}
+async function sim() {
+  const wait = AT - Date.now();
+  log('시작까지 ' + Math.round(wait / 1000) + '초 (이 시각에 맞춰 개발 PC 도 같은 병렬 다운로드를 시작합니다)');
+  if (wait > 0) await sleep(wait);
+  R.simStart = new Date(AT).toISOString();
+  R.sim = await par(4, 10000000); log(JSON.stringify(R.sim));
+  await report('sim');
+}
+document.getElementById('go').onclick = () => {
+  document.getElementById('go').disabled = true;
+  (AT ? sim() : suite()).catch((e) => { log('오류 ' + e); R.error = String(e); report('error'); });
+};
+</script></body></html>

@@ -1,0 +1,32 @@
+{
+  "id": "SC-D-r2",
+  "scen": "SC",
+  "variant": "D",
+  "rep": 2,
+  "attempt": 0,
+  "wallSec": 126.6,
+  "loadCpu": 0.25,
+  "gatewayCpuMedian": 0.214,
+  "opens": 50,
+  "expectedOpens": 50,
+  "valid": true,
+  "healthyP99MedianMs": 3,
+  "healthyP99MaxMs": 4,
+  "windows": 7,
+  "gaps": 0,
+  "dups": 0,
+  "reorders": 0,
+  "healthyCloses": 0,
+  "connFail": 0,
+  "slowKilled": 10,
+  "closed4408": 0,
+  "serverCloseCodes": {
+    "1006": 10
+  },
+  "killedAfterSec": 5,
+  "rssBeforeMb": 44,
+  "rssEndMb": 44.7,
+  "rssGrowthMb": 0.7,
+  "rssLastThirdSlopeMbPerMin": 0.36,
+  "msgsReceived": 9506798
+}

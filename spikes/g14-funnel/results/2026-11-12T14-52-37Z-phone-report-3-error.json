@@ -1,0 +1,69 @@
+{
+  "source": "서버 로그(docker logs g14-echo)의 ev=report 줄을 그대로 옮김",
+  "loggedAt": "2026-11-12T14:54:01.090Z",
+  "commit": "ad4840f 이후 작업 트리의 g14-funnel (서버에는 git archive HEAD 로 올림, 3차 측정)",
+  "report": {
+    "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1",
+    "conn": null,
+    "startedAt": "2026-11-12T14:52:37.268Z",
+    "wsConnect": {
+      "ok": 10,
+      "fail": 0,
+      "ms": {
+        "n": 10,
+        "p50": 952,
+        "p95": 995,
+        "max": 995
+      }
+    },
+    "wsRtt": {
+      "n": 30,
+      "p50": 160,
+      "p95": 252,
+      "max": 254
+    },
+    "firstVisit": [
+      {
+        "got": 600000,
+        "ttfb": 214,
+        "sec": 1.009
+      },
+      {
+        "got": 600000,
+        "ttfb": 247,
+        "sec": 0.542
+      },
+      {
+        "got": 600000,
+        "ttfb": 241,
+        "sec": 0.604
+      }
+    ],
+    "download": [
+      {
+        "par": 1,
+        "bytesEach": 8000000,
+        "aggMBps": 0.7,
+        "eachMBps": [
+          0.7
+        ],
+        "sec": 10.9
+      },
+      {
+        "par": 4,
+        "bytesEach": 4000000,
+        "aggMBps": 0.46,
+        "eachMBps": [
+          0.11,
+          0.17,
+          0.12,
+          0.12
+        ],
+        "sec": 33.2
+      }
+    ],
+    "error": "TypeError: Load failed",
+    "label": "error",
+    "finishedAt": "2026-11-12T14:54:01.090Z"
+  }
+}

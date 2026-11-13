@@ -1,0 +1,73 @@
+{
+  "startedAt": "2026-11-11T00:45:30.390Z",
+  "args": {
+    "label": "full"
+  },
+  "host": {
+    "bun": "1.4.4",
+    "cpuModel": "12th Gen Intel(R) Core(TM) i5-12400",
+    "cpus": 6,
+    "release": "6.18.33.2-microsoft-standard-WSL2",
+    "loadavgAtStart": [
+      4.68,
+      2.22,
+      1.29
+    ]
+  },
+  "scenarios": {
+    "SA": {
+      "public": 900,
+      "private": 100,
+      "rate": 20,
+      "payload": 200,
+      "duration": 240,
+      "slow": 10,
+      "slowAt": 120,
+      "window": 30,
+      "variants": [
+        "A",
+        "B"
+      ],
+      "reps": 2,
+      "capMs": 100
+    },
+    "SB": {
+      "public": 90,
+      "private": 10,
+      "rate": 200,
+      "payload": 1000,
+      "duration": 150,
+      "slow": 10,
+      "slowAt": 30,
+      "window": 10,
+      "variants": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "reps": 3,
+      "capMs": 100
+    },
+    "SC": {
+      "public": 40,
+      "private": 10,
+      "rate": 2000,
+      "payload": 1000,
+      "duration": 120,
+      "slow": 10,
+      "slowAt": 30,
+      "window": 10,
+      "variants": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "reps": 3,
+      "capMs": 250
+    }
+  }
+}

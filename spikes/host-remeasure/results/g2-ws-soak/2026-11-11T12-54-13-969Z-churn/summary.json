@@ -1,0 +1,119 @@
+{
+  "run": "2026-11-11T12-54-13-969Z-churn",
+  "verdict": "PASS",
+  "durationAtTargetMin": 24.9,
+  "samples": 300,
+  "afterWarmupSamples": 276,
+  "rssMb": {
+    "warmEnd": 33.4,
+    "end": 33.5
+  },
+  "cpuCoresMedian": 0.144,
+  "checks": [
+    {
+      "name": "순번 gap·중복·역전(정상 연결)",
+      "value": {
+        "gaps": 0,
+        "dups": 0,
+        "reorders": 0
+      },
+      "limit": "전부 0",
+      "pass": true
+    },
+    {
+      "name": "정상 연결의 예기치 않은 종료",
+      "value": 0,
+      "limit": "0",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 최댓값",
+      "value": 6,
+      "limit": "≤ 100 ms",
+      "pass": true
+    },
+    {
+      "name": "팬아웃 지연 창별 p99 중앙값",
+      "value": 6,
+      "limit": "≤ 50 ms",
+      "pass": true
+    },
+    {
+      "name": "이벤트 루프 지연 p99 중앙값",
+      "value": 0.57,
+      "limit": "≤ 20 ms",
+      "pass": true
+    },
+    {
+      "name": "접속·해제 시작 횟수",
+      "value": 59498,
+      "limit": "≥ 59,000",
+      "pass": true
+    },
+    {
+      "name": "정착 후 서버 연결 수(회수)",
+      "value": 200,
+      "limit": "= 200",
+      "pass": true
+    },
+    {
+      "name": "RSS 정착 후 − 기준선",
+      "value": "2.2 MB (31.3→33.5)",
+      "limit": "≤ +10 MB",
+      "pass": true
+    },
+    {
+      "name": "강제 GC 후 힙 정착 후 − 기준선",
+      "value": "0.06 MB",
+      "limit": "≤ +2 MB",
+      "pass": true
+    },
+    {
+      "name": "서버 opened 회계(고정+시도−실패)",
+      "value": {
+        "server": 59698,
+        "expected": 59698
+      },
+      "limit": "±1%",
+      "pass": true
+    }
+  ],
+  "slowEval": null,
+  "load": {
+    "totalMsgs": 5394574,
+    "serverStats": {
+      "upSec": 1501,
+      "rss": 34922496,
+      "heapUsed": 533699,
+      "heapTotal": 1121280,
+      "external": 154355,
+      "arrayBuffers": 0,
+      "conns": {
+        "public": 180,
+        "private": 20
+      },
+      "queueMax": 0,
+      "opened": 59698,
+      "peak": 299,
+      "sent": 7172982,
+      "sendDropped": 0,
+      "closed4408": 0,
+      "inbound": 0,
+      "published": 29946,
+      "closes": {
+        "1000": 47639,
+        "1006": 11859
+      }
+    }
+  },
+  "criteria": {
+    "warmupMin": 10,
+    "rssSlopeMbPerHourMax": 2,
+    "rssEndOverWarmMax": 1.2,
+    "heapSlopeMbPerHourMax": 0.5,
+    "latWindowP99MaxMs": 100,
+    "latMedianP99MaxMs": 50,
+    "lagP99MedianMaxMs": 20,
+    "slowP99RatioMax": 1.5
+  }
+}

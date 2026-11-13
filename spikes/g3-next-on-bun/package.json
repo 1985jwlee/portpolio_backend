@@ -1,0 +1,22 @@
+{
+  "name": "spike-g3-next-on-bun",
+  "private": true,
+  "type": "module",
+  "description": "G3(Next.js on Bun) 스파이크. 제품 코드가 아니다.",
+  "scripts": {
+    "build": "bun --bun next build",
+    "start": "bun .next/standalone/server.js"
+  },
+  "dependencies": {
+    "next": "16.4.5",
+    "next-intl": "4.14.10",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "typescript": "5.7.2"
+  }
+}

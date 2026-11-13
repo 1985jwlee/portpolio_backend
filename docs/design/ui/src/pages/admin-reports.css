@@ -1,0 +1,5 @@
+.desk{display:none}.mob{display:grid}
+@media (min-width:48rem){.desk{display:block}.mob{display:none}}
+.report-actions{display:flex;gap:.375rem;flex-wrap:wrap;justify-content:flex-end}
+.note-box{margin-top:.5rem;padding:.5rem .75rem;border-radius:var(--radius-md);background:var(--color-surface-sunken);border:1px dashed var(--color-border-strong);font-size:var(--text-sm)}
+.excerpt{max-width:28rem}
