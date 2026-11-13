@@ -27,7 +27,7 @@
 | 2026-11-04 | [ADR-039](ADR-039-payment-adapter-and-webhook-idempotency.md) | 결제 어댑터와 웹훅 멱등: 포트, 상태 머신, 승인은 트랜잭션 밖 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-038](ADR-038-stock-reservation-and-redis-role.md) | 재고 선점과 Redis 역할: 두 게이트(Redis 빠른 게이트 + DB CHECK 하드 게이트) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-037](ADR-037-simulated-points-ledger.md) | 모의 포인트 원장: 복식·추가 전용, 보상 PENDING→확정/박탈 | Accepted (2026-11-05) |
-| 2026-11-04 | [ADR-036](ADR-036-katago-analysis-worker.md) | KataGo 분석 워커: 별도 프로세스, 2단계 분석, 선점·임대 큐 | Accepted (2026-11-05) |
+| 2026-11-04 | [ADR-036](ADR-036-katago-analysis-worker.md) | KataGo 분석 워커: 별도 프로세스, 2단계 분석, 선점·임대 큐. 결정 7(분석 CPU 최소화, 제안) 2026-11-13 추가 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-035](ADR-035-game-state-and-realtime-protocol.md) | 대국 상태 머신·서버 권위·재접속: 이벤트 로그가 진실, 명령은 REST, push 는 NOTIFY | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-034](ADR-034-baduk-rules-engine.md) | 바둑 룰 엔진: 공유 TS 패키지 직접 구현, 라이브러리는 차분 시험 기준 (ADR-012 선정 절차 수행) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-033](ADR-033-resource-budget-and-deploy-units.md) | 자원 예산과 배포 단위: 상시 60% 이하, CPU 예산 분리 | Accepted (2026-11-05) |
