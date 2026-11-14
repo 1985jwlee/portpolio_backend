@@ -1,0 +1,13 @@
+# 개행은 저장소 전체에서 LF 로 통일한다.
+# 커밋된 내용은 이미 전부 LF 이고, WSL/Windows 편집기·도구가 워킹트리를 CRLF 로
+# 되돌려도 이 규칙이 커밋 시점에 LF 로 정규화해 잡음 diff 를 막는다.
+* text=auto eol=lf
+
+# 바이너리 — 개행 변환·diff 대상에서 제외 (자동 감지에 의존하지 않고 명시)
+*.db                binary
+*.mp4               binary
+*.jpg               binary
+*.gif               binary
+*.index             binary
+*.data-*-of-*       binary
+*.exe               binary
