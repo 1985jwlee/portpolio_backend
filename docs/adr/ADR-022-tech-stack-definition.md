@@ -84,7 +84,7 @@ Go(coder/websocket)·C#(.NET 10 Kestrel 순수 WebSocket)·Bun(Elysia)로 같은
 | G10 | Drizzle raw SQL 마이그레이션 재현 |
 | G11·G12 | 별도 주소 정적 호스팅(구 Cloudflare 정적 미러) · 무료 외부 백업 저장소 (ADR-023 에서 추가) |
 | G13 | Worker 절체 — **보류(도메인 확보 후에만 의미)**, design/16 |
-| **G14** | **Tailscale Funnel** — WebSocket 통과·유휴 타임아웃·하트비트 주기, 대역폭 체감, 클라이언트 IP 확보, 재시작 후 주소 유지, 인증서 갱신 (**Proposed, 부분 실측 2026-11-10 — [ADR-051](ADR-051-funnel-g14-measurement-results.md)**; ⑤⑥⑦ 미완) |
+| **G14** | **Tailscale Funnel** — WebSocket 통과·유휴 타임아웃·하트비트 주기, 대역폭 체감, 클라이언트 IP 확보, 재시작 후 주소 유지, 인증서 갱신 (**ADR-051 Accepted 2026-11-14 — [ADR-051](ADR-051-funnel-g14-measurement-results.md)**; 갱신·재부팅·대역폭 변동 관찰은 `design/11` S0 잔여 항목) |
 
 관문 중 **G1·G2 가 설계를 바꿀 수 있는 크기**다(G1 실패 → 실시간 방식, G2 실패 → ws-gateway 언어). 나머지는 도구 교체로 흡수된다.
 

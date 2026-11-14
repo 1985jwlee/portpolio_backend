@@ -12,7 +12,7 @@
 | 2026-11-11 | [ADR-053](ADR-053-ws-gateway-bun-serve.md) | ws-gateway 소켓 계층은 `Bun.serve` 로 구현(BunServeRuntime). Elysia 래퍼는 `getBufferedAmount` 미노출·이벤트마다 새 래퍼라 `ws.raw` 우회에 의존. 사용자 결정 [권장수용] | Accepted |
 | 2026-11-13 | [ADR-054](ADR-054-container-isolation-rootless.md) | 컨테이너 격리는 rootless Docker 를 기본으로(S0-8). Bun 은 `cap_drop ALL` 그대로 기동, nginx·Postgres 는 cap 예외 필요, Ubuntu 24.04 는 AppArmor 프로필(sudo 1회)이 선행. Accepted |
 | 2026-11-11 | [ADR-052](ADR-052-extractable-monolith.md) | 추출 가능한 모놀리스(제안): 모듈 계약 패키지·경계 버전 정책·ActorContext 주입·추출 게이트. 사용자 결정 3건·개별 제안 4묶음 확정, 결정 7 은 G10b 통과 | Accepted |
-| 2026-11-10 | [ADR-051](ADR-051-funnel-g14-measurement-results.md) | Funnel 관문(G14) 실측: WebSocket 통과·유휴 960초+·클라이언트 IP(`X-Forwarded-For` 만 신뢰)·대역폭 합계 상한 ≈2.5MB/s·단일 출발지 동시 40+ 연결 리셋, 첫 방문 전송량 예산(열린 결정) | Proposed (⑤⑥⑦ 미완) |
+| 2026-11-10 | [ADR-051](ADR-051-funnel-g14-measurement-results.md) | Funnel 관문(G14) 실측: WebSocket 통과·유휴 960초+·클라이언트 IP(`X-Forwarded-For` 만 신뢰)·대역폭 합계 상한 ≈2.5MB/s·단일 출발지 동시 40+ 연결 리셋, 첫 방문 전송량 예산(열린 결정) | Accepted (2026-11-14, 결정 1~4 확정) |
 | 2026-11-06 | [ADR-050](ADR-050-evidence-rule.md) | 증거 규칙: 스크립트와 원시 결과(호스트 사양·커밋 해시)를 커밋하지 않은 수치는 사실로 쓰지 않는다. 예외는 `참고값(재현 불가)` 강등. 범례 실측/추정/제안/참고값, 스파이크는 `spikes/` 에 보존 | Accepted |
 | 2026-11-06 | [ADR-049](ADR-049-hot-cache-and-surge-control.md) | 핫 캐시와 몰림 대응: 병합 먼저·보존은 열화 모드, 단계적 열화 사다리(0~4, 그림자 모드로 시작), 기다리는 곳에 상한, 스냅샷 head 공유, 반응 총개수는 쓰기 모델 카운터 열 | Accepted (2026-11-06) |
 | 2026-11-04 | [ADR-048](ADR-048-mock-currency-and-mixed-payment.md) | 모의 통화(USDC·POINT): 첫 로그인 지급, 단방향 교환, 혼합 결제, 선택적 지갑 | Accepted (2026-11-05) |
@@ -27,7 +27,7 @@
 | 2026-11-04 | [ADR-039](ADR-039-payment-adapter-and-webhook-idempotency.md) | 결제 어댑터와 웹훅 멱등: 포트, 상태 머신, 승인은 트랜잭션 밖 | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-038](ADR-038-stock-reservation-and-redis-role.md) | 재고 선점과 Redis 역할: 두 게이트(Redis 빠른 게이트 + DB CHECK 하드 게이트) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-037](ADR-037-simulated-points-ledger.md) | 모의 포인트 원장: 복식·추가 전용, 보상 PENDING→확정/박탈 | Accepted (2026-11-05) |
-| 2026-11-04 | [ADR-036](ADR-036-katago-analysis-worker.md) | KataGo 분석 워커: 별도 프로세스, 2단계 분석, 선점·임대 큐. 결정 7(분석 CPU 최소화, 제안) 2026-11-13 추가 | Accepted (2026-11-05) |
+| 2026-11-04 | [ADR-036](ADR-036-katago-analysis-worker.md) | KataGo 분석 워커: 별도 프로세스, 2단계 분석, 선점·임대 큐. 결정 7(분석 CPU 최소화) 2026-11-13 추가, 방향 확정 2026-11-14(수치는 제안) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-035](ADR-035-game-state-and-realtime-protocol.md) | 대국 상태 머신·서버 권위·재접속: 이벤트 로그가 진실, 명령은 REST, push 는 NOTIFY | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-034](ADR-034-baduk-rules-engine.md) | 바둑 룰 엔진: 공유 TS 패키지 직접 구현, 라이브러리는 차분 시험 기준 (ADR-012 선정 절차 수행) | Accepted (2026-11-05) |
 | 2026-11-04 | [ADR-033](ADR-033-resource-budget-and-deploy-units.md) | 자원 예산과 배포 단위: 상시 60% 이하, CPU 예산 분리 | Accepted (2026-11-05) |

@@ -21,13 +21,13 @@
 
 | 변수 | 타입 | 기본 | 비었을 때(`null`) | 릴리스 필수 |
 |---|---|---|---|---|
-| `contact.emailVisible` | boolean | `false` | 이메일을 표시하지 않음 | 예(결정 필요) |
+| `contact.emailVisible` | boolean | `false` | 이메일을 표시하지 않음 | 예(**결정: `false`**, 사용자 2026-11-14) |
 | `contact.email` | string \| null | `null` | `emailVisible` 이 true 인데 null 이면 릴리스 빌드 실패 | `emailVisible` 일 때 |
 | `contact.links.github` · `linkedin` · `blog` | url \| null | `null` | 해당 링크 숨김 | 아니오 |
 | `privacy.operatorName` | string \| null | `null` | 개인정보 안내의 운영자 줄 숨김 | 예 |
 | `privacy.deletionContact` | string \| null | `null` | 삭제 요청 항이 "문의 수단 준비 중" 자리표시 | 예 |
 | `privacy.deletionResponseDays` | int \| null | `null` | 처리 기한 문장을 넣지 않음 | 아니오 |
-| `privacy.cookieBanner` | boolean | `false` | — | 예(결정 필요) |
+| `privacy.cookieBanner` | boolean | `false` | — | 예(**결정: `true`**, 사용자 2026-11-14) |
 | `site.repoUrl` | url | (저장소) | — | 예 |
 | `site.ciBadgeUrl` | url \| null | `null` | 배지 숨김. **값이 있으면 그 호스트가 CSP `img-src` 에 들어간다**([10](10-security.md) §2.2) | 아니오 |
 | `site.metricsEmbedUrl` | url \| null | `null` | 운영 지표 페이지가 임베드 대신 안내·링크를 보임. 값이 있으면 그 출처가 CSP `frame-src` 에 들어간다. Grafana 공개 대시보드 URL(사이트와 다른 출처 — Funnel 다른 포트, F17 §8.4. 프로비저닝으로 만들 수 없으면 수동 발급, G6) | 아니오 |
@@ -41,7 +41,7 @@
 
 - **보안 공지 문구**: 템플릿(ko/en)은 [13](13-incident-response.md) §8 에 있고, 사고 때 `{date}`·`{what}`·`{scope}`·`{actions}` 를 채워 `site.securityNotice` 에 넣는다. `{contact}` 는 `privacy.deletionContact` 를 쓴다. 영향이 확정되기 전에는 "가능성"으로만 쓴다.
 - `profile.{ko,en}.yaml` 의 개인 정보(이름·소개·경력)도 같은 규칙이다: 비어 있으면 자리표시, 릴리스 빌드에서만 실패.
-- `privacy.cookieBanner` 는 쓰는 쿠키가 모두 **필수(세션·로그인 임시)** 라 기본 `false` 다. 추적·광고 쿠키를 도입하면 `true` 로 바꾸고 동의 UI 를 추가해야 한다.
+- `privacy.cookieBanner` 의 기본값은 `false` 다(쓰는 쿠키가 모두 필수·기능성). **릴리스 값은 `true` 로 정했다(사용자 결정 2026-11-14, 권장은 배너 없음이었다).** 배너는 필수·기능성 쿠키를 **고지**하는 것이고, 동의를 거부해도 필수 쿠키(세션·OAuth)는 동작한다. 추적·광고 쿠키를 도입하면 동의 UI 를 따로 추가해야 한다.
 - 검사 명령: `bun run content:check`(경고 목록) / `CONTENT_STRICT=1 bun run content:check`(릴리스, 비어 있으면 실패). 릴리스 워크플로가 후자를 돌린다([09](09-ci-cd.md)).
 - 변수는 **비밀이 아니다**(공개 페이지에 나간다). 비밀은 환경변수·시크릿([10](10-security.md)).
 
@@ -112,7 +112,7 @@
 | 4. 보관 기간 | 세션·이벤트 로그·outbox 이력: **7일** 후 삭제 / 방명록 글·반응: **보관**(숨김 포함) / 실패 격리 기록: 30일 / 백업: 일별 7개·주별 4개 보관(암호화, 외부 저장소는 G12 결과에 따라) | 백업 위치를 확정 전에 단정 |
 | 5. 익명화 | 세션이 삭제되면 글의 작성자 세션 연결이 끊기고 반응 행위자 값은 무작위 값으로 바뀌어 **집계만 남음** | |
 | 6. 공개 범위 | 방명록 글은 누구에게나 보임. 흐름 시각화에서 **다른 방문자는 내용·식별자 없이 개수만** | |
-| 7. 삭제·정정 요청 | 로그인 사용자는 본인 글을 직접 수정·삭제. 그 외(익명 글 삭제 등)는 **[사용자 제공 필요: 연락 수단]** 로 요청 → 관리자가 숨김/삭제. 처리 목표 기간은 [사용자 결정 필요] | 처리 기한을 지키지 못할 약속 |
+| 7. 삭제·정정 요청 | 로그인 사용자는 본인 글을 직접 수정·삭제. 그 외(익명 글 삭제 등)는 **GitHub Issues**(공개 저장소의 이슈, 사용자 결정 2026-11-14)로 요청 — 요청 내용이 공개되므로 글 번호만 적도록 안내한다 → 관리자가 숨김/삭제. 처리 목표 기간은 **7일**(사용자 결정 2026-11-14, `privacy.deletionResponseDays=7`) | 처리 기한을 지키지 못할 약속 |
 | 8. 제3자 | GitHub(로그인 시), Tailscale(Funnel 전송 경유 — TCP 프록시라 중계 서버는 내용을 복호화하지 못함), 대체 페이지 정적 호스트(별도 주소, 쿠키·추적 없음), 그리고 켠 경우에 한해 CI 배지 호스트·지표 임베드 호스트(`site.ciBadgeUrl`/`site.metricsEmbedUrl` 의 출처). 사이트 변수와 문구가 일치해야 한다 | 변수를 바꾸면 이 줄도 같이 갱신 |
 | 9. 변경 이력 | 날짜별 변경 요약 | |
 
@@ -128,7 +128,7 @@
 | `NEXT_LOCALE` | 언어 선택 | 1년 | 기능성 |
 | `theme` | 테마 선택 | 1년 | 기능성 |
 
-- 추적·광고 쿠키가 없으므로 **동의 배너를 두지 않고** 이 표와 안내만 제공한다. 이 판단의 법적 타당성은 사용자가 확인한다 — **[사용자 결정 필요]**.
+- 추적·광고 쿠키가 없지만 **고지 배너를 둔다**(사용자 결정 2026-11-14, `privacy.cookieBanner=true`). 이 표와 안내 페이지도 함께 제공한다. 배너 없이 안내만 두는 안의 법적 타당성은 판단하지 않았다(권장안이었으나 사용자가 배너 쪽을 택했다). 필수 쿠키는 동의와 무관하게 동작한다.
 - 쿠키 이름·기간은 06 과 같아야 한다(변경 시 동시 갱신).
 
 ## 5. 번역 규칙 (ko/en)
@@ -242,8 +242,8 @@ flowchart TD
 | 항목 | 결정 주체·시점 |
 |---|---|
 | 자기소개의 모든 실제 문구(이름·경력·연락처·소개글·프로젝트) | **사용자 제공** — 구현 중/출시 전 |
-| 이메일 노출 방식, 삭제 요청 연락 수단·처리 목표 기간 | 사용자 결정 |
-| 쿠키 동의 배너 불요 판단의 타당성 | 사용자 확인 |
+| ~~이메일 노출 방식, 삭제 요청 연락 수단·처리 목표 기간~~ | **결정(2026-11-14)**: 이메일 숨김(링크만), 연락 수단 GitHub Issues, 처리 7일. 이메일·링크 URL 값은 사용자 제공 |
+| ~~쿠키 동의 배너 불요 판단의 타당성~~ | **해소(2026-11-14)**: 고지 배너를 두기로 했다 |
 | `apps/web/content` 경로 | 01 §1 에 반영됨(확정) |
 | 개인정보 문구 중 "외부 자원은 배지·지표 임베드를 켠 경우에만", "백업 외부 저장소" | 구현 후 사실 확인(G12 포함) |
 
@@ -262,9 +262,9 @@ flowchart TD
 | 7 | 공개 이메일 주소 | 문자열 | `contact.email` | `emailVisible` 일 때 | 조건부 | 릴리스 전 |
 | 8 | GitHub·LinkedIn·블로그 링크 | URL | `contact.links.*` | 선택 | 아니오 | — |
 | 9 | 개인정보 운영자 표기 | 문자열 | `privacy.operatorName` | 필수 | 예 | 릴리스 전 |
-| 10 | 삭제 요청 연락 수단 | 문자열 | `privacy.deletionContact` | 필수 | 예 | 릴리스 전 |
-| 11 | 삭제 요청 처리 목표 기간(일) | 정수 | `privacy.deletionResponseDays` | 선택 | 아니오 | — |
-| 12 | 쿠키 동의 배너 필요 여부(기본 불요: 필수 쿠키만) | 예/아니오 | `privacy.cookieBanner` | 필수(결정) | 예 | 릴리스 전 |
+| 10 | 삭제 요청 연락 수단 — **결정: GitHub Issues**(이슈 URL 은 저장소 공개 후 채운다) | 문자열 | `privacy.deletionContact` | 필수 | 예 | 릴리스 전 |
+| 11 | 삭제 요청 처리 목표 기간(일) — **결정: 7** | 정수 | `privacy.deletionResponseDays` | 선택(값 7) | 아니오 | — |
+| 12 | 쿠키 고지 배너(**결정: 둔다**, 2026-11-14) | 예/아니오 | `privacy.cookieBanner` | 필수(결정 완료: `true`) | 예 | 릴리스 전 |
 | 13 | 저장소 URL | URL | `site.repoUrl` | 필수 | 예 | S5-2 전 |
 | 14 | CI 배지 URL | URL | `site.ciBadgeUrl` | 선택 | 아니오 | CI 구성 후 |
 | 15 | Grafana 공개 대시보드 URL | URL | `site.metricsEmbedUrl` | 선택(G6 후) | 아니오 | S7-3 후 |
