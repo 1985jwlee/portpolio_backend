@@ -176,7 +176,8 @@ async function enumerateSources(
 			cwd: `${root}/${dir}`,
 			dot: true,
 		})) {
-			const path = `${dir}/${relative}`;
+			// Bun.Glob.scan 은 Windows 에서 `\` 구분 경로를 돌려준다 — 제외 패턴·isProductSource 가 `/` 를 전제하므로 정규화한다.
+			const path = `${dir}/${relative.replaceAll("\\", "/")}`;
 			if (path.split("/").includes("node_modules")) {
 				continue;
 			}
@@ -205,7 +206,9 @@ async function readJson(path: string): Promise<unknown> {
 async function readDeclarations(root: string): Promise<Map<string, unknown>> {
 	const declarations = new Map<string, unknown>();
 	const glob = new Bun.Glob("*/port-kinds.json");
-	for await (const relative of glob.scan({ cwd: `${root}/modules` })) {
+	for await (const scanned of glob.scan({ cwd: `${root}/modules` })) {
+		// 위 enumerateSources 와 같은 이유로 `\` 를 `/` 로 정규화한다.
+		const relative = scanned.replaceAll("\\", "/");
 		const module = relative.split("/")[0];
 		if (module !== undefined) {
 			declarations.set(module, await readJson(`${root}/modules/${relative}`));

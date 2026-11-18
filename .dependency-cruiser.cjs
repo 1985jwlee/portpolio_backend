@@ -1,11 +1,13 @@
 // 경계 검사 그래프 규칙 — S1-5. 규칙의 정본은 docs/design/01-repository-structure.md §5 (규칙 수단 표) 와 이 파일이다.
 // 실행은 `bun run arch` 로만 한다(scripts/arch.ts 가 이 설정을 읽어 API 로 한 번 돌린다).
-// B3(CQRS)·B5(패키지 순환)·문자열 규칙(B9 env·시간·난수·B11)·비공허성 가드는 여기 없다 — 각각
+// B3(CQRS)·B5(패키지 순환)·AST 판정 규칙(B9 env·시간·난수·B11)·비공허성 가드는 여기 없다 — 각각
 // scripts/check-cqrs.ts · scripts/arch.ts · scripts/check-purity.ts 가 맡는다.
 //
-// parser 를 swc 로 두는 이유: TypeScript 7.0.x 에서는 dependency-cruiser 의 기본(tsc) 파서가 .ts 를
-// 한 건도 읽지 못하고 종료 0 으로 끝난다(검사가 조용히 빈다). swc 는 TypeScript 를 거치지 않고
-// 구문을 직접 읽으므로 두 번째 TypeScript 없이 동작한다. 이 전제는 scripts/arch.test.ts 의 카나리가 잰다.
+// parser 를 swc 로 두는 이유: TypeScript 7.0.x 에는 JS API 가 없어 dependency-cruiser 의 typescript 트랜스파일러가 꺼진다.
+// 그러면 @swc/core 가 설치돼 있어야 .ts 를 읽고, 없으면 한 건도 읽지 못한 채 종료 0 으로 끝난다(검사가 조용히 빈다).
+// parser 를 고정하는 것은 typescript 트랜스파일러가 되살아날 때 파서가 조용히 바뀌지 않게 하려는 것이다.
+// swc 는 TypeScript 를 거치지 않고 구문을 직접 읽으므로 두 번째 TypeScript 없이 동작한다.
+// 카나리(scripts/arch.test.ts T8)는 typescript 트랜스파일러의 가용성을 잰다.
 //
 // 모든 경로는 검사 루트(baseDir) 기준 상대 경로다 — 실저장소와 시험 픽스처가 같은 규칙으로 돈다.
 // 위반 ID 는 규칙 name 의 접두다(01 §5 의 이유 열로 곧장 간다).
@@ -158,7 +160,7 @@ module.exports = {
 			to: { path: "^(modules|packages)/", pathNot: "^packages/protocol/" },
 		},
 
-		// B9 환경 접근 — 문자열 검사(check-purity)가 놓치는 `import { env } from "node:process"` 우회를 막는다.
+		// B9 환경 접근 — AST 검사(check-purity)가 놓치는 `import { env } from "node:process"` 우회를 막는다.
 		{
 			name: "B9-process-import",
 			comment: "packages/config 밖 제품 소스는 내장 모듈 process 를 임포트하지 않는다",

@@ -104,6 +104,7 @@ sequenceDiagram
 | Docker / Compose | Docker 29.8 확인됨 |
 | `psql`, `k3d`, `kubectl`, `k6` | **로컬에 없음** → `psql` 은 `docker compose exec postgres psql`, `k6` 는 `grafana/k6` 컨테이너, `k3d`·`kubectl` 은 §8 에서 설치 |
 | OS | **개발 PC** 는 WSL2 (M1 로컬 측정 환경). 라이브 호스트는 네이티브 Ubuntu 24.04(ADR-033 '호스트 프로필')라 성능 수치는 호스트에서 재측정한다. 파일 감시가 느리면 프로젝트를 WSL 파일시스템 안에 둔다 |
+| `@swc/core` 로드 (Windows) | Windows 호스트에서 `@swc/core` 1.16.22 의 네이티브 바인딩이 `user cache failed: … DACL grants replacement rights … set SWC_NATIVE_BINDING_CACHE to a safe absolute directory` 로 로드되지 않을 수 있다(Bun 1.4.2·Windows 11 에서 확인). `bun run arch`·`bun test`(`scripts/arch.test.ts`)가 swc 를 쓰므로 **`SWC_NATIVE_BINDING_CACHE` 를 본인 소유이고 상위 경로가 다른 사용자에게 교체 권한을 주지 않는 절대 경로**(사용자 디렉토리 아래에 직접 만든 폴더 등)로 설정한 셸에서 돌린다. 의존 버전은 바꾸지 않는다. 리눅스(CI)에서의 발생 여부는 미측정(S1-6 몫) |
 
 ## 4. 시드 데이터
 

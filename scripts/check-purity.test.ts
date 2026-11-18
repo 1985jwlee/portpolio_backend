@@ -1,4 +1,4 @@
-// 문자열 규칙(check-purity) 시험 — 메모리 입력만 쓴다. 파일·네트워크를 읽지 않고, 시계는 규모 시험 한 묶음만 읽는다.
+// 소스 규칙(check-purity) 시험 — 메모리 입력만 쓴다. 파일·네트워크·시계를 읽지 않는다.
 import { describe, expect, test } from "bun:test";
 import { PURITY_RULE_IDS, scanPurity } from "./check-purity.ts";
 
@@ -28,7 +28,7 @@ describe("B9-env 환경 접근", () => {
 		]);
 	});
 
-	test("process·Bun 의 ?.·[ 접근은 속성 이름과 상관없이 잡는다", () => {
+	test("process·Bun 의 ?.·[ 접근도 속성이 env 면 잡는다", () => {
 		const lines = [
 			"const v = process?.env?.X;",
 			'const v = process["env"].X;',
@@ -116,25 +116,58 @@ describe("B9-env 환경 접근", () => {
 		expect(wrong(USECASE, cases, [])).toEqual([]);
 	});
 
-	test("문서에 적은 한계 — 못 잡는 표기와 멤버 접근 오탐을 그대로 고정한다", () => {
-		// 미탐: 이름공간·기본 임포트, 별칭, require, 구조분해의 따옴표 키·주석·타입 주석 (01 §5 B9 칸)
+	test("문서에 적은 한계 — AST 로도 못 잡는 표기를 그대로 고정한다", () => {
+		// 미탐: 이름공간·기본 임포트, 별칭, require, 키를 변수로 계산하는 접근 (01 §5 B9 칸) — 스코프·값 추적이 없다.
 		const missed = [
 			'import * as b from "bun";\nconst v = b.env.X;',
 			'import b from "bun";\nconst v = b.env.X;',
 			"const p = process;\nconst v = p.env.X;",
 			'const v = require("bun").env.X;',
+			'const key = "env";\nconst v = process[key];',
+		];
+		expect(wrong(USECASE, missed, [])).toEqual([]);
+	});
+
+	test("구조분해의 주석 낀 키·따옴표 키·타입 주석도 노드로 보고 잡는다", () => {
+		const lines = [
 			"const {\n\t// 설정\n\tenv,\n} = process;",
 			"const {\n\targv, // 인자\n\tenv,\n} = process;",
 			'const { "env": e } = process;',
+			'const { ["env"]: e } = process;',
 			"const { env }: NodeJS.Process = process;",
 		];
-		expect(wrong(USECASE, missed, [])).toEqual([]);
-		// 오탐: 앞에 . 이 붙은 멤버 접근도 process?.·process[ 로 걸린다
-		const falsePositive = [
+		expect(wrong(USECASE, lines, ["B9-env:1"])).toEqual([]);
+	});
+
+	test("process·Bun 이 아닌 객체의 ?.·[ 접근과 env 가 아닌 속성은 잡지 않는다", () => {
+		const lines = [
 			"const v = job.process?.(x);",
 			"const r = this.process[step];",
+			'process["exitCode"] = 1;',
+			"const a = process?.argv;",
+			"const b = Bun?.version;",
 		];
-		expect(wrong(USECASE, falsePositive, ["B9-env:1"])).toEqual([]);
+		expect(wrong(USECASE, lines, [])).toEqual([]);
+	});
+
+	test("주석·문자열·템플릿 안의 표기는 코드가 아니라서 잡지 않는다", () => {
+		const lines = [
+			"// process.env 는 packages/config 에서만 읽는다\nconst a = 1;",
+			"/* const { env } = process; */\nconst a = 1;",
+			'const s = "process.env.X";',
+			"const t = `Bun.env.X`;",
+		];
+		expect(wrong(USECASE, lines, [])).toEqual([]);
+	});
+
+	test("(process as X).env·process!.env 처럼 값을 감싼 객체도 같은 접근으로 본다", () => {
+		const lines = [
+			"const a = (process as NodeJS.Process).env.X;",
+			"const b = process!.env.X;",
+			"const c = (process).env.X;",
+			"const d = globalThis?.process?.env;",
+		];
+		expect(wrong(USECASE, lines, ["B9-env:1"])).toEqual([]);
 	});
 
 	test("packages/config 와 제품 소스 밖(시험·scripts)은 대상이 아니다", () => {
@@ -207,7 +240,7 @@ describe("B2-time-random 시간·난수 직접 호출", () => {
 	test("new Date (x)·여러 줄 인자·new DateTime()·toDate() 는 잡지 않는다", () => {
 		const lines = [
 			"new Date (x);",
-			"new Date(",
+			"new Date(\n\tvalue\n);",
 			"new Date(\n\tvalue,\n);",
 			"new DateTime();",
 			"const d = toDate();",
@@ -322,9 +355,9 @@ describe("B11 쓰기·raw SQL", () => {
 	});
 });
 
-describe("포매터(Biome 2.6.8)가 실제로 만든 줄바꿈 모양", () => {
-	// 입력은 기본 설정의 biome format 출력을 그대로 옮긴 것이다 — 줄이 길어 포매터가 어디서 나눴는지가 그대로 들어 있다.
-	// 보고 줄은 매치가 시작한 줄이다. 나뉘는 자리는 포매터 버전·줄 길이·들여쓰기에 따라 바뀌므로 어디서 나눠도 잡아야 한다.
+describe("줄바꿈이 낀 입력 — 회귀 입력(포매터 출력에서 옮겨 둔 모양)", () => {
+	// 입력은 Biome 2.6.8 기본 설정의 포맷 출력을 옮겨 둔 고정 입력이다 — 줄이 길어 어디서 나뉘었는지가 그대로 들어 있다.
+	// 판정은 AST 노드라 줄바꿈과 무관하고 포매터 버전에도 묶이지 않는다. 이 묶음은 보고 줄이 갈래가 정한 노드의 시작 줄로 고정되는지를 지킨다.
 	const DOMAIN = "modules/m/src/domain/x.ts";
 	const cases = [
 		{
@@ -712,9 +745,9 @@ describe("포매터(Biome 2.6.8)가 실제로 만든 줄바꿈 모양", () => {
 	}
 });
 
-describe("`.` 앞뒤 줄바꿈 — 포매터가 만든 적은 없지만 같은 갈래라 허용하는 표기", () => {
+describe("`.` 앞뒤 줄바꿈 — 포매터가 만든 적은 없지만 같은 노드라 잡는 표기", () => {
 	// 위 묶음은 Biome 2.6.8 이 만든 출력이다. 포매터 버전·설정이 바뀌어 대문자 머리(Date·Math·Bun)나 import.meta 도
-	// 나뉘기 시작해도 같은 갈래가 잡는다 — 갈래의 모든 `.` 가 앞뒤 줄바꿈을 허용하기 때문이다.
+	// 나뉘기 시작해도 같은 노드로 파싱되므로 잡는다 — 공백·줄바꿈은 노드를 바꾸지 않는다.
 	test("B2 의 모든 머리가 `.` 앞뒤에서 나뉘어도 잡는다", () => {
 		const lines = [
 			"const a = Date\n\t.now();",
@@ -749,23 +782,26 @@ describe("`.` 앞뒤 줄바꿈 — 포매터가 만든 적은 없지만 같은 �
 	});
 });
 
-describe("세 규칙 공통 한계 — 문서에 적은 미탐을 그대로 고정한다", () => {
-	test("호출의 토큰 사이에 주석이 끼면 못 잡는다", () => {
+describe("토큰 사이 주석·중괄호 — 문자열 검사가 놓치던 모양을 노드로 잡는다", () => {
+	test("호출의 토큰 사이에 주석이 끼어도 잡는다", () => {
 		expect(
 			rules("modules/m/src/domain/x.ts", "const d = new Date(/* now */);"),
-		).toEqual([]);
+		).toEqual(["B2-time-random:1"]);
+		expect(
+			rules("modules/m/src/domain/x.ts", "const t = Date /* c */ .now();"),
+		).toEqual(["B2-time-random:1"]);
 		expect(
 			rules(USECASE, 'await tx.execute(\n\t// 정리\n\t"DELETE",\n);'),
-		).toEqual([]);
+		).toEqual(["B11-write:1"]);
 	});
 
-	test("구조분해 안 문자열·주석에 짝이 안 맞는 중괄호가 있거나 중괄호가 네 겹 이상이면 못 잡는다", () => {
-		const missed = [
+	test("구조분해 안 문자열·주석에 짝이 안 맞는 중괄호가 있거나 중괄호가 네 겹 이상이어도 잡는다", () => {
+		const lines = [
 			'const { env = "}" } = process;',
 			"const {\n\tenv, // }\n} = process;",
 			"const { env: { A: { B: { C } } } } = process;",
 		];
-		expect(wrong(USECASE, missed, [])).toEqual([]);
+		expect(wrong(USECASE, lines, ["B9-env:1"])).toEqual([]);
 	});
 });
 
@@ -799,29 +835,122 @@ describe("줄 번호 보고", () => {
 	});
 });
 
-describe("규모 — 매치 수·같은 키 수에 이차로 늘지 않는다 (실시계, 여유를 크게 둔 상한)", () => {
-	// 실행 시간을 재므로 L2 가 아니라 L3 다. 상한은 고치기 전 구현이 몇 배 넘기도록(7~12 초) 잡았고 고친 뒤는 수십~백여 ms 다.
-	const LIMIT_MS = 2000;
-	const elapsedMs = (path: string, text: string) => {
-		const start = performance.now();
-		scanPurity(path, text);
-		return performance.now() - start;
-	};
+describe("정규식이 놓치던 표기 여섯 — 노드로 잡는다 (TD-1 m-2)", () => {
+	const DOMAIN_PATH = "modules/m/src/domain/x.ts";
 
-	test("위반이 3만 건이어도 줄 번호를 매치마다 처음부터 세지 않는다", () => {
-		expect(elapsedMs(USECASE, "x.delete(k);\n".repeat(32000))).toBeLessThan(
-			LIMIT_MS,
+	test("타입 인자가 붙은 sql<number>`…` 태그 템플릿", () => {
+		expect(rules(USECASE, "const q = sql<number>`select 1`;")).toEqual([
+			"B11-raw-sql:1",
+		]);
+	});
+
+	test(".execute<Row>( 의 문자열 인자", () => {
+		expect(rules(USECASE, 'await tx.execute<Row>("delete from a.t");')).toEqual(
+			["B11-write:1"],
 		);
 	});
 
-	test("한 객체에 env 키가 1만 개 넘게 있어도 구조분해 갈래가 후보마다 다시 훑지 않는다", () => {
-		const text = `const o = {\n${"\tenv: 1,\n".repeat(16000)}};\n`;
-		expect(elapsedMs(USECASE, text)).toBeLessThan(LIMIT_MS);
+	test(".execute?.( 의 템플릿 인자", () => {
+		expect(rules(USECASE, "await tx.execute?.(`delete from a.t`);")).toEqual([
+			"B11-write:1",
+		]);
 	});
 
-	test("임포트 목록에 env 가 수만 개 있어도 bun 임포트 갈래가 후보마다 다시 훑지 않는다", () => {
-		const text = `import {\n${"\tenv,\n".repeat(80000)}} from "x";\n`;
-		expect(elapsedMs(USECASE, text)).toBeLessThan(LIMIT_MS);
+	test("crypto?.randomUUID()", () => {
+		expect(rules(DOMAIN_PATH, "const id = crypto?.randomUUID();")).toEqual([
+			"B2-time-random:1",
+		]);
+	});
+
+	test("performance?.now()", () => {
+		expect(rules(DOMAIN_PATH, "const t = performance?.now();")).toEqual([
+			"B2-time-random:1",
+		]);
+	});
+
+	test("괄호 없는 new globalThis.Date", () => {
+		expect(rules(DOMAIN_PATH, "const d = new globalThis.Date;")).toEqual([
+			"B2-time-random:1",
+		]);
+	});
+});
+
+describe("줄 번호 — swc 위치(1부터 세는 UTF-8 바이트)를 줄로 바꾼다", () => {
+	test("위반 앞의 한글 주석이 있어도 바이트가 아니라 줄로 센다", () => {
+		// 한글 한 자는 UTF-8 로 3바이트라 문자 인덱스로 세면 위반이 뒤 줄로 밀린다.
+		const text = [
+			"// 한글 한글 한글 한글 한글 한글 한글 한글",
+			"const a = process.env.A;",
+			"const b = 1;",
+			"const c = 2;",
+			"const d = 3;",
+		].join("\n");
+		expect(rules(USECASE, text)).toEqual(["B9-env:2"]);
+	});
+
+	test("네 바이트 문자(이모지)가 앞 줄 문자열에 있어도 줄을 센다", () => {
+		const text =
+			'const s = "😀😀😀😀😀😀😀😀";\nconst a = process.env.A;\nconst b = 1;\nconst c = 2;';
+		expect(rules(USECASE, text)).toEqual(["B9-env:2"]);
+	});
+
+	test("같은 텍스트를 연속으로 스캔해도, 사이에 다른 텍스트를 스캔해도 결과가 같다", () => {
+		const text = "// 한글\nconst a = process.env.A;\nconst b = Bun.env.B;";
+		const first = scanPurity(USECASE, text);
+		scanPurity(USECASE, "const pad = 1;\n".repeat(200));
+		const second = scanPurity(USECASE, text);
+		expect(second).toEqual(first);
+		expect(first.map((v) => v.line)).toEqual([2, 3]);
+	});
+
+	test("첫 줄·개행 없는 마지막 줄의 위반도 자기 줄이다", () => {
+		expect(rules(USECASE, "process.env.A;")).toEqual(["B9-env:1"]);
+		expect(rules(USECASE, "a;\nb;\nprocess.env.A")).toEqual(["B9-env:3"]);
+	});
+
+	test("여러 줄에 걸친 노드는 갈래가 정한 시작 줄로 보고한다", () => {
+		// new Date( ) 식은 `new` 가 있는 줄, 쓰기 호출은 `.insert(` 가 있는 줄이다.
+		expect(
+			rules("modules/m/src/domain/x.ts", "a;\nconst d = new Date(\n);"),
+		).toEqual(["B2-time-random:2"]);
+		expect(
+			rules(USECASE, "await tx\n\t.insert(\n\t\tusers,\n\t)\n\t.values(v);"),
+		).toEqual(["B11-write:2"]);
+	});
+
+	test("셰뱅 줄이 있는 파일과 BOM 으로 시작하는 파일도 줄을 맞춘다", () => {
+		expect(
+			rules(USECASE, "#!/usr/bin/env bun\nconst a = process.env.A;"),
+		).toEqual(["B9-env:2"]);
+		expect(rules(USECASE, "﻿const a = 1;\nconst b = process.env.B;")).toEqual([
+			"B9-env:2",
+		]);
+	});
+});
+
+describe("파싱", () => {
+	test("구문 오류가 있는 제품 소스는 경로를 담은 오류를 던진다 — 조용히 통과시키지 않는다", () => {
+		expect(() => scanPurity(USECASE, "const = ;")).toThrow(USECASE);
+	});
+
+	test("적용 규칙이 없는 경로는 구문 오류여도 파싱하지 않는다", () => {
+		expect(scanPurity("scripts/x.ts", "const = ;")).toEqual([]);
+		expect(scanPurity("modules/m/test/x.ts", "const = ;")).toEqual([]);
+	});
+
+	test("확장자로 문법을 정한다 — .tsx 는 JSX, .js 는 타입 주석 없는 ECMAScript", () => {
+		expect(
+			rules(
+				"modules/m/src/usecase/x.tsx",
+				"const el = <div>{process.env.X}</div>;",
+			),
+		).toEqual(["B9-env:1"]);
+		expect(
+			rules("modules/m/src/usecase/x.js", "const v = process.env.X;"),
+		).toEqual(["B9-env:1"]);
+		expect(
+			rules("modules/m/src/usecase/x.mts", "const v: string = process.env.X!;"),
+		).toEqual(["B9-env:1"]);
 	});
 });
 
