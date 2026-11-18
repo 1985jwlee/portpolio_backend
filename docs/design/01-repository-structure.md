@@ -141,7 +141,8 @@ tsconfig.base.json            # 엄격 옵션 전부. 모든 패키지가 extend
 ├─ modules/*/tsconfig.json    # extends base, include: src, test
 ├─ apps/*/tsconfig.json       # include: src, test (test/ 도 tsc -b·dependency-cruiser 검사 대상)
 ├─ apps/api|ws-gateway|worker/tsconfig.json   # extends base, types: ["bun"]
-└─ apps/web/tsconfig.json     # extends base, lib: DOM, jsx: preserve, Next 플러그인
+├─ apps/web/tsconfig.json     # extends base, lib: DOM·ESNext, jsx: preserve, Next 플러그인
+└─ scripts/tsconfig.json      # extends base, types: ["bun"], include: **/*.ts (저장소 도구·저장소 시험)
 tsconfig.json                 # 루트: files: [], references 로 위 전부 나열 (tsc -b 용)
 ```
 
@@ -155,7 +156,12 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 | `noImplicitOverride` | true | 상속 구조(00 §4)의 오버라이드 명시 |
 | `verbatimModuleSyntax` | true | 타입 임포트 분리 |
 | `moduleResolution` | `bundler` | Bun·Next 공통 |
-| `target` / `module` | `ES2023` / `ESNext` | |
+| `target` / `module` | `ESNext` / `Preserve` | Bun 권장(https://bun.com/docs/typescript-6) |
+| `lib` | `["ESNext"]` | Bun 권장(https://bun.com/docs/typescript-6) |
+| `moduleDetection` | `force` | Bun 권장(https://bun.com/docs/typescript-6) |
+| `allowImportingTsExtensions` | true | Bun 권장(https://bun.com/docs/typescript-6) |
+| `skipLibCheck` | true | Bun 권장(https://bun.com/docs/typescript-6) |
+| `noFallthroughCasesInSwitch` | true | Bun 권장(https://bun.com/docs/typescript-6) |
 | `isolatedModules` | true | |
 | `noEmit` | true | 실행은 Bun 이 직접 TS 를 읽는다. `tsc` 는 검사 전용 |
 | `paths` | 사용하지 않는다 | 워크스페이스 해석에 맡긴다(별칭이 경계 검사를 흐리지 않게) |

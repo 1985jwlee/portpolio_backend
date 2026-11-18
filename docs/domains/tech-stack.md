@@ -21,7 +21,7 @@
 
 | 영역 | 선택 | 버전 | 상태 | 비고 |
 |---|---|---|---|---|
-| 언어 | TypeScript (엄격 모드) | — | 확정 | `typescript-strict` 규약: `any`·`as` 남용 금지, 에러 처리 패턴 |
+| 언어 | TypeScript (엄격 모드) | 7.0.2 (2026-11-16 재조회) | 확정 | `typescript-strict` 규약: `any`·`as` 남용 금지, 에러 처리 패턴 · 사용법은 Bun 문서 [TypeScript 6 and 7](https://bun.com/docs/typescript-6) — `types` 기본값이 빈 목록이라 단위 tsconfig 에 `types` 를 명시한다 |
 | 런타임 | **Bun** | 1.4.4 (로컬도 1.4.4로 맞춤, 2026-11-04) | 확정 | api·ws-gateway·worker·**web** 모두 Bun 으로 실행 |
 | 패키지 관리·스크립트 | Bun (`bun.lock`) | — | 확정 | 저장소 도구도 TypeScript(Bun) |
 | 컨테이너 베이스 | `oven/bun` (`1.4-alpine` 또는 `slim`) | 1.4 | 확정 | amd64·arm64 제공 |
@@ -102,12 +102,12 @@
 | 영역 | 선택 | 버전 | 상태 | 비고 |
 |---|---|---|---|---|
 | 모노레포 | **Bun 워크스페이스 단독** | — | 확정 | Turborepo 는 빌드가 느려질 때 추가 |
-| 경계 검사 | **dependency-cruiser** | 18.7 | 확정 | 계층 규칙(`domain ↛ service` 등)과 CQRS 규칙(`usecase/query ↛ 쓰기 포트`)을 정규식 규칙으로 표현, `error` 면 CI 실패 |
+| 경계 검사 | **dependency-cruiser** | 18.7 | 확정 | 계층 규칙(`domain ↛ service` 등)과 CQRS 규칙(`usecase/query ↛ 쓰기 포트`)을 정규식 규칙으로 표현, `error` 면 CI 실패 · **TypeScript 7.0.x 와 함께 쓰면 `.ts` 를 0건 검사하고 종료 0 이다** — 18.7.2 의 지원 범위가 `typescript >=2.0.0 <7.0.0` 이다(`depcruise --info`, 2026-11-16). 18.8.0 베타는 `>=7.1.0 <8.0.0` 을 받는다. 해석 경로는 S1-5 가 정한다 |
 | 린트·포맷 | **Biome** | 2.6 | 확정 | **계층 검사는 못 한다**(`noRestrictedImports` 는 임포트하는 쪽을 구분하지 못함) → 위 도구가 맡는다 |
 | 단위·통합 시험 | **`bun test`** | Bun 내장 | 확정 | `mock.module` 지원. 가짜 타이머 지원 여부는 미확인 → 시계는 포트로 주입(ADR-019) |
 | DB 통합 시험 | CI 의 compose 서비스(실제 Postgres) | — | 확정 | Testcontainers 는 Bun 호환 확인 후(**G9**, 선택) |
 | E2E | **Playwright** | 1.64.1 | 채택(Bun 동작 확인) | `bun add -d @playwright/test` + `bunx playwright install chromium`(브라우저 약 150MB를 CI 에서 받음) |
-| 타입 검사 | `tsc --noEmit` | — | 확정 | CI 필수 |
+| 타입 검사 | `tsc --noEmit` | 7.0.2 | 확정 | CI 필수 |
 
 ## 10. M1 에서 쓰지 않는 것
 

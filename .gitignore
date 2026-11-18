@@ -22,3 +22,11 @@ dist/
 
 # 측정 증거 로그는 추적한다(*.log 규칙의 예외, ADR-050)
 !spikes/**/results/*.log
+
+# 환경 변수 — 실제 값은 추적하지 않고 견본만 추적한다 (S1-1, design/02 §5)
+.env
+.env.*
+!.env.example
+
+# tsc -b 증분 정보 (S1-1)
+*.tsbuildinfo

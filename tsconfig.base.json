@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true,
+		"noImplicitOverride": true,
+		"verbatimModuleSyntax": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"moduleResolution": "bundler",
+		"target": "ESNext",
+		"module": "Preserve",
+		"lib": ["ESNext"],
+		"moduleDetection": "force",
+		"allowImportingTsExtensions": true,
+		"skipLibCheck": true,
+		"noFallthroughCasesInSwitch": true
+	}
+}

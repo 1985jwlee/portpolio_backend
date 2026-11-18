@@ -1,0 +1,21 @@
+{
+	"name": "portpolio_backend",
+	"private": true,
+	"packageManager": "bun@1.4.4",
+	"workspaces": [
+		"apps/*",
+		"modules/*",
+		"packages/*"
+	],
+	"scripts": {
+		"lint": "biome check",
+		"format": "biome format --write",
+		"typecheck": "tsc -b --noEmit",
+		"check": "bun run lint && bun run typecheck"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.6.8",
+		"@types/bun": "1.4.4",
+		"typescript": "7.0.2"
+	}
+}

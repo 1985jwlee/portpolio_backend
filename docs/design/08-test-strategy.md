@@ -279,7 +279,7 @@ classDiagram
 | AC-029 | 감사 조회·보관 | 비관리자 403, 키셋 조회, `auth` 7일·`admin`/`system` 90일 경계(가짜 시계) | L3 | §2.0c, `apps/api/test/integration/audit.test.ts` |
 | AC-030 | dead 재투입 | `dead → received/new`, 시도 횟수 초기화, 사유·감사 행 | L3 | §7.2, `test/chaos/dead-requeue.test.ts` |
 | AC-031 | public/private 분리 연결 | 쿠키 없는 `/ws/private` 업그레이드 401, 익명 세션의 `flow.step` 수신·타 세션 미수신, `4409` | L3 | §6.x, `apps/ws-gateway/test/channels.test.ts`, `test/e2e/realtime.spec.ts` |
-| AC-032 | 라이선스·콘텐츠 고지 | 저장소 루트 `LICENSE`(MIT)와 README 고지 존재 검사 | L1 | `scripts/check-license.ts`(제안) |
+| AC-032 | 라이선스·콘텐츠 고지 | 저장소 루트 `LICENSE`(MIT)와 README 고지 존재 검사 · README 라이선스 절이 `LICENSE`·`CONTENT-LICENSE.md` 를 가리킴(ADR-029 검증 방법) | L2 | `scripts/check-license.test.ts` |
 | AC-033 | 멱등 쓰기 | 같은 키 재전송·동시 2건·다른 본문 422·처리 중 409 | L3 | `modules/guestbook/test/integration/idempotency.test.ts` |
 | AC-034 | 필드 키 회전 | `k1`→`k2` 재암호화, 재실행 멱등, 중단 후 이어서, 옛 키 행 0 확인 | L3 | §2.0b, `packages/infra/test/crypto/rotate.test.ts` |
 | AC-035 | 사고 대응 리허설 | design/13 §10 체크리스트 실행(구 비밀 거부·새 비밀 동작·소요 시간) | L4(수동) | 릴리스·분기 체크리스트 |
