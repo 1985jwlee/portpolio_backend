@@ -13,6 +13,7 @@
 | 숫자 없는 비기능 요구는 검증하지 않는다 | 성능은 수치·도구·환경·반복 횟수를 먼저 고정한다(§9) |
 | 못 돌린 것과 안 한 것을 구분 | 불가(예: WSL2 에서 TLS 종단 성능)는 사유와 함께 "L4 미수행"으로 기록한다 |
 | 시험이 설계를 강제한다 | `Clock`·`IdGenerator`·`UnitOfWork` 포트로만 시간·식별자·트랜잭션에 접근하므로 domain/service 는 DB 없이 시험된다(00 §4.2) |
+| 검사 대상 0건은 실패한다 | 검사가 하나도 보지 않았는데 통과하면 검사가 빈 것이다. 린트는 `--no-errors-on-unmatched` 를 쓰지 않고(S1-1), 경계 검사는 독립 열거한 파일이 전부 검사됐는지 확인한다(`GUARD-empty`·`GUARD-uncruised`, S1-5) |
 
 ## 2. 계층과 등급
 
@@ -40,6 +41,7 @@ flowchart TB
 | 계층 | 대상 | 등급 | 실행 | 위치 |
 |---|---|---|---|---|
 | 정적 | 타입·린트·경계(계층·CQRS 규칙) | **L1** | 매 PR | 저장소 전체 |
+| 경계 규칙 판정 | 위반·통과 픽스처 트리의 규칙 ID 집합(위반 집합 = 기대 집합, 통과 트리는 무위반), 비공허성 가드(빈 트리·열거 누락), B5 패키지 순환·`check-purity`·`check-cqrs` 판정, typescript 트랜스파일러 카나리 — 위 정적 행의 L1 은 검사 자체의 등급이고, 이 행은 그 판정을 시험하는 등급이다(둘은 다르다) | **L2**(판정 로직) · **L2(조건부: 읽기 전용 + 같은 체크아웃의 추적 파일)**(픽스처 실행) | 매 PR | `scripts/*.test.ts` · 픽스처 `scripts/fixtures/arch/` |
 | 단위 | `domain`, `service`, 값 객체, 오류 매핑, `Upcaster`, `ProjectorBase.isStale`, 재시도 백오프 계산, `ReconnectPolicy`, `SeqTracker` | **L2** | 매 PR | `modules/<m>/**/*.test.ts` |
 | 계약 | `packages/protocol` 의 REST/WS/이벤트 스키마: 골든 JSON 인코딩·디코딩·업캐스트, 서버·클라이언트가 같은 스키마를 쓰는지 | **L2** | 매 PR | `packages/protocol/test/` |
 | 모듈 통합 | usecase + 실제 Postgres 어댑터, 트랜잭션·outbox·inbox·읽기 모델·마이그레이션 | **L3** | 매 PR | `modules/<m>/test/integration/` |
@@ -279,7 +281,7 @@ classDiagram
 | AC-029 | 감사 조회·보관 | 비관리자 403, 키셋 조회, `auth` 7일·`admin`/`system` 90일 경계(가짜 시계) | L3 | §2.0c, `apps/api/test/integration/audit.test.ts` |
 | AC-030 | dead 재투입 | `dead → received/new`, 시도 횟수 초기화, 사유·감사 행 | L3 | §7.2, `test/chaos/dead-requeue.test.ts` |
 | AC-031 | public/private 분리 연결 | 쿠키 없는 `/ws/private` 업그레이드 401, 익명 세션의 `flow.step` 수신·타 세션 미수신, `4409` | L3 | §6.x, `apps/ws-gateway/test/channels.test.ts`, `test/e2e/realtime.spec.ts` |
-| AC-032 | 라이선스·콘텐츠 고지 | 저장소 루트 `LICENSE`(MIT)와 README 고지 존재 검사 · README 라이선스 절이 `LICENSE`·`CONTENT-LICENSE.md` 를 가리킴(ADR-029 검증 방법) | L2 | `scripts/check-license.test.ts` |
+| AC-032 | 라이선스·콘텐츠 고지 | 저장소 루트 `LICENSE`(MIT)와 README 고지 존재 검사 · README 라이선스 절이 `LICENSE`·`CONTENT-LICENSE.md` 를 가리킴(ADR-029 검증 방법) | L2(조건부: 읽기 전용 + 같은 체크아웃의 추적 파일) | `scripts/check-license.test.ts` |
 | AC-033 | 멱등 쓰기 | 같은 키 재전송·동시 2건·다른 본문 422·처리 중 409 | L3 | `modules/guestbook/test/integration/idempotency.test.ts` |
 | AC-034 | 필드 키 회전 | `k1`→`k2` 재암호화, 재실행 멱등, 중단 후 이어서, 옛 키 행 0 확인 | L3 | §2.0b, `packages/infra/test/crypto/rotate.test.ts` |
 | AC-035 | 사고 대응 리허설 | design/13 §10 체크리스트 실행(구 비밀 거부·새 비밀 동작·소요 시간) | L4(수동) | 릴리스·분기 체크리스트 |

@@ -1,0 +1,9 @@
+{
+	"exceptions": [
+		{
+			"id": "X3",
+			"reader": "modules/trace/src/port/trace-reader.ts",
+			"schemaObject": "trace.trace_step"
+		}
+	]
+}

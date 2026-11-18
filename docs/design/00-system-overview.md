@@ -290,7 +290,7 @@ classDiagram
     GuestbookProjector ..> ReadRepository
 ```
 
-- **`CommandHandler` 는 `ReadRepository` 를, `QueryHandler` 는 `WriteRepository` 를 주입받을 수 없다**(타입으로 분리 + dependency-cruiser 규칙). 이것이 구조적 CQRS 강제다.
+- **`CommandHandler` 는 `ReadRepository` 를, `QueryHandler` 는 `WriteRepository` 를 주입받을 수 없다**(타입으로 분리 + 경계 검사 B3 `check-cqrs` — design/01 §5). 이것이 구조적 CQRS 강제다.
 - 포트 구현(`adapter/postgres`)은 엔트리포인트의 조립 단계에서만 연결한다.
 - `AuditWriter.record(tx, entry)` 는 `OutboxWriter` 와 같은 패턴이다: `events` 모듈이 소유하고(`events.audit_log`), 다른 모듈의 usecase 가 **자기 트랜잭션 안에서** 호출해 행위와 감사 기록이 원자적이다([ADR-027](../adr/ADR-027-server-logs.md)).
 - **모든 쓰기(C·U·D)는 `UnitOfWork.run` 의 트랜잭션 안에서만** 실행한다. `DbPool` 은 읽기 전용 핸들만 주고 쓰기 메서드는 `TxContext` 에만 있다([ADR-025](../adr/ADR-025-query-layer.md)).

@@ -1,0 +1,5 @@
+{
+	"ports": {
+		"src/port/trace-reader.ts": { "kind": "read", "tables": ["trace.trace_step"] }
+	}
+}

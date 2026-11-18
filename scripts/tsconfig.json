@@ -4,5 +4,6 @@
 		"composite": true,
 		"types": ["bun"]
 	},
-	"include": ["**/*.ts"]
+	"include": ["**/*.ts"],
+	"exclude": ["fixtures/**"]
 }

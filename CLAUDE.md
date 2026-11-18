@@ -19,6 +19,7 @@ portpolio_backend — 포트폴리오 백엔드 저장소. 상세는 `README.md`
 | `tech-stack.md` | 스택·버전·도구·구현 초기 관문. 의존성 추가·교체 전 |
 | `architecture.md` | 구성·경계·흐름·신뢰 경계·배포. 모듈 추가·의존 변경 전 |
 | `database-schema.md` | 테이블·제약·보관 정책. 마이그레이션 작성 전 |
+| `tech-debt.md` | 미룬 것(TD-n)의 담당·기한·닫는 방법. 작업 계획 전·`check-purity`·`arch` 수정 전·S1-6/S2-1 시작 전 |
 
 구현 수준의 설계(저장소 골격, API·WS·이벤트 계약, 인증, 프론트, 시험, CI/CD, 보안, 구현 계획, 콘텐츠)는 `docs/design/` 이고 출발점은 `00-system-overview.md` 다. Phase 1~6(바둑·상거래·풀필먼트·채팅) 영역 설계는 `docs/design/phases/` 이고 `00-platform-evolution.md` 가 정본(서비스 경계·B12·이벤트 계약·ENC 통합표·사용자 결정 목록)이다. 기능 단위 상세(클래스·시퀀스·순서도)는 `docs/design/features/` 이고 `00-feature-catalog.md` 가 색인이다. 보안사고(유출·침해) 대응 런북은 `docs/design/13-incident-response.md` 다.
 

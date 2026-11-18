@@ -7,7 +7,8 @@
 			"packages/**",
 			"scripts/**",
 			"test/**",
-			"*.json"
+			"*.json",
+			"!scripts/fixtures"
 		]
 	}
 }

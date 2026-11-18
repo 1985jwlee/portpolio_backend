@@ -50,7 +50,7 @@ flowchart TD
     T["pull_request"] --> I["install<br/>frozen-lockfile · 캐시"]
     I --> L["lint<br/>biome check"]
     I --> TC["typecheck<br/>tsc -b --noEmit"]
-    I --> AR["arch<br/>dependency-cruiser · check-purity"]
+    I --> AR["arch<br/>bun scripts/arch.ts (dependency-cruiser · check-cqrs · check-purity)"]
     I --> GS["gen:schema --check<br/>protocol 스키마 최신"]
     L & TC & AR & GS --> U["unit test<br/>bun test"]
     U --> INT["integration test<br/>postgres 서비스 컨테이너"]

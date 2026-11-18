@@ -167,7 +167,7 @@ classDiagram
 | Grafana 관리자 비밀번호 | `.env` | `secrets/grafana_admin_password` | 없음 |
 | 백업 암호화 **공개키**(`BACKUP_AGE_RECIPIENT`, 비밀 아님) | 개발에서는 미사용 | 환경변수/설정(서버에는 공개키만, ADR-026). **개인키는 서버에 두지 않고** 사용자가 오프라인 보관(복구 시험 때만 사용) | 없음 |
 
-- `.env.example` 만 커밋한다. **비밀 항목은 값을 비워 두고**, 비밀이 아닌 항목(포트·기본값)은 개발용 값을 채운다. `.env`·`secrets/` 는 `.gitignore`.
+- `.env.example` 만 커밋한다. **비밀 항목은 값을 비워 두고**, 비밀이 아닌 항목(포트·기본값)은 개발용 값을 채운다. `.env`·`secrets/` 는 `.gitignore`. `.gitignore` 에서 `.env.*` 가 `.env.example` 까지 덮으므로 `!.env.example` 를 그 뒤에 둔다(S1-1).
 - 라이브는 compose 의 파일 기반 secrets 를 마운트하고, 앱은 `NAME_FILE` 규약(01 §7.1)으로 읽는다. 환경변수로 비밀을 넘기지 않는다(`docker inspect` 노출 방지).
 - `secrets/` 는 호스트의 저장소 **밖 경로**에 두고 권한 `0600`, 소유 사용자 한 명.
 - 개발용과 운영용 **OAuth 앱·Grafana 비밀번호는 서로 다른 값**이다. 개발 `.env` 가 유출돼도 운영이 안전해야 한다.

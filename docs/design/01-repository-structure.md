@@ -42,7 +42,7 @@ portpolio_backend/
 │  ├─ prometheus/  grafana/      # 설정·대시보드 프로비저닝 (grafana/provisioning/alerting/: 연락처·정책·규칙, F17 §16.3)
 │  ├─ systemd/                   # pf-archive-logs · pf-backup · pf-pull-deploy 의 .service/.timer (F17 §16.1.1)
 │  └─ scripts/                   # pull-deploy.sh, backup.sh, archive-logs.sh, logq.sh 등 (09, 02, ADR-027)
-├─ scripts/                      # TypeScript(Bun) 저장소 도구: check-purity.ts, check-cqrs.ts, gen-schema.ts, seed.ts
+├─ scripts/                      # TypeScript(Bun) 저장소 도구: arch.ts(경계 검사 실행기), check-purity.ts, check-cqrs.ts, gen-schema.ts, seed.ts · fixtures/arch/(경계 검사 픽스처 — 린트·타입·경계 검사에서 제외)
 ├─ test/                         # 교차 시험: chaos/(동시성·장애), e2e/, load/ (k6) (08 §11). 재접속 시험은 apps/ws-gateway/test/
 ├─ docs/  specs/                 # 문서
 ├─ .dependency-cruiser.cjs  biome.json  tsconfig.base.json  tsconfig.json
@@ -142,9 +142,11 @@ tsconfig.base.json            # 엄격 옵션 전부. 모든 패키지가 extend
 ├─ apps/*/tsconfig.json       # include: src, test (test/ 도 tsc -b·dependency-cruiser 검사 대상)
 ├─ apps/api|ws-gateway|worker/tsconfig.json   # extends base, types: ["bun"]
 ├─ apps/web/tsconfig.json     # extends base, lib: DOM·ESNext, jsx: preserve, Next 플러그인
-└─ scripts/tsconfig.json      # extends base, types: ["bun"], include: **/*.ts (저장소 도구·저장소 시험)
+└─ scripts/tsconfig.json      # extends base, types: ["bun"], include: **/*.ts, exclude: fixtures/** (저장소 도구·저장소 시험. fixtures/ 는 의도적 위반 픽스처)
 tsconfig.json                 # 루트: files: [], references 로 위 전부 나열 (tsc -b 용)
 ```
+
+단위 tsconfig 사이에는 `references` 를 두지 않는다 — `tsc -b --noEmit` 에서 TS6310 으로 실패한다. 루트 `tsconfig.json` 의 `references` 로만 잇는다. 빈 디렉토리에는 단위 tsconfig 를 두지 않는다 — 내용 없는 단위는 TS18003, 참조 0 개인 루트는 TS18002 로 종료 1 이다(편차 DV-001).
 
 `tsconfig.base.json` 핵심 옵션(typescript-strict 규약과 같다):
 
@@ -168,7 +170,7 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 
 ## 5. 경계 검사 규칙 (dependency-cruiser)
 
-`.dependency-cruiser.cjs` 에 규칙으로 둔다. **위반 = CI 실패**(ADR-001). Biome 는 임포트하는 쪽을 구분하지 못하므로 이 도구가 담당한다.
+규칙은 수단이 셋이다 — 그래프 규칙은 `.dependency-cruiser.cjs`(구문 분석은 swc, [tech-stack §9](../domains/tech-stack.md)), B3 는 `scripts/check-cqrs.ts`, 문자열 규칙은 `scripts/check-purity.ts`. B5(패키지 순환)와 비공허성 가드는 셋을 하나로 돌리는 실행기 `scripts/arch.ts` 가 맡는다(`bun run arch`). **위반 = CI 실패**(ADR-001). Biome 는 임포트하는 쪽을 구분하지 못하므로 이 도구가 담당한다.
 
 | ID | 규칙 | 금지 대상 |
 |---|---|---|
@@ -186,17 +188,45 @@ tsconfig.json                 # 루트: files: [], references 로 위 전부 나
 | **B14** 마이그레이션 격리 (ADR-052) | `modules/<m>/migrations` 의 SQL 은 다른 모듈의 스키마 객체(표·함수·트리거)를 참조하지 않는다. 모듈은 `identity` 를 호출하지 않고 엔트리포인트가 푼 `ActorContext` 를 받는다 | 타 모듈 스키마 참조, 모듈의 identity 직접 호출 |
 | **B10** 보조 포트 구현 격리 | `@pf/infra` 는 `apps/*/src/compose/**` 에서만 임포트. `domain`·`service`·`usecase` ↛ `@pf/infra` | usecase 가 Redis·메모리 구현에 결합 (ADR-024) |
 
+**규칙 정본 — 어느 수단이 무엇을 잡는가 (S1-5)**. 위반 보고는 아래 위반 ID 로 시작하므로 빨강을 본 사람이 위 표의 이유 열로 곧장 온다. 시험 픽스처는 `scripts/fixtures/arch/{violating,passing,empty}` 이고, 규칙마다 위반 트리에서 그 ID 가·통과 트리에서 무위반이·빈 트리에서 0건 가드가 `bun test` 로 확인된다(`scripts/arch.test.ts`).
+
+| ID | 수단 · 위반 ID | S1-5 범위 |
+|---|---|---|
+| B1 | dependency-cruiser · `B1-domain`·`B1-service`·`B1-port`·`B1-usecase` | 구현 |
+| B2 | dependency-cruiser · `B2-core`(내장 모듈 전부)·`B2-io-package`(`packages/db`·`postgres`·`pg`) / `check-purity` · `B2-time-random` | 구현. 드라이버 절은 고정 픽스처 없음 — 드라이버가 설치되면 해석 결과가 바뀐다(첫 사용 S1-4 가 `bun run arch` 로 본다) |
+| B3 | `check-cqrs` · `B3-command-read`·`B3-query-write`·`B3-undeclared-port`·`B3-declaration` | 선언 형식·usecase 방향. 어댑터 스키마 대조는 S2-1. **한계**: 방향은 `usecase/command/`·`usecase/query/` 아래 파일이 같은 모듈의 포트 파일을 직접 임포트하는 간선만 판정한다 — 서비스·헬퍼를 거친 간접 경로와 그 밖 디렉토리의 usecase 는 보지 않는다(S2-1 이 이어받는다) |
+| B4 | dependency-cruiser · `B4-deep-module`·`B4-deep-outside`·`B4-deep-db` | 구현 |
+| B5 | `scripts/arch.ts` · `B5-module-cycle` — 파일 간선을 `apps/<a>`·`modules/<m>`·`packages/<p>` 로 접어 강연결요소로 판정(같은 패키지 안 파일 순환은 대상 아님, type-only 간선도 센다) | 구현 |
+| B6 | dependency-cruiser · `B6-adapter` | 구현. 조립이 어댑터를 어떤 경로로 받는지는 정하지 않았다(아래 모호점) |
+| B7 | dependency-cruiser · `B7-packages-up`·`B7-modules-up`·`B7-kernel` | 구현 |
+| B8 | dependency-cruiser · `B8-web` | 구현 |
+| B9 | `check-purity` · `B9-env` / dependency-cruiser · `B9-process-import` | 구현. `import { env } from "node:process"` 는 문자열 `process.env` 가 없어 `B9-env` 를 우회하므로 임포트 규칙을 함께 둔다. 문자열 규칙은 `process.env`·`Bun.env`·`import.meta.env` 와 같은 접근의 다른 표기(`process`·`Bun` 의 `?.`·`[`, 중첩 구조분해 `{ env: { X } } = process`·`Bun`, `bun` 에서 `env` 명명 임포트)도 잡는다 — 파일 전체 텍스트에 돌리므로 한 줄이든 포매터가 여러 줄로 나눈 것(`process` 뒤에서 나뉜 `.env` 포함)이든 같다. **한계**: 이름공간·기본 임포트(`import * as b from "bun"`)의 `b.env`·별칭 변수(`const p = process`)·`require("bun")` 는 못 잡고, 구조분해도 키를 따옴표·계산식으로 쓰거나 키 앞에 주석이 끼거나 타입 주석이 붙거나 중괄호가 네 겹 이상이면 못 잡는다(세 규칙 공통의 한계는 아래 "검사하지 않는 것" ⑤). `?.`·`[` 는 속성 이름을 따지지 않아 `process["exitCode"]` 도, 앞에 `.` 이 붙은 멤버 접근 `job.process?.()`·`this.process[step]` 도 오탐으로 잡는다 — 앞의 `.` 을 빼면 `globalThis.process?.env` 를 놓치므로 오탐 쪽을 택했다(오탐은 위반으로 눈에 보이고 미탐은 조용하다) |
+| B10 | dependency-cruiser · `B10-infra` | 구현 |
+| B11 | `check-purity` · `B11-write`·`B11-raw-sql`(ADR-025 — raw SQL 은 `adapter/postgres/raw/` 에서만) | 구현. 쓰기 `execute` 는 인자가 문자열·템플릿 리터럴·`sql.raw` 인 형태만 문자열로 잡는다 — `.execute(` 전체를 막으면 usecase 의 `handler.execute(cmd)` 관례가 걸리고, 포매터가 인자를 다음 줄로 내린 호출도 잡고, 변수로 넘긴 SQL 은 문자열 검사가 못 잡는다. `B11-raw-sql` 은 `sql` 태그와 `sql.raw(` 둘을 보고, 포매터가 `sql` 뒤에서 `.raw(` 를 나눈 체인도 잡는다 |
+| B12 | — | 구현하지 않음(P0 §2.4 의 제안 단계) |
+| B13 | dependency-cruiser · `B13-impl-module`·`B13-impl-app`·`B13-contract` | 임포트 규칙 구현. 계약 버전 상승·골든 JSON 비교 절은 S1-18 |
+| B14 | dependency-cruiser · `B14-identity` | 임포트 규칙 구현. 마이그레이션 SQL 의 타 모듈 스키마 참조 절은 S1-18(S1-5 에서 이관, 편차 DV-005) |
+| (공통) | dependency-cruiser · `unresolvable` / `scripts/arch.ts` · `GUARD-empty`·`GUARD-uncruised` | 해석 안 되는 지정자는 경로 규칙을 조용히 피하므로 그 자체가 위반이다. 가드는 독립 열거한 소스가 0 개이거나 결과의 로컬 소스에 빠진 것이 있으면 실패시킨다. 열거는 dependency-cruiser 가 읽는 범위와 같다 — `.ts`·`.tsx`·`.mts`·`.cts`·`.js`·`.jsx`·`.mjs`·`.cjs` 와 점 디렉토리 — 그리고 문자열 규칙이 같은 열거를 쓰므로 `.mts`·`.js`·`.hidden/` 아래 파일도 B9·B11·시간·난수가 본다 |
+
+**범위 원칙**: 계층·순수성·환경·시간·쓰기·보조 포트 규칙(B1·B2·B6·B9~B11)은 제품 소스(`apps|modules|packages/<단위>/src/**`)에만 건다 — 시험은 정당하게 환경을 읽고 가짜·보조 구현을 쓴다. 패키지 경계 규칙(B4·B5·B7·B8·B13·B14)은 시험을 포함한 제품 트리 전체에 건다 — 모듈과 함께 떨어져 나갈 시험이 다른 모듈 구현에 붙으면 추출이 깨진다(ADR-052). 단 `kernel`(B7)과 계약 패키지(B13)가 "자기 밖 아무것도 임포트하지 않는다" 는 `src/` 에만 건다 — 그 패키지의 시험은 `bun:test` 를 임포트한다. B4 가 `packages/db` 에 허용한 스키마 진입(`adapter/postgres/schema.ts`)은 B7(`packages` ↛ `modules`)에서도 예외다 — 두 규칙이 서로 모순되지 않게 했다.
+
+**검사하지 않는 것**: ① 전역 API 를 통한 I/O(`fetch`·`globalThis` 경유) ② `usecase/event/` 의 포트 종류(B3 는 `command`·`query` 만 본다) ③ testkit 이 제품 번들에 섞이는 경계(`features/16` 77행 — S1-10) ④ 동적 경로 임포트(템플릿·변수 경로의 `import()`) — 정적 임포트만 쓰는 저장소 관례에 기댄다 ⑤ 문자열 규칙(B9·B11·시간·난수) 세 가지 모두 텍스트를 토큰으로 나누지 않으므로, 호출·구조분해의 토큰 사이에 주석이 끼거나(`execute(` 뒤 `// …`·`new Date(/* … */)`) 구조분해 안 문자열·주석에 짝이 안 맞는 중괄호가 있으면(`{ env = "}" } = process`) 못 잡는다.
+
+**문서 자체의 모호점 (규칙은 글자대로 두었다)**: B4·B6·§1.1 `exports` 는 조립이 어댑터를 어떤 경로로 받는지(`index` 가 어댑터 팩토리를 내보내는가 — 그러면 `index` → `adapter` 가 B6 위반)를 정하지 않았다. 두 규칙을 글자대로 두고 그 경로의 픽스처를 만들지 않았다 — 첫 모듈(S2-1)이 판정한다. §2 의존 다이어그램의 `GB → ID`·`RT → ID` 는 B14(모듈은 identity 를 호출하지 않는다)와 부딪힌다 — 다이어그램은 고치지 않았고 첫 모듈 전에 판정한다.
+
 **B3 를 파일명 정규식으로 쓰지 않는 이유**: 읽기 포트 `entry-view-repository.ts` 는 `*-repository` 글롭에도 걸려, `usecase/query/**` 가 읽기 포트를 임포트하면 쓰기 포트로 **오탐**한다(`*-view-repository` 를 제외하는 정규식을 쓰더라도 `*-read-repository`·`*-projection-repository` 같은 새 이름에서 다시 샌다). 그래서 이름이 아니라 스키마 객체(어느 스키마의 표를 읽고 쓰는가)를 정본으로 하고, 이름 관례(`*-repository` 쓰기, `*-view-repository` 읽기)는 사람이 읽는 힌트로만 남긴다. 시험: 읽기 포트를 쓰는 query usecase(통과), 쓰기 포트를 쓰는 query usecase(실패), 읽기 포트를 쓰는 command usecase(실패), X3 의 `GetTrace`(통과)를 한 벌씩 두는 규칙 픽스처.
 
-시간·난수 직접 호출 금지(`Date.now`, `new Date()`, `Math.random`, `crypto.randomUUID` in `domain`·`service`)는 임포트가 아니라 호출이라 dependency-cruiser 로 못 잡는다 → **`scripts/check-purity.ts`**(대상 디렉토리 텍스트 검사)로 CI 에서 확인한다. Biome 의 해당 규칙 사용 여부는 **미확인**(구현 시 확인하고, 있으면 그쪽으로 이관).
+**S1-5 가 구현한 범위와 선언 형식**: `modules/<m>/port-kinds.json` 은 `{ "ports": { "<모듈 디렉토리 기준 포트 파일 경로 — 예 src/port/entry-repository.ts>": { "kind": "write" | "read", "tables": ["<스키마>.<표>", …] } } }` 이고, `modules/cqrs-exceptions.json` 은 `{ "exceptions": [{ "id": "X<n>", "reader": "<검사 루트 기준 usecase 또는 포트 파일 경로>", "schemaObject": "<스키마>.<표>" }] }` 다(`reader` 를 파일 경로로 정한 것은 P0 §2.4 의 "usecase 또는 포트" 를 기계가 모호하지 않게 읽기 위해서다). 표의 스키마는 `<m>` 또는 `<m>_read`(§3), 읽기 포트는 `<m>_read` 표만 선언하고(예외 등재분 제외), 쓰기 포트는 `<m>` 표를 하나 이상 갖는다. 계약 패키지(`-contract`)에는 선언을 두지 않는다. 실저장소의 `cqrs-exceptions.json` 은 첫 X 독자가 생기는 작업(X4 — S2-1)이 만든다. **S1-5 는 선언의 형식·정합과 usecase 방향까지 판정한다 — 어댑터가 실제로 건드리는 스키마 객체와 선언의 대조는 첫 모듈 스키마 작업(S2-1)이 이어받는다**(편차 DV-005). 규칙 픽스처는 `scripts/fixtures/arch/` 에 있다.
+
+시간·난수 직접 호출 금지(`Date.now`, `new Date()`·괄호 없는 `new Date`·`new` 없는 `Date()`, `Math.random`, `crypto.randomUUID`·`crypto.getRandomValues`, `performance.now`, `Bun.nanoseconds` in `domain`·`service`)는 임포트가 아니라 호출이라 dependency-cruiser 로 못 잡는다 → **`scripts/check-purity.ts`**(대상 디렉토리 텍스트 검사)로 CI 에서 확인한다(위반 ID `B2-time-random`). 갈래의 `.` 는 앞뒤 줄바꿈을 허용하므로 포매터가 `crypto`·`performance` 호출을 `.` 앞에서 나눈 것(`crypto` 와 `.randomUUID()` 사이가 줄바꿈)도 잡는다. **Biome 로는 표현할 수 없다**(S1-5 확인, Biome 2.6.8 — `biome explain noRestrictedGlobals`, 2026-11-16): 속성 단위(`Date.now`·`Math.random`) 금지 규칙이 없고, `noRestrictedGlobals` 는 전역 이름(`Date`·`Math`) 전체를 막아 값 변환인 `new Date(value)` 까지 걸린다 → `check-purity` 를 유지한다.
 
 ```mermaid
 flowchart LR
     SRC["변경된 소스"] --> BIO["biome check<br/>포맷 · 린트"]
     BIO --> TSC["tsc -b --noEmit<br/>타입"]
-    TSC --> DC["dependency-cruiser<br/>B1~B8 · B10"]
+    TSC --> DC["dependency-cruiser<br/>B1·B2·B4·B6~B10·B13·B14"]
     DC --> CQ["check-cqrs.ts<br/>B3 스키마 객체 기준"]
-    CQ --> PUR["check-purity.ts<br/>B9 + 시간·난수"]
+    CQ --> PUR["check-purity.ts<br/>B9·B11 + 시간·난수<br/>(arch.ts 가 셋을 돌려 합치고 B5·가드를 맡는다)"]
     PUR --> GEN["gen-schema.ts --check<br/>protocol 스키마 최신 여부"]
     GEN --> TST["bun test<br/>unit"]
     TST --> OK["통과"]
@@ -213,7 +243,7 @@ flowchart LR
 | `build` | web `next build`(standalone), 서버 번들 점검 |
 | `typecheck` | `tsc -b --noEmit` |
 | `lint` / `format` | `biome check` / `biome format --write` |
-| `arch` | dependency-cruiser + `scripts/check-cqrs.ts` + `scripts/check-purity.ts` |
+| `arch` | `bun scripts/arch.ts` — dependency-cruiser API 1회(swc 파서) + 비공허성 가드 + B5 + `scripts/check-cqrs.ts` + `scripts/check-purity.ts` 를 전부 돌려 위반을 합친다. 위반이거나 가드가 걸리면 종료 1. 검사 루트는 `apps`·`modules`·`packages`·`scripts`·`test` 다섯 개이고 `scripts/fixtures/` 는 제외 |
 | `gen:schema` | `@pf/protocol` TypeBox → JSON Schema 내보내기. `--check` 는 변경이 있으면 실패 |
 | `test` · `test:unit` | 전체 `bun test` (unit, L2). `test` 는 `test:unit` 의 별칭 |
 | `test:integration` | DB 가 필요한 시험(컨테이너 또는 compose 서비스, 08) |
@@ -229,7 +259,7 @@ flowchart LR
 | `k3d:up` · `k3d:down` | 로컬 K8s 검증 환경 (02) |
 | `check:classification` | 모든 Drizzle 컬럼이 `classification.ts` 에 등급(PUB·SYS·PSD·PII·HSH·ENC)을 가졌는지 검사 (ADR-026) |
 | `content:check` | 사이트 변수·프로필 스키마 검사. 비면 경고, `CONTENT_STRICT=1` 이면 릴리스 필수 변수가 비었을 때 실패 (12 §1.1) |
-| `check` | `lint → typecheck → arch → gen:schema --check → test:unit` (CI 의 PR 검사와 같은 순서). `content:check` 는 릴리스 워크플로가 별도 실행 (09) |
+| `check` | `lint → typecheck → arch → gen:schema --check → test:unit` (CI 의 PR 검사와 같은 순서). `content:check` 는 릴리스 워크플로가 별도 실행 (09). **현재 구성은 `lint → typecheck`(S1-1)** — `arch` 는 S1-5 사용자 결정으로 아직 편입하지 않았다(CI 의 `arch` 잡 배선은 S1-6, 편차 DV-006) |
 
 ## 7. 설정 (`packages/config`)
 
@@ -443,7 +473,7 @@ flowchart TD
 
 | 항목 | 결정 시점 |
 |---|---|
-| Biome 로 시간·난수 호출 금지를 표현할 수 있는지 | 구현 단계 0 (`check-purity.ts` 로 시작) |
+| Biome 로 시간·난수 호출 금지를 표현할 수 있는지 | **확인(S1-5): 표현할 수 없다 → `check-purity.ts` 로 확정** (§5 시간·난수 문단) |
 | `WS_BACKPRESSURE_BYTES` 값 | 앱 레벨 큐 기준(256KB)으로 확정. 수 시간 소크 후 조정 |
 | 속도 제한 수치 | 구현 시 (A-011) |
 | 이모지 6종의 구체 목록 | protocol 작성 시 |

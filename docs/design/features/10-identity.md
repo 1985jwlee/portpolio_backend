@@ -1481,7 +1481,7 @@ flowchart TD
 | 동시 첫 로그인 | `github_id` 유일 키 | 동시성 L3 (08 §5 방식) | `.../login-race.test.ts` |
 | 정리·익명화 | ID-10 순서·멱등·중단 복구 | 장애 시험 L3 | `apps/worker/test/purge-sessions.test.ts` |
 | 세션 폐기 | ID-11 범위별 폐기·`--dry-run`·멱등·롤백 시 감사 행 부재 | 모듈 통합 L3 | `modules/identity/test/integration/revoke-sessions.test.ts` |
-| 구조 | 조회 usecase 가 쓰기 포트 불가, usecase 가 어댑터 임포트 불가 | 정적 L1 | dependency-cruiser B3·B6 |
+| 구조 | 조회 usecase 가 쓰기 포트 불가, usecase 가 어댑터 임포트 불가 | 정적 L1 | 경계 검사 B3(`check-cqrs`)·B6(dependency-cruiser) |
 | 계약 | `GET /api/me` 응답, 쿠키 속성, 리다이렉트 | 계약 L2 | `packages/protocol/test/` |
 | E2E | 첫 진입 세션 발급, 로그인(대역 GitHub), 로그아웃 | E2E L3, 실제 GitHub L4 | `tests/e2e/` |
 

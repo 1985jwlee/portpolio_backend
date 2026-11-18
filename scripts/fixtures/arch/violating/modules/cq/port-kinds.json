@@ -1,0 +1,7 @@
+{
+	"ports": {
+		"src/port/write-repo.ts": { "kind": "write", "tables": ["cq.entry"] },
+		"src/port/read-view.ts": { "kind": "read", "tables": ["cq_read.entry_view"] },
+		"src/port/bad-read.ts": { "kind": "read", "tables": ["cq.entry"] }
+	}
+}

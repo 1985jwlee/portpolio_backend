@@ -86,13 +86,13 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 ### S1 — 기반 골격
 | ID | 내용 | 의존 | 완료 기준 |
 |---|---|---|---|
-| S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check` 통과, AC-032 |
+| S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check`(현재 구성 lint·typecheck) 통과, AC-032(`bun test` — `check` 밖) |
 | S1-2 | `packages/kernel`: `Result`, `AppError` 계층, `AggregateRoot`, `DomainEvent`, 포트 인터페이스 | S1-1 | 오류 계층·`Result` 단위 시험(L2), 오류→HTTP 매핑 표 시험 |
 | S1-3 | `packages/config`: 환경변수 스키마·검증·`_FILE` 지원 | S1-1 | 필수 누락 시 기동 실패 시험, 비밀값이 로그에 안 나옴 |
 | S1-4 | `packages/db`: 풀·`UnitOfWork`·**모듈 폴더 목록을 받는 마이그레이션 실행기**(모듈별 이력 표, ADR-052), 첫 마이그레이션(스키마 생성) | S0-4, S0-7, S0-7b | 빈 DB 에서 마이그레이션 재현, 롤백 없이 순방향만, AC-023. **`migration immutable` 잡(09 §CI)이 적용된 파일을 고친 변경과 과거 `when` 의 새 항목을 실제로 거절함**(고치기 전 실패 → 통과 순서로 시험, ADR-050) |
-| S1-5 | `.dependency-cruiser.cjs` **B1~B10·B13·B14** 규칙(B10 = `@pf/infra` 격리, B13 = 계약만 의존, B14 = 마이그레이션 격리), `check-purity`(B9 + 시간·난수) | S1-1 | 위반 샘플이 CI 에서 실패하는 시험 |
+| S1-5 | 그래프 규칙 `.dependency-cruiser.cjs`(B1·B2·B4·B6~B10·B13·B14 — swc 파서, B10 = `@pf/infra` 격리, B13 = 계약만 의존, B14 = 모듈은 identity 를 호출하지 않는다) + `scripts/check-cqrs.ts`(B3 — 선언·usecase 방향) + `scripts/check-purity.ts`(B9·B11 + 시간·난수) + 실행기 `bun run arch`(`scripts/arch.ts` — B5·비공허성 가드). 규칙별 수단·범위는 01 §5 수단 표 | S1-1 | 규칙마다 위반 픽스처에서 그 규칙 ID 가, 통과 픽스처에서 무위반이, 빈 트리에서 0건 가드가 `bun test` 로 확인되고 `bun run arch` 가 위반 시 종료 1(로컬 — CI 배선은 S1-6) |
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`) + **G9 확인**(Testcontainers on Bun; 불가하면 compose `postgres` 서비스로 시험 DB 확정) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강, 시험 DB 방식 결정 기록 |
-| S1-18 | **계약 패키지·버전·추출 게이트** (ADR-052): 모듈별 `@pf/<m>-contract` 골격, `@pf/protocol` 에서 모듈별 이벤트·DTO 분리, 골든 JSON 변경 시 `package.json` 버전 상승 검사(`bun run check:contract-version`), 모듈별 **격리 타입체크(필수)**·번들 검사 — 번들만으로는 `import type` 의존 누락을 못 본다(G11 기준 4) | S1-5 | 버전 안 올린 계약 변경이 CI 에서 실패, 모듈 하나가 선언한 계약·kernel 복사본만으로 타입체크·번들 통과 |
+| S1-18 | **계약 패키지·버전·추출 게이트** (ADR-052): 모듈별 `@pf/<m>-contract` 골격, `@pf/protocol` 에서 모듈별 이벤트·DTO 분리, 골든 JSON 변경 시 `package.json` 버전 상승 검사(`bun run check:contract-version`), 모듈별 **격리 타입체크(필수)**·번들 검사 — 번들만으로는 `import type` 의존 누락을 못 본다(G11 기준 4). **B14 SQL 절 — 모듈 마이그레이션 SQL 이 다른 모듈의 스키마 객체를 참조하는지 검사(S1-5 에서 이관, DV-005)** | S1-5 | 버전 안 올린 계약 변경이 CI 에서 실패, 모듈 하나가 선언한 계약·kernel 복사본만으로 타입체크·번들 통과, **다른 모듈 표를 참조하는 마이그레이션이 CI 에서 실패** |
 | S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 (근거: ADR-027, EV-14, AC-020, FR-090) |
 | S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
 | S1-16 | **추적표 점검**: `docs/traceability.md` 와 명세·시험 이름의 정합 검사(`bun run check:trace`) — 추적표의 AC 가 명세에 존재하는지, `검증` 상태인 AC 에 시험 이름이 있고 시험 파일에 그 이름이 존재하는지, 시험 이름이 존재하지 않는 AC 를 가리키지 않는지 | S1-1 | 없는 AC 를 가리키는 시험·시험 없는 `검증` 행을 CI 가 실패시키는 시험, 추적표 초기 행 39개와 명세 AC 개수 일치 (요구: AC-032) |
@@ -108,7 +108,7 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 ### S2 — identity
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
 |---|---|---|---|---|
-| S2-1 | `identity` 도메인·포트·어댑터: 세션 발급/조회/폐기, 토큰 해시 | S1 | 토큰 원문이 DB 에 없음(시험), 만료·`last_seen_at` 1시간 갱신 | FR-010 |
+| S2-1 | `identity` 도메인·포트·어댑터: 세션 발급/조회/폐기, 토큰 해시. **B3 어댑터 스키마 객체 대조(S1-5 에서 이관 — 01 §5, DV-005)** | S1 | 토큰 원문이 DB 에 없음(시험), 만료·`last_seen_at` 1시간 갱신 | FR-010 |
 | S2-2 | `GET /api/me` (익명 세션 발급), 쿠키 속성 | S2-1 | 쿠키 없음→발급, 있음→유지, 속성 일치 시험 | FR-010 |
 | S2-3 | GitHub OAuth(PKCE+state), 콜백 검증, 세션 회전 | S2-2 | 콜백 검증 순서도(06 §3.2)의 모든 분기 시험, `returnTo` 오픈 리다이렉트 차단 | FR-011 |
 | S2-4 | 관리자 허용목록 판정, `RequireAdmin` | S2-3 | 숫자 ID 허용목록 시험 | FR-012 |

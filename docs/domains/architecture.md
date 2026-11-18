@@ -291,4 +291,4 @@ Phase 1~6 의 상세 설계는 [design/phases](../design/phases/00-platform-evol
 | 복구 시험 수행 | M1 후반(방식은 ADR-023, 외부 저장소는 G12) |
 | 별도 주소 정적 호스팅 수단(Cloudflare Pages vs GitHub Pages) | 관문 G11 |
 | Funnel 의 WebSocket·대역폭·클라이언트 IP·재시작·인증서 | 관문 G14 |
-| 경계 검사 규칙 파일 작성(dependency-cruiser, 계층·CQRS 규칙) | 구현 단계 0 |
+| 경계 검사 규칙 파일 작성(dependency-cruiser, 계층·CQRS 규칙) | S1-5 에서 작성(`.dependency-cruiser.cjs`·`scripts/arch.ts`). 남은 절(B3 어댑터 대조·B13 버전·B14 SQL·B12)은 design/01 §5 수단 표 |
