@@ -137,7 +137,7 @@ flowchart TB
 
 ```
 tsconfig.base.json            # 엄격 옵션 전부. 모든 패키지가 extends
-├─ packages/*/tsconfig.json   # extends base, include: src, test (golden JSON 은 packages/protocol/golden)
+├─ packages/*/tsconfig.json   # extends base, types: ["bun"](시험이 bun:test 를 임포트), include: src, test (golden JSON 은 packages/protocol/golden)
 ├─ modules/*/tsconfig.json    # extends base, include: src, test
 ├─ apps/*/tsconfig.json       # include: src, test (test/ 도 tsc -b·dependency-cruiser 검사 대상)
 ├─ apps/api|ws-gateway|worker/tsconfig.json   # extends base, types: ["bun"]

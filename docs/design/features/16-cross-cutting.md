@@ -85,21 +85,27 @@ flowchart TB
 ```mermaid
 classDiagram
     class Result~T,E~ {
-        <<union>>
-        +ok bool
-        +map(fn) Result
-        +mapErr(fn) Result
-        +andThen(fn) Result
-        +unwrapOrThrow() T
+        <<union Ok | Err>>
     }
     class Ok~T~ {
+        +ok true
         +value T
     }
     class Err~E~ {
+        +ok false
         +error E
     }
-    Result <|-- Ok
-    Result <|-- Err
+    class ResultFns {
+        <<namespace Result>>
+        +ok(value) Ok
+        +err(error) Err
+        +map(result, fn) Result
+        +mapErr(result, fn) Result
+        +andThen(result, fn) Result
+        +unwrapOrThrow(result) T
+    }
+    Result <|.. Ok
+    Result <|.. Err
 
     class AppError {
         <<abstract>>
@@ -129,6 +135,7 @@ classDiagram
     class IdempotencyKeyReuseError
     class RateLimitedError
     class WriteLockedError
+    class OverloadedError
     DomainError <|-- ValidationError
     DomainError <|-- UnauthenticatedError
     DomainError <|-- ForbiddenError
@@ -140,14 +147,17 @@ classDiagram
     DomainError <|-- IdempotencyKeyReuseError
     DomainError <|-- RateLimitedError
     DomainError <|-- WriteLockedError
+    DomainError <|-- OverloadedError
     class TransientError
     class PermanentError
     class LeaseLostError
+    class GithubUpstreamError
     class ConfigError
     class MigrationBehindError
     InfraError <|-- TransientError
     InfraError <|-- PermanentError
     TransientError <|-- LeaseLostError
+    InfraError <|-- GithubUpstreamError
     PermanentError <|-- ConfigError
     PermanentError <|-- MigrationBehindError
 ```

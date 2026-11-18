@@ -196,6 +196,7 @@ classDiagram
 
 - `domain`/`service` 은 순수하다. 시간·식별자·난수는 **포트로 받은 값**을 쓴다(`Clock`, `IdGenerator`).
 - `AggregateRoot.version` 은 낙관적 `version` 컬럼과 같은 값이다(ADR-021).
+- `Uuid` 는 uuid v7 문자열(`string`), `Instant` 는 `Date`(밀리초 — 16 §14.2) — 둘 다 `packages/kernel` 의 타입 별칭
 - 값 객체는 생성 시 불변식을 검사한다(예: `EntryBody` 는 500자·10줄, ADR-023).
 
 ### 4.2 usecase·포트 구조
@@ -338,9 +339,11 @@ classDiagram
     class RequestInProgressError
     class IdempotencyKeyReuseError
     class WriteLockedError
+    class OverloadedError
     ConflictError <|-- RequestInProgressError
     DomainError <|-- IdempotencyKeyReuseError
     DomainError <|-- WriteLockedError
+    DomainError <|-- OverloadedError
 
     class TransientError
     class PermanentError
@@ -379,6 +382,7 @@ classDiagram
 - `WriteLockedError` 는 `DomainError` 지만 상태 503 이다(서비스가 일부러 쓰기를 닫은 상태라 클라이언트는 `Retry-After` 를 따른다). `GithubUpstreamError` 는 인프라 계열이며 `retryable` 은 코드에 따른다.
 - 오류는 **던지지 않고 `Result<T, AppError>` 로 돌려준다**(usecase 경계). 예상 밖 예외만 `PermanentError` 로 감싼다.
 - 엔트리포인트의 오류 매핑은 한 곳(`errorToResponse`)이다. 규칙은 [03](03-api-contract.md).
+- 값(상태·기본 코드·`retryable`)의 정본은 `packages/kernel` 의 `APP_ERROR_TABLE` 이고 `packages/kernel/test/errors.test.ts` 가 이 표와 대조한다. HTTP 경로에서 나지 않는 오류는 부모 값(409·500·500), `LeaseLostError` 는 503(16 §6.2). `retryable` 은 시스템 자동 재시도 여부이고 `DomainError` 계열은 false — 클라이언트 재시도 안내는 `Retry-After`(CM-03)
 
 ## 5. 공통 규약
 

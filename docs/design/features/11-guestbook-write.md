@@ -631,7 +631,7 @@ sequenceDiagram
         end
     else 선행 트랜잭션이 아직 진행 중 (lock_timeout 초과)
         DB-->>K: lock timeout
-        K-->>H: ConflictError request_in_progress
+        K-->>H: RequestInProgressError request_in_progress
     end
 ```
 
@@ -804,8 +804,8 @@ flowchart TD
 | 조건 | AppError | HTTP | code |
 |---|---|---|---|
 | 본문/이름 검증 실패 | `ValidationError` | 400 | `validation_failed` |
-| 키 재사용(다른 요청) | `DuplicateRequestError` 계열 | 422 | `idempotency_key_reuse` |
-| 키 대기 초과 | `ConflictError` | 409 | `request_in_progress` |
+| 키 재사용(다른 요청) | `IdempotencyKeyReuseError` | 422 | `idempotency_key_reuse` |
+| 키 대기 초과 | `RequestInProgressError` | 409 | `request_in_progress` |
 | 쓰기 잠금 | `WriteLockedError`(`DomainError`) | 503 | `write_locked` |
 | 속도 제한 | `RateLimitedError` | 429 | `rate_limited` |
 | DB 일시 오류 | `TransientError` | 503 | `unavailable` |
