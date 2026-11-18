@@ -261,19 +261,18 @@ classDiagram
     }
     class EnvSource {
         <<interface>>
-        +get(name) string
-        +has(name) bool
+        +lookup(name) EnvLookup
     }
     class ProcessEnvSource
     class FileBackedEnvSource {
-        +dir string
+        +안쪽 원천 · 읽기 함수
     }
     class MapEnvSource
     EnvSource <|.. ProcessEnvSource
     EnvSource <|.. FileBackedEnvSource
     EnvSource <|.. MapEnvSource
     class ConfigLoader {
-        +load(schema, source) Result~T,ConfigError~
+        +loadConfig(schema, source) Result~config·warnings,ConfigError~
         +summarize(config) object
     }
     ConfigLoader ..> ConfigSchema
@@ -849,16 +848,16 @@ flowchart TD
 | 항목 | 규약 |
 |---|---|
 | 스키마 구성 | `schemas/base.ts`(공통) + `schemas/{api,gateway,worker,web}.ts`. 앱은 `merge(base, 자기 스키마)` 만 로드 → **다른 앱의 필수 변수를 요구하지 않는다** |
-| 값 해석 순서 | ① `NAME` ② `NAME_FILE`(파일 내용, 끝 개행 제거) ③ 기본값 ④ 없음(필수면 `missing`). `NAME` 과 `NAME_FILE` 이 둘 다 있으면 `NAME` 우선 + 경고 |
+| 값 해석 순서 | ① `NAME` ② `NAME_FILE`(파일 내용, 끝 개행 제거) ③ 기본값 ④ 없음(필수면 `missing`). `NAME` 과 `NAME_FILE` 이 둘 다 있으면 `NAME` 우선 + 경고. 빈 문자열은 없음, 끝 `\r`·`\n` 연속과 맨 앞 BOM 한 개 제거, `NAME_FILE` 읽기 실패·빈 파일은 `invalid`(기본값으로 가지 않음) |
 | 타입 변환 | `int`, `bool`(`true/false/1/0`), `url`, `enum`, `csv-int` (`ADMIN_GITHUB_IDS`), `duration` 접미 없음(단위는 변수명에 포함) |
 | 교차 검증 | `refine`: `HANDLER_TIMEOUT_SECONDS ≤ LEASE_SECONDS / 2`, `WS_SEND_QUEUE_MAX ≥ 1`, `production` 에서 `COOKIE_SECURE=true` 와 `SESSION_COOKIE_NAME` 이 `__Host-` 접두 |
 | 비밀 | `secret: true` 필드는 `SecretString`. `toString`/`toJSON`/로그/`util.inspect` 에서 `***`. 꺼내려면 `reveal()` |
 | 요약 출력 | 부팅 시 `summarize(config)` 가 **비밀이 아닌 값 + 비밀 키 이름**만 로그 |
-| 실패 | `ConfigError{missing[], invalid[]}` → 이름만 로그, **종료 코드 78**(`EX_CONFIG`). 값은 절대 출력하지 않는다 |
+| 실패 | `ConfigError`(details: `missing`·`invalid`(이름+사유 코드)·`violations`(규칙 id)) → 이름만 로그, **종료 코드 78**(`EX_CONFIG`). 값은 절대 출력하지 않는다 |
 | 재로드 | 없음(불변). 설정 변경은 재시작 |
 
 ### 7.3 클래스
-§3.3. `EnvSource` 구현 셋: `ProcessEnvSource`(운영), `FileBackedEnvSource`(`_FILE` 처리), `MapEnvSource`(시험).
+§3.3. `EnvSource` 구현 셋: `ProcessEnvSource`(운영), `MapEnvSource`(시험), `FileBackedEnvSource`(`NAME_FILE` 해석 — 안쪽 원천을 감싼다).
 
 ### 7.4 시퀀스
 
@@ -866,21 +865,24 @@ flowchart TD
 sequenceDiagram
     participant M as main.ts
     participant L as ConfigLoader
-    participant P as ProcessEnvSource
-    participant F as FileBackedEnvSource
+    participant P as FileBackedEnvSource
+    participant F as 파일 읽기(readSecretFile)
     participant G as 로거
-    M->>L: load(merge(base, api), source)
+    M->>L: loadConfig(merge(base, api), source)
     loop 필드마다
-        L->>P: get(NAME)
-        alt 값 있음
+        L->>P: lookup(NAME)
+        alt NAME 값 있음
             P-->>L: 문자열
-        else 없음
-            L->>F: get(NAME_FILE 경로)
-            alt 파일 있음
-                F-->>L: 파일 내용
-            else 없음
-                L->>L: 기본값 또는 missing 기록
+        else NAME 없음 · NAME_FILE 있음
+            P->>F: NAME_FILE 경로 읽기
+            alt 읽기 성공 · 내용 있음
+                F-->>P: 파일 내용
+                P-->>L: 끝 개행·BOM 을 지운 내용
+            else 읽기 실패 · 빈 파일
+                P-->>L: file(failure) → invalid 기록 (기본값으로 가지 않음)
             end
+        else NAME 없음 · NAME_FILE 없음
+            P-->>L: absent → 기본값 또는 missing 기록
         end
         L->>L: 타입 변환 → 실패면 invalid 기록
     end
@@ -1663,7 +1665,7 @@ flowchart TD
 | CM-01 | 단위 + 통합 | L2 · L3 | 가드별 경계, 순서, 교차 사이트가 세션 조회 안 함, AC-007 |
 | CM-02 | 통합 | L3 | 순차·동시 같은 키, 해시 불일치, 롤백 시 키 소멸, 24시간 인수 |
 | CM-03 | 단위 | L2 | 표 전체 데이터 주도, 5xx 본문 비노출 |
-| CM-04 | 단위 | L2 | 누락·`_FILE`·비밀 마스킹·교차 규칙 |
+| CM-04 | 단위 + 자식 프로세스 | L2 · L3 | 누락·`_FILE`·비밀 마스킹·교차 규칙·종료 78 |
 | CM-05 | 통합 | L3 | 롤백·재시도·풀 고갈·마이그레이션 재현·순방향 호환 |
 | CM-06 | 단위 + 통합 | L2 · L3 | 시작/정지 순서, 종료 흐름, 임대 반납 |
 | CM-07 | 계약 | L2 · L3 | 포트별 스위트(어댑터 공용) |

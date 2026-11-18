@@ -1,4 +1,8 @@
 {
 	"files": [],
-	"references": [{ "path": "./scripts" }, { "path": "./packages/kernel" }]
+	"references": [
+		{ "path": "./scripts" },
+		{ "path": "./packages/kernel" },
+		{ "path": "./packages/config" }
+	]
 }

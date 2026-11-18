@@ -18,9 +18,9 @@
 | TD-2 | 영향분석이 찾은 문서·주석 어긋남 D-1~D-4 | S1-5b (TD-1 과 같은 작업) | TD-1 의 재계획과 함께 | **닫힘 2026-11-17** | D-1·D-2 가 근거 없는 "실측"·"확정" 문구로 남아 다시 열 이유를 지움 |
 | TD-3 | 리뷰 r4 잔여 m-1~m-3 | S1-5b (TD-1 과 같은 작업) | m-2 는 S2-1 이전, m-3 는 Biome 올리기 전 | **닫힘 2026-11-17** (소멸) | Biome 를 올려도 깨지는 가드가 없다 |
 | TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-4 | **S1-6** | S1-6 계획의 입력으로 | 열림 | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
-| TD-5 | `bun test` 가 `.env` 를 자동으로 읽음 | S1-3 | `.env` 값에 기대는 첫 시험 전 | 열림 | 문서에는 없고 KB 에만 있는 사실 |
+| TD-5 | `bun test` 가 `.env` 를 자동으로 읽음 | S1-3 | `.env` 값에 기대는 첫 시험 전 | **닫힘 2026-11-18** | 문서에는 없고 KB 에만 있는 사실 |
 | TD-6 | 계획이 이미 이월한 범위 (B3·B14 등) | S2-1·S1-18·첫 제품 패키지 | 각 담당 작업 | 담당이 문서에 있음 | `port-kinds.json` 형식이 실제 모듈 없이 정해져 바뀔 수 있음 |
-| **TD-7** | S1-2(kernel) 가 남긴 것 — 실구현체 미배정(7-1), 직렬화·표 한계, 문서 대조 자동화 없음 | 항목마다 다름 (S1-3·S1-6·S1-11·S1-18·S2-1·CM-03·**미배정 3건**) | 각 담당 작업 시작 전 | 열림 | `SystemClock`·`UuidV7Generator` 를 맡은 작업이 없어 S1-7 조립 루트가 주입할 실구현이 비어 있음 (7-1) |
+| **TD-7** | S1-2(kernel) 가 남긴 것 — 실구현체 미배정(7-1), 직렬화·표 한계, 문서 대조 자동화 없음 | 항목마다 다름 (S1-6·S1-11·S1-18·S2-1·CM-03·**미배정 3건**; 7-3 은 S1-3 에서 닫힘) | 각 담당 작업 시작 전 | 열림 | `SystemClock`·`UuidV7Generator` 를 맡은 작업이 없어 S1-7 조립 루트가 주입할 실구현이 비어 있음 (7-1) |
 
 ---
 
@@ -137,6 +137,8 @@
 
 ## TD-5 — `bun test` 의 `.env` 자동 로드 (이전 런에서 이어짐)
 
+> **닫힘 (2026-11-18, S1-3)** — 수단은 루트 `bunfig.toml` 최상위 `env = false` 이고, 시험은 `scripts/bunfig-env.test.ts`(D1 대조군: bunfig 없이 `.env` 값이 보임 / D2: 루트 `bunfig.toml` 복사 시 안 보임)다. **부작용: 저장소 루트에서 도는 모든 bun 명령(`bun <파일>`·`bun test`)이 `.env` 를 자동으로 읽지 않는다.** 루트에서 `.env` 를 읽어야 하는 명령 — S1-4 `db:migrate`, S1-7 `dev`·`db:seed`·`worker <cmd>`(02 §2.2 기동 시퀀스 순서) — 은 각자 `--env-file=.env` 로 명시 로드해야 한다(`--env-file` 은 여전히 읽는다. `bun run <스크립트>` 는 bunfig 와 무관하게 스크립트 셸에 `.env` 를 넣지 않는다). S1-6·S1-10 이 이 파일에 `[test] preload` 를 넣으면 D2 가 임시 디렉토리에서 `preload not found` 로 빨개진다 — 그때 D2 를 고치고 지우지 않는다. `bunfig.toml` 은 작업 디렉토리 기준이라 하위 디렉토리에서 돌리면 걸리지 않는다. 아래는 닫기 전 기록이며 지우지 않는다.
+
 | 칸 | 내용 |
 |---|---|
 | **무엇** | `bun test` 가 `.env` 를 자동으로 읽는다. S1-1 커밋(`bacf2e2`) 메시지가 "알려진 한계" 로 적었다. S1-5 런 1단계 실측(근거: 이번 런 산출물, 저장소에 없음): 차단은 설정 파일 최상위 `env = false` 또는 `--no-env-file` 이 유효하고 `[test]` 표 안은 무효다. |
@@ -159,7 +161,7 @@
 | B3 어댑터 스키마 대조 | S2-1 | DV-005, `11` 의 S2-1 행 |
 | B14 SQL 절 | S1-18 | DV-005, `11` 의 S1-18 행 |
 | `port-kinds.json`·`cqrs-exceptions.json` 형식 | S2-1 | 실제 모듈 없이 정함 — 계획이 스스로 가장 약한 고리로 적음. 바뀌면 선언·픽스처·`check-cqrs` 가 함께 다시 쓰인다 |
-| 실저장소 `@pf/*` 워크스페이스 해석 | S1-3(패키지 간) | S1-2: 자기 참조(`packages/kernel/test` → `@pf/kernel`)가 tsc·`bun test`·`bun run arch` 에서 해석됨 — 실측 배치는 isolated(`node_modules/.bun/` 있음, `node_modules/@pf` 없음). 패키지 간 해석은 kernel 을 의존하는 첫 패키지가 잰다 |
+| 실저장소 `@pf/*` 워크스페이스 해석 | S1-3(패키지 간) | S1-2: 자기 참조(`packages/kernel/test` → `@pf/kernel`)가 tsc·`bun test`·`bun run arch` 에서 해석됨 — 실측 배치는 isolated(`node_modules/.bun/` 있음, `node_modules/@pf` 없음). 패키지 간 해석은 kernel 을 의존하는 첫 패키지가 잰다. **S1-3 실저장소 실측(2026-11-18, `packages/config`)**: `"@pf/kernel": "workspace:*"` 선언 있음 — `bun run typecheck`·`bun test packages/config`·`bun run arch` 종료 0, 링크 `packages/config/node_modules/@pf/kernel -> ../../../kernel`. 선언 없음(`dependencies` 를 지우고 `bun install`) — `typecheck` 종료 1(`TS2307`, 그 결과로 `@ts-expect-error` 가 쓸모없어져 `TS2578` 이 따라 난다), `bun test` 는 `Cannot find module '@pf/kernel'`, `arch` 는 `unresolvable packages/config/src/loader.ts → @pf/kernel` 위반으로 종료 1. 선언을 복원하고 `bun install` 을 다시 돌려 `package.json`·`bun.lock` 이 바이트까지 같음을 확인했다 |
 | B6 조립 경로 모호점·`GB → ID` 다이어그램 충돌 | S2-1 | 01 §5 "문서 자체의 모호점" 에 적혀 있다. B12 는 범위 밖(제안 단계) |
 
 **근거**: [교육 문서 TD-6](../teaching/s1-5-boundary-rules-20261116-1724.md) · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md).
@@ -183,7 +185,7 @@ S1-2 런이 **알면서 닫지 않은 것**의 모음이다. 코드는 `98ceec8`
 |---|---|---|---|---|
 | 7-1 | **`SystemClock`·`UuidV7Generator` 의 담당 작업이 없다.** kernel 은 `Clock`·`IdGenerator` 인터페이스만 만들었고(R13), 16 §14 가 설계한 **실구현체**를 만드는 행이 `11` 에 없다(`FakeClock`·`FakeIdGenerator` 는 `11` 의 S1-10 testkit 행이 이미 적고 있으므로 비어 있는 것은 실구현 쪽이다). | S1-7 조립 루트가 주입할 실구현이 비어 있고, kernel 은 시간·난수를 쓰지 않는 층이라(B2) 그 구현체는 다른 패키지에 둬야 한다. | **미배정** · S1-7 이전 | 사용자가 `11` 에 행을 더하거나 S1-7·S1-10 범위에 흡수시킨다. 위치(`packages/infra` 로 보이나 정해지지 않음)를 그때 정한다. |
 | 7-2 | **`ValueObject<Instant>` 의 기본 `equals` 가 참조 비교다**(리뷰 잔여 m-3, H-7). `Instant` 가 `Date` 라 같은 시각의 두 값이 다르다고 나온다. | 계획 T2 가 정한 동작 그대로라 결함은 아니고, **시각 값 객체를 만드는 사람마다 직접 걸린다.** | S2 첫 모듈 · 그 값 객체를 만들기 전 | `domain.ts` 의 `ValueObject` 주석에 "`Date`·`Instant` 필드는 `equals` 를 덮어쓴다" 한 줄(리뷰 r1 의 m-3 제안 문면), 또는 모듈 VO 가 `equals` 를 덮는다. |
-| 7-3 | **소비 패키지의 `"@pf/kernel": "workspace:*"` 선언 규칙이 문서에 없다**(H-2). 선언하면 `tsc`·`bun test`·`arch` 가 통과하고 안 하면 셋 다 실패한다는 것을 저장소 밖 사본에서 쟀다. | ADR-052 결정 5("적어 둔 의존만으로 타입검사")가 isolated 링커 덕에 자동으로 지켜지지만 **그 사실이 어디에도 안 적혀 있어** 링커 설정이 바뀌면 조용히 풀린다. | **S1-3** (kernel 을 의존하는 첫 패키지) | 패키지 간 해석을 실저장소에서 재고 `01 §1.1` 또는 `§4` 에 규약 한 줄을 적은 뒤, 위 TD-6 의 `@pf/*` 행을 실측 결과로 바꾼다. |
+| 7-3 | **(S1-3 에서 닫힘 2026-11-18)** **소비 패키지의 `"@pf/kernel": "workspace:*"` 선언 규칙이 문서에 없다**(H-2). 선언하면 `tsc`·`bun test`·`arch` 가 통과하고 안 하면 셋 다 실패한다는 것을 저장소 밖 사본에서 쟀다. | ADR-052 결정 5("적어 둔 의존만으로 타입검사")가 isolated 링커 덕에 자동으로 지켜지지만 **그 사실이 어디에도 안 적혀 있어** 링커 설정이 바뀌면 조용히 풀린다. | **S1-3** (kernel 을 의존하는 첫 패키지) | 패키지 간 해석을 실저장소에서 재고 `01 §1.1` 또는 `§4` 에 규약 한 줄을 적은 뒤, 위 TD-6 의 `@pf/*` 행을 실측 결과로 바꾼다. **닫힘 — 01 §2 에 규약 한 줄(`01-repository-structure.md` §2), TD-6 `@pf/*` 행에 실측을 적었다.** |
 | 7-4 | **`AppErrorKind` 가 18종으로 닫혀 있다**(H-3). 402(`PaymentDeclinedError`)·202(`PaymentPendingError`)·검증 계열 422(`ScanMismatchError`) 등 Phase 문서가 쓰는 상태는 kind 를 더해야 표현된다. | kind 추가는 kernel 공개 표면 변경이라 ADR-052 의 버전 경계를 올린다. 그것이 major 인지는 `errorToResponse` 의 짜임(전수 `Record<AppErrorKind, …>` 인가)에 달려 있어 **아직 추측**이다. | **CM-03**(`errorToResponse`)·Phase 2·3 계획 | CM-03 이 전수 매핑을 쓰는지 정하고 kind 추가의 버전 영향을 계획에 적는다. 202 는 오류가 아니라 응답 코드라 `Result` 성공 쪽으로 보내는 방향도 선택지다(이행 비용 미측정). |
 | 7-5 | **오류의 직렬화 경계가 문서와 다르다**(H-4·H-5). `JSON.stringify` 는 `name`·`code`·`httpStatus`·`retryable`·`details` 만 내고 `kind`·`message`·`cause` 는 안 낸다(`kind` 는 프로토타입 접근자). 계획 R-3 은 서비스 사이 판별을 `kind` 로 적었으나 실제로 실리는 것은 `name` 이다. 로그 필드 `err.kind`(`17-ops-observability.md:693`, `domain\|infra\|unexpected`)와 kernel `AppError.kind`(클래스 이름)는 **이름이 충돌**한다. | 추출 게이트(S1-18)가 사본 사이 판별을 `kind` 위에 세우면 운영에서 모든 도메인 오류가 500 으로 나간다(외부 시각 I-1). | **S1-18**(계약·추출 게이트) · **S1-11**(관측) · CM-03 | 판별 필드를 `name`·`code` 로 쓰거나 계약 DTO 에 own `kind` 를 명시한다. 로그 `err.kind` 는 `DomainError`/`InfraError` 판별로 만든다. |
 | 7-6 | **이벤트 payload 의 `Instant`(Date) 는 JSON 왕복 뒤 문자열이다**(H-6). DB `now()` 컬럼이 마이크로초라 `Date` 로 읽으면 잘릴 수 있다 — **쓰는 쿼리가 없어 추측이다.** | 역직렬화 규칙 없이 동등 비교 키로 쓰면 값이 어긋난다. | 13-events 파이프라인 · **S1-4**(`packages/db`) | payload 역직렬화에 시각 복원 규칙을 두고, 읽은 시각을 동등 비교 키로 쓰지 않는다. |
@@ -212,3 +214,6 @@ S1-2 런이 **알면서 닫지 않은 것**의 모음이다. 코드는 `98ceec8`
 | TD-1 (P1) | `check-purity` 를 정규식에서 swc AST 로 교체 (DV-008). 완료 판정 (a)~(e) 충족 | 닫힘 | 2026-11-17 | S1-5b 커밋(해시는 커밋 후 기입) |
 | TD-2 D-1~D-4 | D-1(a) 수치를 참고값(재현 불가)·커밋된 근거로, D-2 "표현할 수 없다"·"확정" 제거, D-3 규모 시험 삭제로 소멸, D-4 주석 정정 | 닫힘 | 2026-11-17 | S1-5b 커밋(해시는 커밋 후 기입) |
 | TD-3 m-1~m-3 | AST 전환으로 소멸(m-2 는 양성 시험 6종이 고치기 전 엔진에서 빨강) | 닫힘 (소멸) | 2026-11-17 | S1-5b 커밋(해시는 커밋 후 기입) |
+| TD-5 | `bun test` 의 `.env` 자동 로드 — 루트 `bunfig.toml` 최상위 `env = false` + 대조군을 가진 시험(`scripts/bunfig-env.test.ts`). 부작용: 루트의 모든 bun 명령이 `.env` 를 안 읽는다(S1-4 `db:migrate`·S1-7 `dev`·`db:seed`·`worker <cmd>` 는 `--env-file`) | 닫힘 | 2026-11-18 | S1-3 커밋(해시는 커밋 후 기입) |
+| TD-6 (`@pf/*` 행) | 실저장소 `@pf/*` 워크스페이스 해석 — `workspace:*` 선언 유무로 세 도구가 통과/실패함을 실측(실패 증명 포함) | 닫힘 | 2026-11-18 | S1-3 커밋(해시는 커밋 후 기입) |
+| TD-7 7-3 | 소비 패키지의 `workspace:*` 선언 규약 — `01-repository-structure.md` §2 에 한 줄 | 닫힘 | 2026-11-18 | S1-3 커밋(해시는 커밋 후 기입) |

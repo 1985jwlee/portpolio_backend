@@ -115,6 +115,7 @@ flowchart TB
 - `@pf/web` 은 **`@pf/protocol` 만** 임포트한다(서버 코드가 번들에 섞이지 않게).
 - 점선은 drizzle-kit 집계 전용 예외다.
 - `GB → EV` 는 `events` 공개 포트(outbox 기록)로만 연결된다(architecture.md §4 모듈 지도).
+- 다른 워크스페이스 패키지를 임포트하는 단위는 자기 `package.json` 의 `dependencies` 에 `"@pf/<이름>": "workspace:*"` 를 선언한다. 선언이 없으면 isolated 링커가 링크를 만들지 않아 `tsc`(TS2307)·`bun test`·`bun run arch`(`unresolvable`)가 실패한다 — 이것이 ADR-052 결정 5("적어 둔 의존만으로 타입검사")를 지켜 준다(TD-7 7-3).
 
 ## 3. 패키지 이름·네이밍
 
@@ -286,24 +287,29 @@ classDiagram
     }
     class EnvSource {
         <<interface>>
-        +get(name) string
+        +lookup(name) EnvLookup
     }
     class ProcessEnvSource
-    class FileBackedEnvSource
-    class ConfigLoader {
-        +load(schema, source) Result~T,ConfigError~
+    class MapEnvSource
+    class FileBackedEnvSource {
+        안쪽 원천 · 읽기 함수
+    }
+    class loadConfig {
+        <<function>>
+        +loadConfig(schema, source) Result~config·warnings,ConfigError~
     }
     EnvSource <|.. ProcessEnvSource
+    EnvSource <|.. MapEnvSource
     EnvSource <|.. FileBackedEnvSource
-    ConfigLoader ..> ConfigSchema
-    ConfigLoader ..> EnvSource
+    FileBackedEnvSource o-- EnvSource : 안쪽 원천(NAME·NAME_FILE 경로)
+    loadConfig ..> ConfigSchema
+    loadConfig ..> EnvSource
     ConfigSchema "1" o-- "*" FieldSpec
-    ConfigLoader ..> SecretString : 비밀 필드를 감싼다
+    loadConfig ..> SecretString : 비밀 필드를 감싼다
 
     class BaseConfig {
-        +appEnv string
-        +logLevel string
-        +database DatabaseConfig
+        +APP_ENV string
+        +LOG_LEVEL string
     }
     class ApiConfig
     class WsGatewayConfig
@@ -315,17 +321,16 @@ classDiagram
     BaseConfig <|-- WebConfig
 
     class ConfigError {
-        +missing string[]
-        +invalid string[]
+        +details missing·invalid(이름+사유 코드)·violations(규칙 id)
     }
     class PermanentError
     PermanentError <|-- ConfigError
 ```
 
 - `SecretString` 은 `toString`·`toJSON`·로그 직렬화에서 `***` 를 돌려준다. 값은 `reveal()` 로만 꺼낸다(로그·오류 메시지에 비밀이 새지 않게, 10 §5).
-- `FileBackedEnvSource`: `NAME` 이 없고 `NAME_FILE` 이 있으면 그 파일 내용을 읽는다(Docker secrets 규약, 02 §5). `ProcessEnvSource` 가 우선, 둘 다 없으면 기본값.
+- `FileBackedEnvSource`: 안쪽 원천(`ProcessEnvSource` 또는 시험용 `MapEnvSource`)에 `NAME` 이 있으면 그것을 쓰고(둘 다 있으면 `NAME` 우선 + 경고, 파일은 읽지 않는다), 없고 `NAME_FILE` 이 있으면 그 파일 내용을 읽는다(Docker secrets 규약, 02 §5). 빈 문자열은 없음이고, 파일 끝의 `\r`·`\n` 연속과 맨 앞 BOM 한 개는 지운다. `NAME_FILE` 읽기 실패·빈 파일은 `invalid` 이며 기본값으로 가지 않는다(순서도 7.3). 둘 다 없으면 기본값이다.
 - `ConfigError` 는 `PermanentError`(00 §4.3)의 하위다. 부팅 중 발생하면 재시도하지 않는다.
-- 앱별 설정은 `BaseConfig` 를 확장한다. **각 앱은 자기 설정 타입만 로드**하고 다른 앱의 필수 변수는 요구하지 않는다.
+- 앱 스키마는 `base`(`APP_ENV`·`LOG_LEVEL`)와 공유 필드 정의(`fields`)를 병합한다(`mergeSchemas(a, b, rules?)` — 병합 뒤 두 조각의 키를 함께 읽는 교차 규칙은 세 번째 인자로 준다). **각 앱은 자기 설정 타입만 로드**하고 다른 앱의 필수 변수는 요구하지 않는다.
 
 ### 7.2 부팅 시퀀스
 
@@ -336,8 +341,8 @@ sequenceDiagram
     participant S as EnvSource
     participant C as compose
     participant R as 서버·잡
-    M->>L: load(ApiConfigSchema, source)
-    L->>S: 필드별 get(name) 또는 NAME_FILE
+    M->>L: loadConfig(ApiConfigSchema, source)
+    L->>S: 필드별 lookup(name) (NAME 또는 NAME_FILE)
     S-->>L: 문자열
     L->>L: 타입 변환 · 기본값 · 필수 검사
     alt 누락·형식 오류
@@ -356,14 +361,19 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     A["부팅"] --> B["스키마의 필드 순회"]
-    B --> C{"환경 값 있음?"}
-    C -- "아니오" --> D{"NAME_FILE 있음?"}
-    D -- "예" --> E["파일에서 읽기"]
+    B --> C{"환경 값 있음? (빈 문자열은 없음)"}
+    C -- "아니오" --> D{"NAME_FILE 있음? (빈 문자열은 없음)"}
+    D -- "예" --> E["파일에서 읽기 (끝 CR·LF·맨 앞 BOM 제거)"]
+    E --> E2{"읽기 성공 · 내용 있음?"}
+    E2 -- "아니오" --> Y
+    E2 -- "예" --> H
     D -- "아니오" --> F{"기본값 있음?"}
     F -- "예" --> G["기본값 적용"]
     F -- "아니오" --> X["missing 에 추가"]
-    C -- "예" --> H["타입 변환"]
-    E --> H
+    C -- "예" --> W{"NAME_FILE 도 있음?"}
+    W -- "예" --> W2["경고 name_and_file_both_set (파일은 읽지 않음)"]
+    W2 --> H["타입 변환"]
+    W -- "아니오" --> H
     H --> I{"형식 유효?"}
     I -- "아니오" --> Y["invalid 에 추가"]
     I -- "예" --> J{"secret?"}

@@ -1,0 +1,4 @@
+# TD-5 — 저장소 루트에서 도는 bun 명령(bun <파일>·bun test)이 .env 를 자동으로 읽지 않게 한다.
+# 시험이 개발 PC 의 .env 에 좌우되지 않게 하려는 것이다. 이 키는 최상위여야 한다 — [test] 표 안에 두면 효과가 없다.
+# .env 가 필요한 루트 명령(S1-4 db:migrate · S1-7 dev·db:seed·worker <cmd>)은 --env-file=.env 로 명시적으로 불러온다.
+env = false

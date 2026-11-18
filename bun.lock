@@ -12,6 +12,12 @@
         "typescript": "7.0.2",
       },
     },
+    "packages/config": {
+      "name": "@pf/config",
+      "dependencies": {
+        "@pf/kernel": "workspace:*",
+      },
+    },
     "packages/kernel": {
       "name": "@pf/kernel",
       "version": "1.0.0",
@@ -39,6 +45,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.6.8", "", { "os": "win32", "cpu": "arm64" }, "sha512-ezjCEZzHIWE2pdh83a7zLVcAAcDaERcTcvfA7uWlxqz/1CuDxgtfO19pDg9B6YY4wKYIDvYBw2QCMnqIshSwmw=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.8", "", { "os": "win32", "cpu": "x64" }, "sha512-cD6HvGczZUiAYsY8s2TxxXj2AHFzEdMomvVJfEjzOjBM45nGqIDfBpbtvwGQzDCN8X2yKKk9u1jnDZisT2nxIg=="],
+
+    "@pf/config": ["@pf/config@workspace:packages/config"],
 
     "@pf/kernel": ["@pf/kernel@workspace:packages/kernel"],
 
