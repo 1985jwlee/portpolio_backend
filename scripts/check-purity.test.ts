@@ -248,6 +248,29 @@ describe("B2-time-random 시간·난수 직접 호출", () => {
 		expect(wrong("modules/m/src/domain/x.ts", lines, [])).toEqual([]);
 	});
 
+	test('Temporal.Now 의 멤버 접근(호출·참조·?.·["Now"]·globalThis·줄바꿈)을 잡는다 (TD-7 7-11)', () => {
+		const lines = [
+			"Temporal.Now.instant();",
+			"Temporal.Now.plainDateISO();",
+			"const n = Temporal.Now;",
+			"globalThis.Temporal.Now.instant();",
+			"Temporal?.Now.instant();",
+			'Temporal["Now"].instant();',
+			"Temporal\n\t.Now\n\t.instant();",
+		];
+		expect(
+			wrong("modules/m/src/domain/x.ts", lines, ["B2-time-random:1"]),
+		).toEqual([]);
+	});
+
+	test("Temporal 의 시계가 아닌 멤버와 다른 객체의 Temporal 은 잡지 않는다", () => {
+		const lines = [
+			"const t = Temporal.Instant.from(s);",
+			"x.Temporal.Now.instant();",
+		];
+		expect(wrong("modules/m/src/domain/x.ts", lines, [])).toEqual([]);
+	});
+
 	test("adapter·usecase 와 모듈 밖은 대상이 아니다", () => {
 		expect(rules("modules/m/src/adapter/x.ts", "Date.now();")).toEqual([]);
 		expect(rules("modules/m/src/usecase/x.ts", "Date.now();")).toEqual([]);

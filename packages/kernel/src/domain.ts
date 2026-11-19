@@ -20,6 +20,7 @@ export interface DomainEvent {
 /**
  * 값으로만 같음을 판정하는 객체.
  * 복합 값을 가진 하위 클래스는 `equals` 를 덮어쓴다.
+ * `Date`·`Instant` 필드도 `equals` 를 덮어쓴다 — 기본 비교는 `Object.is` 라 같은 시각의 두 `Date` 가 다르다고 나온다.
  */
 export abstract class ValueObject<T> {
 	readonly value: T;

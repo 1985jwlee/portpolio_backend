@@ -215,7 +215,7 @@ const bunEnvImport: Detector = (node) => {
 	return undefined;
 };
 
-/** 시간·난수를 읽는 전역 API — [객체, 속성]. */
+/** 시간·난수를 읽는 전역 API — [객체, 속성]. `Temporal.Now` 는 아래 멤버(`instant()` 등)가 전부 시계라 한 단계 위에서 막는다. */
 const TIME_RANDOM_MEMBERS: readonly (readonly [string, string])[] = [
 	["Date", "now"],
 	["Math", "random"],
@@ -223,6 +223,7 @@ const TIME_RANDOM_MEMBERS: readonly (readonly [string, string])[] = [
 	["crypto", "getRandomValues"],
 	["performance", "now"],
 	["Bun", "nanoseconds"],
+	["Temporal", "Now"],
 ];
 
 // B2-time-random 갈래 ① — 위 API 의 멤버 접근(호출·참조 모두). 보고: 접근의 시작.
@@ -349,7 +350,7 @@ const RULES: readonly PurityRule[] = [
 	},
 	{
 		// 시간·난수 직접 호출 금지(domain·service). 인자가 있는 new Date(value) 는 값 변환이라 대상이 아니다.
-		// new Date 괄호 생략·Date() 와 performance.now·crypto.getRandomValues·Bun.nanoseconds 는 같은 계열의 다른 표기·API 다.
+		// new Date 괄호 생략·Date() 와 performance.now·crypto.getRandomValues·Bun.nanoseconds·Temporal.Now(아래 멤버 전부) 는 같은 계열의 다른 표기·API 다.
 		// 미탐(한계): 객체가 전역 이름(또는 globalThis.이름)이 아닌 접근 — 별칭(const d = Date; d.now())·구조분해({ now } = Date)·
 		//   다른 객체의 같은 이름 속성(x.Date.now())은 스코프·값 추적이 없어 잡지 않는다.
 		id: "B2-time-random",
