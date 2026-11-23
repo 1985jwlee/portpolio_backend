@@ -1,0 +1,12 @@
+{
+	"name": "@pf/db",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@pf/kernel": "workspace:*",
+		"drizzle-orm": "0.45.4"
+	}
+}

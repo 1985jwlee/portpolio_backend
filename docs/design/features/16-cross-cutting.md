@@ -287,10 +287,8 @@ classDiagram
 classDiagram
     class DbPool {
         <<interface>>
-        +acquire() Connection
-        +query(sql, params) Rows
-        +stats() PoolStats
-        +close(deadlineMs) void
+        +read ReadDb
+        +close() void
     }
     class ListenerConnection {
         +listen(channel, handler) void
@@ -303,14 +301,11 @@ classDiagram
     }
     class TxContext {
         <<interface>>
-        +query(sql, params) Rows
+        +db TxDb
         +now Instant
-        +savepoint(name) void
     }
     class TxOptions {
         +timeoutMs int
-        +retryOnSerialization int
-        +name string
     }
     class PostgresUnitOfWork
     UnitOfWork <|.. PostgresUnitOfWork
@@ -318,10 +313,7 @@ classDiagram
     PostgresUnitOfWork ..> TxContext
     UnitOfWork ..> TxOptions
     class MigrationRunner {
-        +apply() Result
-        +assertUpToDate() Result
-        +expectedVersion() string
-        +appliedVersion() string
+        +runMigrations(pool, plan) Result
     }
     class MigrationJournal {
         +entries MigrationEntry[]
@@ -329,6 +321,10 @@ classDiagram
     MigrationRunner ..> DbPool
     MigrationRunner ..> MigrationJournal
 ```
+
+**S1-4 구현 범위** (`packages/db`): `DbPool` 은 읽기 전용 핸들 `read`(select 계열 4개)와 `close()` 만 밖으로 준다(ADR-025 — 쓰기·트랜잭션은 `UnitOfWork.run` 안에서만). `TxContext.db` 는 Drizzle 트랜잭션에서 `rollback`·`setTransaction` 을 뺀 것이고 롤백은 `Err` 를 돌려주는 것으로만 한다. `run` 은 중첩을 거절하고(`PermanentError`), 시간 제한 3종(`statement_timeout` 5s 또는 `timeoutMs`·`idle_in_transaction_session_timeout` 10s·`lock_timeout` 2s)을 트랜잭션 로컬로 걸며, `tx.now` 를 `Clock` 에서 한 번 고정한다. `runMigrations(pool, { modules, roles })` 는 동시 실행 잠금을 쥐고 모듈별로 순방향 적용한 뒤 `roles.json` 의 권한을 적용한다.
+
+**미구현(TD-8)**: `retryOnSerialization`·`name`·`stats`·`close(deadlineMs)`·`assertUpToDate`·`expectedVersion`·`appliedVersion`·`ListenerConnection`·`savepoint(name)`(대신 `tx.db.transaction()` 이 savepoint 다).
 
 ### 3.5 보조 포트와 어댑터
 
@@ -947,7 +943,7 @@ flowchart TD
 | **모든 쓰기는 tx** | INSERT·UPDATE·DELETE 는 한 문장이어도 `uow.run` 안에서만 실행한다(잡·reaper·정리·집계·세션 갱신·`trace_step`·시드 포함). `DbPool` 은 읽기 전용 `ReadDb` 만 노출하고 쓰기 메서드는 `TxContext` 에만 있다. 대량 삭제·집계는 배치마다 짧은 tx. 근거 ADR-025 | 타입(`ReadDb` 에 쓰기 메서드 없음) + `check-purity` + 08 구조 시험 |
 | 여는 곳 | **command/event usecase 와 잡 usecase 만** `uow.run` 을 부른다. query usecase 는 읽기 전용 연결(tx 없음 또는 `READ ONLY`) | 경계 규칙 B3(읽기·쓰기 포트 분리) + 코드 리뷰 |
 | 중첩 금지 | `run` 안에서 `run` 을 부르면 `PermanentError`(프로그래밍 오류). 하위 작업은 `savepoint` | `PostgresUnitOfWork` 가 진행 중 tx 를 추적 |
-| **tx 안 외부 호출 금지** | HTTP·파일·메시지 전송 등을 tx 안에서 하지 않는다. tx 안에서 `await` 하는 것은 `tx.query` 와 순수 계산만 | `TxContext` 에는 외부 클라이언트가 없고, 외부 호출은 usecase 가 **tx 앞/뒤**에서 한다(예: GitHub 호출은 로그인 usecase 에서 tx 이전). 시험은 `faults.hit` 지점으로 순서 확인(08) |
+| **tx 안 외부 호출 금지** | HTTP·파일·메시지 전송 등을 tx 안에서 하지 않는다. tx 안에서 `await` 하는 것은 `tx.db` 와 순수 계산만 | `TxContext` 에는 외부 클라이언트가 없고, 외부 호출은 usecase 가 **tx 앞/뒤**에서 한다(예: GitHub 호출은 로그인 usecase 에서 tx 이전). 시험은 `faults.hit` 지점으로 순서 확인(08) |
 | 격리 수준 | `READ COMMITTED` 기본(ADR-021). 직렬화 격리를 쓰지 않는다 | `TxOptions` 기본값 |
 | 경합 규칙 | 조건부 UPDATE(`WHERE version = $n`, `WHERE claim_token = $t`), 유일 키, `FOR UPDATE SKIP LOCKED` 로 해결. 읽고-판단-쓰기에 행 잠금이 필요하면 `SELECT … FOR UPDATE` 를 같은 tx 에서 | ADR-021 |
 | 시간 제한 | tx 당 `statement_timeout = 5s`, `idle_in_transaction_session_timeout = 10s`, 멱등 대기용 `lock_timeout = 2s` | `SET LOCAL` |
@@ -971,7 +967,7 @@ sequenceDiagram
     P-->>W: Connection
     W->>D: BEGIN + SET LOCAL timeouts
     W->>U: fn(tx)
-    U->>D: 쓰기 · outbox (tx.query)
+    U->>D: 쓰기 · outbox (tx.db)
     alt fn 이 Ok
         W->>D: COMMIT
         W->>P: release

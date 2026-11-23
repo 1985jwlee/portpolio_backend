@@ -427,7 +427,7 @@ classDiagram
     }
     class UnitOfWork {
         <<interface>>
-        +run(fn) T
+        +run(fn, opts) Result
     }
     WriteRepository <|-- EntryRepository
     class PgEntryRepository

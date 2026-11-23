@@ -3,6 +3,7 @@
 	"references": [
 		{ "path": "./scripts" },
 		{ "path": "./packages/kernel" },
-		{ "path": "./packages/config" }
+		{ "path": "./packages/config" },
+		{ "path": "./packages/db" }
 	]
 }

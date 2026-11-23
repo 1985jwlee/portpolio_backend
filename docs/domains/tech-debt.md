@@ -17,10 +17,11 @@
 | **TD-1** (P1) | `check-purity` 를 정규식에서 swc AST 로 교체 (사용자 결정 (A)) | **S1-5b** (가칭 — 이름 확정은 사용자 몫, `11` 에 행 추가) | **S2-1 이전** | **닫힘 2026-11-17** | Drizzle `` sql<number>`…` `` 등이 규칙을 그대로 피해 첫 제품 모듈에서 조용히 통과 |
 | TD-2 | 영향분석이 찾은 문서·주석 어긋남 D-1~D-4 | S1-5b (TD-1 과 같은 작업) | TD-1 의 재계획과 함께 | **닫힘 2026-11-17** | D-1·D-2 가 근거 없는 "실측"·"확정" 문구로 남아 다시 열 이유를 지움 |
 | TD-3 | 리뷰 r4 잔여 m-1~m-3 | S1-5b (TD-1 과 같은 작업) | m-2 는 S2-1 이전, m-3 는 Biome 올리기 전 | **닫힘 2026-11-17** (소멸) | Biome 를 올려도 깨지는 가드가 없다 |
-| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-4 | **S1-6** | S1-6 계획의 입력으로 | 열림 | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
+| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-6 | **S1-6** | S1-6 계획의 입력으로 | 열림 | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
 | TD-5 | `bun test` 가 `.env` 를 자동으로 읽음 | S1-3 | `.env` 값에 기대는 첫 시험 전 | **닫힘 2026-11-18** | 문서에는 없고 KB 에만 있는 사실 |
 | TD-6 | 계획이 이미 이월한 범위 (B3·B14 등) | S2-1·S1-18·첫 제품 패키지 | 각 담당 작업 | 담당이 문서에 있음 | `port-kinds.json` 형식이 실제 모듈 없이 정해져 바뀔 수 있음 |
 | **TD-7** | S1-2(kernel) 가 남긴 것 — 실구현체 미배정(7-1), 직렬화·표 한계, 문서 대조 자동화 없음 | 항목마다 다름 (S1-6·S1-11·S1-18·S2-1·CM-03·**미배정 2건**; 7-3 은 S1-3, 7-2·7-11 은 2026-11-18 에 닫힘) | 각 담당 작업 시작 전 | 열림 | `SystemClock`·`UuidV7Generator` 를 맡은 작업이 없어 S1-7 조립 루트가 주입할 실구현이 비어 있음 (7-1) |
+| **TD-8** | S1-4(`packages/db`) 가 남긴 것 — UoW 재시도·지표, `assertUpToDate`, 풀 통계·종료 기한, `roles.json` 의 시퀀스·함수 권한, drizzle-kit 저널 형식 ↔ Biome 충돌, 잠금 대기 상한, 관리 역할 폐기 시 권한 잔존, 관리 역할 선행 조건(8-8)·로컬 `.env` 키 불일치(8-9) | 항목마다 다름 (8-3·8-8·8-9 는 S1-7, 8-5 는 S2-1, **나머지 미배정**) | 각 담당 작업 시작 전 | 열림 | `retryOnSerialization` 이 없어 직렬화 실패(40001·40P01)가 호출자마다 제각각으로 처리됨 (8-1) |
 
 ---
 
@@ -116,7 +117,7 @@
 
 ---
 
-## TD-4 — S1-6(CI 배선)이 넘겨받는 것 H-1~H-4
+## TD-4 — S1-6(CI 배선)이 넘겨받는 것 H-1~H-6
 
 | 칸 | 내용 |
 |---|---|
@@ -130,6 +131,8 @@
 | H-2 | `@swc/core` postinstall 이 Bun 에서 차단(`bun pm untrusted`)되나 해는 없다 — 바이너리는 optionalDependencies 로 오고 `bun.lock` 에 플랫폼별 13항목(`bun.lock:55`). `node_modules` **캐시 키**에 os·arch·libc 가 빠지면 다른 플랫폼 바이너리가 복원되어 cruise 가 0 모듈로 끝나고 `GUARD-uncruised` 가 파일마다 빨강을 낸다(조용한 통과는 아니나 원인을 잘못 짚기 쉽다). `09` 50행에는 '캐시' 만 있고 키가 없다. `trustedDependencies` 등록 시 node 없는 이미지의 동작은 **미측정** | 신뢰 등록 안 함([`tech-stack.md`](tech-stack.md) 105행 결정 유지). 캐시 키에 `runner.os`·`runner.arch`·`bun.lock` 해시. `GUARD-uncruised` 가 줄줄이 뜨면 T8 부터 본다 | 캐시 키에 세 요소가 있고 T8 이 CI 에서 초록 |
 | H-3 | 규모 시험 3개(`LIMIT_MS = 2000`): 부하 없음 12~13 / 40~47 / 123~143 ms. CPU 한 개에 12개를 겹치면(`taskset -c 0`) 247~334 / 423~525 / 1,350~1,505 ms, 가장 무거운 `importEnv80k` 의 여유가 약 1.3배(12회 통과). `09` 55행 `unit test` 잡이 `bun test` 를 매 PR 에 돌린다. 실제 러너는 **미측정** | ① 상대 비교(n 과 2n 의 시간비)로 바꾼다 ② 별도 잡으로 떼어 매 PR 에서 뺀다 ③ 상한을 올린다(가드 감도 7~12초가 줄어듦). **`retry` 로 덮지 않는다.** TD-1 이 규모 시험을 지우면 소멸 (→ 2026-11-17 S1-5b 가 규모 시험 3개를 삭제해 "시험이 없다" 를 충족 — S1-6 은 이 행을 확인만 한다) | 매 PR 게이트에서 시계 시험이 흔들리지 않거나 시험이 없다 |
 | H-4 | 픽스처를 고쳐서는 CI `arch` 를 빨강으로 만들 수 없다. 설정이 `^scripts/fixtures/` 를 제외하고 실저장소는 열거 7·purity 대상 0·cqrs 모듈 0 이기 때문이다. 빨강은 `bun test` 쪽에서만 난다. S1-6 완료 기준 "의도적 위반 PR 에서 빨강"(`11:95`)에 영향 | 위반 PR 이 `(apps\|modules\|packages)/<x>/src/` 아래에 파일을 하나 넣게 설계한다 | 그 PR 에서 `arch` 잡이 빨강이다 |
+| H-5 | (S1-4 가 더함) `migration immutable`(`bun run migration:immutable`)은 `merge-base(기준, HEAD)` 를 쓴다. CI 의 얕은 checkout(`fetch-depth: 1`)이면 merge-base 가 나오지 않아 검사가 던지고(종료 1), `--base` 의 기본값 `main` 은 PR 대상이 다른 브랜치일 때 틀린다 | 잡이 `--base <PR 대상 브랜치>` 를 주고, checkout 은 전체 이력(`fetch-depth: 0`)으로 한다 | 마이그레이션을 고친 PR 에서 그 잡이 빨강이고, 마이그레이션이 없는 PR 에서 `변경 0` 으로 초록이다 |
+| H-6 | (S1-4 가 더함) `test:integration` 은 환경변수 `TEST_DATABASE_URL`(슈퍼유저로 접속하는, 버려도 되는 Postgres 클러스터)이 없으면 **건너뛰지 않고 실패한다.** CI 잡이 그 값을 공급해야 한다 — 서비스 컨테이너의 `postgres` 슈퍼유저 URL 이면 된다(역할 `pf_*` 는 시험이 없을 때만 만들고 지우지 않는다) | `integration` 잡에 서비스 컨테이너 `postgres:18` 과 `TEST_DATABASE_URL` 을 둔다. 래퍼가 컨테이너를 띄우는 방식(G9)을 고르더라도 시험에는 URL 하나만 넘긴다 | CI 의 `integration` 잡이 `packages/db` 통합 시험 4개를 돌려 초록이다 |
 
 **근거**: [교육 문서 TD-4](../teaching/s1-5-boundary-rules-20261116-1724.md) · [`../design/09-ci-cd.md`](../design/09-ci-cd.md) · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md).
 
@@ -204,6 +207,26 @@ S1-2 런이 **알면서 닫지 않은 것**의 모음이다. 코드는 `98ceec8`
 - 실제 CI 러너·Windows 에서의 isolated 링크, Node 계열 도구가 `exports` 의 `.ts` 를 런타임에 임포트하는 경우. **S1-6** 이 CI 를 세울 때 처음 잴 수 있고, TD-4 의 H-1(node 25.1.0 engines)과 같은 부류다.
 
 **근거**: [교육 문서 S1-2](../teaching/s1-2-kernel-20261117-1532.md) · 커밋 `98ceec8` · [`../deviation-log.md`](../deviation-log.md) DV-009~011 · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md).
+
+---
+
+## TD-8 — S1-4(`packages/db`) 가 남긴 것
+
+S1-4 는 완료 기준과 후속이 코드로 기대는 계약까지만 구현했다. 아래는 **알면서 미룬 것**이다. 설계 문서와 어긋난 곳은 [`deviation-log.md`](../deviation-log.md) DV-015~017 에 있다.
+
+| # | 무엇 / 왜 지금 안 했나 | 누가 · 언제까지 | 닫는 방법 / 완료 판정 |
+|---|---|---|---|
+| 8-1 | **UoW 재시도·분류·지표·느린 tx 로그가 없다.** `retryOnSerialization`(40001·40P01 재시도)·`TransientError` 분류·지표·느린 트랜잭션 로그는 소비자 코드에 보이지 않는 동작이라 첫 소비자(S2-1) 없이 정하면 틀린다. 지금 `run` 은 DB 오류를 전부 `PermanentError`(원인은 `cause`)로 낸다 | **미배정** · S2-1 이전 | 직렬화 실패를 `TransientError` 로 사상하고 재시도 횟수·지표 이름을 정한다. 완료: 40001 을 일으키는 통합 시험이 재시도 뒤 `Ok`, 한도 초과면 `TransientError` |
+| 8-2 | **`assertUpToDate`(기동 시 마이그레이션 확인)가 없다.** 모듈별 "기대 버전"의 정의(저널 마지막 `when`? 항목 수?)가 설계에 없다 | **미배정** · S1-7 조립 루트가 기동 순서를 정하기 전 | 기대 버전을 정의하고 `MigrationBehindError` 로 거절한다. 완료: 한 항목 덜 적용된 DB 에서 기동이 거절되는 시험 |
+| 8-3 | **`DbPool.stats()`·`close(deadlineMs)`가 없다.** 생명주기(종료 순서·기한)는 조립 루트의 몫이다. 지금 `close()` 는 기한 없이 닫는다 | **S1-7** | `ShutdownCoordinator` 와 함께 풀 통계·종료 기한을 더한다 |
+| 8-4 | **`roles.json` 이 시퀀스·함수 권한을 다루지 않고, "모든 표가 분류돼 있는가" CI 검사가 없다.** 기본키는 앱이 만드는 uuid v7 이라 시퀀스가 없다(첫 제품 모듈이 시퀀스를 쓰면 틀린다). 지금은 명세에 없는 표가 권한 0 으로 남을 뿐 검출되지 않는다 | **미배정** · S2-1 이전 | 시퀀스·함수·`ALTER DEFAULT PRIVILEGES` 를 명세에 더하고, 명세에 없는 표를 CI 가 실패시킨다 |
+| 8-5 | **drizzle-kit 이 쓰는 저널 형식(공백 2칸)과 Biome(탭)이 충돌한다.** 첫 모듈이 `modules/**` 에서 생성하는 `_journal.json` 이 `bun run lint` 에서 형식 오류로 걸릴 수 있다. S1-4 의 픽스처는 손으로 탭으로 썼다 | **S2-1** (첫 모듈) | `biome.json` 에서 저널을 제외하거나 생성 뒤 포맷하는 단계를 `db:generate` 에 둔다. 완료: 생성 직후 `bun run check` 초록 |
+| 8-6 | **마이그레이션 잠금 대기에 시간 상한이 없다.** 다른 실행기가 잠금을 쥐고 멈추면 `db:migrate` 가 무한히 기다린다. 새 수치를 만들지 않으려고 두지 않았다(D-8) | **미배정** · 배포 파이프라인 작업 전 | 대기 상한(`lock_timeout` 류)을 정하고 초과 시 `Err`. 완료: 잠금을 쥔 채 두고 상한 뒤 `Err` 로 끝나는 시험 |
+| 8-7 | **`roles.json` 의 `roles` 목록에서 뺀 역할의 기존 권한은 회수되지 않는다.** 회수 대상은 이번 명세가 아는 역할(`PUBLIC` + `roles`)뿐이라 목록에서 빠진 역할은 어떤 문장의 대상도 아니다 — 명세가 더는 모르는 이름을 코드로 닫을 수 없다(L3 재현: 역할까지 뺀 재적용 뒤 `USAGE` 가 남음). 역할 생성과 마찬가지로 역할 수명 관리의 몫이다 | **미배정** · 관리 역할을 처음 폐기하기 전 | 역할을 폐기할 때 사람이 `DROP OWNED BY <역할>` → `DROP ROLE <역할>` 을 실행한다(`roles.json` 에서 빼기만 하면 안 된다). 역할 수명 관리를 넣을 때 폐기 목록을 명세가 알게 한다. 완료: 폐기한 역할로 접속·권한 질의가 거부되는 시험 |
+| 8-8 | **`db:migrate` 는 `roles.json` 의 관리 역할이 클러스터에 먼저 있어야 성공한다.** 첫 모듈 마이그레이션이 `pf_migrations` 스키마를 만든 순간부터 필요하다 — 역할이 없으면 마이그레이션은 커밋되고 권한 단계에서 종료 1(`role "pf_api_rw" does not exist`, 이력은 남는다. L3 재현). 역할은 `postgres` 최초 기동 init SQL 이 만든다는 설계(`docs/design/10-security.md` §5.1)이고 S1-4 는 역할 생성 SQL 을 범위에서 뺐다(0단계 Q4) | **S1-7**(로컬 compose) · 배포 파이프라인 작업 | init SQL 이 `roles.json` 과 같은 이름의 역할을 만든다. 완료: 빈 compose 에서 init → 모듈 1개 이상으로 `bun run db:migrate` 종료 0 |
+| 8-9 | **로컬 템플릿 `.env` 로는 `db:migrate` 가 종료 78 이다.** `.env.example` 은 `DATABASE_URL_API`·`_GATEWAY`·`_WORKER`·`_MIGRATOR` 넷만 갖고 `db:migrate` 는 `DATABASE_URL` 하나만 읽는다. 매핑은 `dev` 스크립트 몫이라 적혀 있지만(`docs/design/02-dev-environment.md` §5) `db:migrate` 는 `dev` 를 거치지 않는다 | **S1-7** | `db:migrate` 가 로컬에서 `DATABASE_URL_MIGRATOR` 를 `DATABASE_URL` 로 매핑하게 하거나 템플릿·문서가 `DATABASE_URL` 을 직접 두게 한다. 완료: `cp .env.example .env` 후 값만 채우고 `bun run db:migrate` 가 78 이 아니다 |
+
+**근거**: [`../design/features/16-cross-cutting.md`](../design/features/16-cross-cutting.md) §3.4·§8 · [`../adr/ADR-025-query-layer.md`](../adr/ADR-025-query-layer.md) · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md) S1-4.
 
 ---
 

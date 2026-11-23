@@ -282,7 +282,7 @@ sequenceDiagram
 | `pf_admin` | `postgres` 컨테이너 초기화(`POSTGRES_USER`)만 | `postgres_admin_password`(postgres 컨테이너만 마운트) | 슈퍼유저. 최초 기동 시 init SQL 이 위 역할을 만들고 이후 앱·스크립트는 쓰지 않는다. 사고 조사용 읽기 접속(13 §S8-1 의 `pf_readonly`)은 `pf_backup_ro` 와 같은 권한의 별도 역할로 두고 어느 서비스에도 마운트하지 않는다 |
 
 - **마이그레이션 실행 주체는 `pf_migrator` 뿐이다.** 앱 런타임 역할은 표를 소유하지 않아 `ALTER`/`DROP`/`RENAME` 이 불가능하다. 읽기 모델 재구성의 이름 교체(`RENAME`, F12 §9)는 소유권이 필요해서 상주 `worker` 가 아니라 **`worker rebuild` 일회성 실행(migrator 접속 문자열)** 이 한다.
-- **GRANT 의 정본은 `packages/db/roles.json`**(표 → 역할별 권한)이다. `db:migrate` 가 마이그레이션 끝에 이 파일로 `GRANT`/`REVOKE` 를 멱등 적용하고(`ALTER DEFAULT PRIVILEGES` 로 새 표는 기본 무권한), CI 가 **모든 Drizzle 표가 이 파일에 분류돼 있는지** 검사한다(`infra/backup/tables.json` 과 같은 방식). `PUBLIC` 의 스키마·표 권한은 `REVOKE` 한다.
+- **GRANT 의 정본은 `packages/db/roles.json`**(표 → 역할별 권한)이다. `db:migrate` 가 마이그레이션 끝에 이 파일로 `GRANT`/`REVOKE` 를 멱등 적용하고(`ALTER DEFAULT PRIVILEGES` 로 새 표는 기본 무권한), CI 가 **모든 Drizzle 표가 이 파일에 분류돼 있는지** 검사한다(`infra/backup/tables.json` 과 같은 방식). `PUBLIC` 의 스키마·표 권한은 `REVOKE` 한다(확장이 관리하는 스키마는 `roles.json` 에 없으면 건드리지 않는다).
 - **앱 코드는 `DATABASE_URL` 하나만 읽는다**(01 §8.1). 값이 서비스마다 다른 역할의 문자열일 뿐이다 — compose 가 서비스별로 다른 비밀 파일을 `DATABASE_URL_FILE` 에 연결한다. `LISTEN/NOTIFY` 전용 연결도 같은 역할을 쓴다. 로컬 개발은 `.env` 에 `DATABASE_URL_API`·`_GATEWAY`·`_WORKER`·`_MIGRATOR` 를 두고 `dev` 스크립트가 프로세스마다 `DATABASE_URL` 로 매핑한다(권한 오류가 라이브에서 처음 나지 않게 개발·CI 도 같은 역할을 쓴다).
 - **시험(새 AC 없음, 08 의 통합 시험 항목)**: 역할별 권한 행렬을 Testcontainers 에서 확인한다 — `pf_gateway_ro` 의 `INSERT` 거부, `pf_api_rw` 의 `*_read` 쓰기 거부와 `audit_log` `UPDATE`/`DELETE` 거부, `pf_worker_rw` 의 `DDL` 거부, `pf_backup_ro` 의 `INSERT` 거부, 앱 런타임 역할의 `ALTER TABLE` 거부.
 - **회전**은 역할마다 따로 한다(§5 DB 비밀번호 행, 13 의 DB 자격증명 유출 절). 한 역할의 비밀 유출은 그 역할 권한 안으로 피해가 한정된다(예: 게이트웨이 비밀이 새도 쓰기는 불가).

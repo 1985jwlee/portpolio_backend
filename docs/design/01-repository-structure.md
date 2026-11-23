@@ -245,16 +245,17 @@ flowchart LR
 | `typecheck` | `tsc -b --noEmit` |
 | `lint` / `format` | `biome check` / `biome format --write` |
 | `arch` | `bun scripts/arch.ts` — dependency-cruiser API 1회(swc 파서) + 비공허성 가드 + B5 + `scripts/check-cqrs.ts` + `scripts/check-purity.ts` 를 전부 돌려 위반을 합친다. 위반이거나 가드가 걸리면 종료 1. 검사 루트는 `apps`·`modules`·`packages`·`scripts`·`test` 다섯 개이고 `scripts/fixtures/` 는 제외 |
+| `migration:immutable [--base <ref>]` | `bun scripts/check-migration-immutable.ts` — 이미 적용된 마이그레이션(`modules/<m>/migrations/*.sql`·`meta/_journal.json`)이 기준 브랜치(기본 `main`)와의 merge-base 대비 바뀌지 않았는지 커밋된 변경으로 본다. 위반이면 종료 1, 규칙은 09 §마이그레이션 `migration immutable` |
 | `gen:schema` | `@pf/protocol` TypeBox → JSON Schema 내보내기. `--check` 는 변경이 있으면 실패 |
 | `test` · `test:unit` | 전체 `bun test` (unit, L2). `test` 는 `test:unit` 의 별칭 |
-| `test:integration` | DB 가 필요한 시험(컨테이너 또는 compose 서비스, 08) |
+| `test:integration` | DB 가 필요한 시험(컨테이너 또는 compose 서비스, 08). 환경변수 **`TEST_DATABASE_URL`**(슈퍼유저로 접속하는, 버려도 되는 Postgres 클러스터)이 필수이고 **없으면 건너뛰지 않고 실패한다**. 시험 파일은 `*/test/integration/` 아래에 두며 평소 `bun test` 는 루트 `bunfig.toml` 의 `[test] pathIgnorePatterns` 로 이것들을 집지 않는다. 시험 파일마다 새 DB(`pf_t_<무작위>`)를 만들어 쓰고 지운다 |
 | `test:chaos` | 동시성·장애 시험(`test/chaos/`, L3, 08 §5·§7) |
 | `test:e2e` · `test:load` | 교차 시험·k6 (08). `load:api` 는 API 부하(k6) 별칭 |
 | `load:api` | k6 API 부하 시나리오 실행 (08 §9) |
 | `build:fallback` | 정적 폴백 페이지 빌드(OB-08, F17) → `infra/nginx/fallback/` |
 | `worker <cmd>` | 관리 CLI 진입점: `rebuild`, `dead-requeue`, `admin write-lock on\|off`, `retention:run` (F16 §11 정본). 예: `bun run worker dead-requeue` |
 | `db:generate <모듈>` / `db:generate:custom <모듈>` | 그 모듈의 drizzle-kit 마이그레이션 생성 / raw SQL 마이그레이션 틀 (모듈별 설정, ADR-052) |
-| `db:migrate [모듈…]` | 모듈 폴더별 forward-only 적용(인자 없으면 조립된 전 모듈). 적용 순서가 결과에 영향이 없어야 한다(B14) |
+| `db:migrate [모듈…]` | 모듈 폴더별 forward-only 적용(인자 없으면 조립된 전 모듈). 적용 순서가 결과에 영향이 없어야 한다(B14). `DATABASE_URL`(또는 `DATABASE_URL_FILE`)을 `@pf/config` 로 읽고 `bun --env-file=.env` 로 로컬 `.env` 를 읽는다(없어도 실패하지 않는다). 끝에 `packages/db/roles.json` 의 권한을 적용한다(그 관리 역할이 클러스터에 먼저 있어야 한다 — TD-8 8-8). 실행기는 연결 2개(잠금 1 + 작업 1)가 필요해 `DATABASE_URL` 의 `max` 가 2 미만이면 연결 전에 거절한다. 종료 코드 **0 성공 · 1 실행·인자 오류(모르는 모듈은 연결 전) · 78 설정 오류** |
 | `db:seed` | 개발 시드 (02) |
 | `compose:up` · `compose:down` | 로컬 인프라 |
 | `k3d:up` · `k3d:down` | 로컬 K8s 검증 환경 (02) |

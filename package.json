@@ -12,7 +12,14 @@
 		"format": "biome format --write",
 		"typecheck": "tsc -b --noEmit",
 		"arch": "bun scripts/arch.ts",
-		"check": "bun run lint && bun run typecheck"
+		"check": "bun run lint && bun run typecheck",
+		"db:migrate": "bun --env-file=.env scripts/db-migrate.ts",
+		"migration:immutable": "bun scripts/check-migration-immutable.ts",
+		"test:integration": "bun test --path-ignore-patterns='**/node_modules/**' test/integration"
+	},
+	"dependencies": {
+		"@pf/config": "workspace:*",
+		"@pf/db": "workspace:*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.8",

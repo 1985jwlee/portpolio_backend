@@ -1,0 +1,4 @@
+{
+	"roles": ["pf_api_rw", "pf_worker_rw", "pf_gateway_ro"],
+	"tables": {}
+}

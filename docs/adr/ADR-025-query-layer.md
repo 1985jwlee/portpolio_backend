@@ -60,6 +60,9 @@ Drizzle 은 스키마 정본과 마이그레이션에 쓰기로 확정됐지만(
 | `LISTEN`/`pg_notify` | T2 / T1 | 드라이버 기능 / 단문 | EV-13 |
 | 배치 삭제(`ctid` 서브쿼리 + LIMIT) | T1 | PG 에 `DELETE … LIMIT` 없음 | EV-10 |
 | 재구성 `RENAME`/락 순서 | T1 | DDL | GB-26 |
+| 트랜잭션 시간 제한 `set_config('statement_timeout' 등, 값, true)` | T1 | 표현 불가 — 빌더에 `SET` 이 없고 `SET LOCAL` 은 바인드 매개변수를 받지 않는다 | S1-4 (`packages/db/src/adapter/postgres/raw/tx-settings.ts`) |
+| 마이그레이션 동시 실행 잠금 `pg_advisory_lock(hashtext('pf-migrate'))` | T2 | 세션 소유 락, 예약한 한 연결에서 걸고 푼다(리더 선출 행과 같은 성격) | S1-4 (`…/raw/migration-lock.ts`) |
+| 권한 적용 `GRANT`/`REVOKE`(`roles.json`) | T1 | DCL — 빌더에 없다. 식별자는 `sql.identifier`, 권한어는 화이트리스트 | S1-4 (`…/raw/grants.ts`) |
 
 나머지(글/반응/신고 CRUD, `ListEntries` 키셋 조회, 프로젝터 UPSERT, `request_key` 선점)는 T0.
 
