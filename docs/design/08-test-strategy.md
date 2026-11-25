@@ -626,7 +626,7 @@ test/
 | 항목 | 결정 시점 |
 |---|---|
 | ~~E2E 도구(Playwright 등)와 Bun 호환~~ | Playwright 1.64.1 이 Bun 에서 동작(tech-stack §11.1). 브라우저 약 150MB를 CI 에서 받아야 한다 |
-| ~~Testcontainers on Bun~~ | G9 로컬 통과(testcontainers 12.2.1, postgres:18.6). 실패 대안은 **서비스 Postgres + 템플릿 DB 복제**(`CREATE DATABASE … TEMPLATE`) |
+| ~~Testcontainers on Bun~~ | G9 로컬 통과(testcontainers 12.2.1, postgres:18.6). 실패 대안은 **서비스 Postgres + 템플릿 DB 복제**(`CREATE DATABASE … TEMPLATE`). **CI 는 서비스 컨테이너 `postgres:18` + `TEST_DATABASE_URL` 로 확정(S1-6, 2026-11-25)** — CI 러너에서 Testcontainers 는 미확인 |
 
 **G9 실측 패턴**: ① `bun test`(순차)에서는 `bunfig.toml` `preload` 로 컨테이너를 한 번 띄워 파일 간 공유 ② `bun test --parallel` 에서는 preload 가 워커마다 컨테이너를 만드므로(시작 3~4초) **래퍼 스크립트가 컨테이너 1개를 띄우고 `DATABASE_URL` env 로 넘기고** 워커가 공유(총 약 4초) ③ `beforeAll` 기본 타임아웃 5초는 컨테이너 시작에 걸려 한 번 실패했으므로 **60초**로 올린다 ④ Ryuk 필수(켜면 SIGKILL 후 약 11초 안에 정리, 끄면 12초 뒤에도 컨테이너 누수) ⑤ 시험 격리는 템플릿 DB 복제가 빠르다(복제 중앙값 약 36ms, 병렬 8개 191ms. 복제본 삭제는 `WAL_LOG` 복제본 10개에 4.2초라 컨테이너를 통째로 버리는 편이 안전해 보이나 이는 추측) ⑥ 템플릿에 접속 중이면 복제가 실패한다.
 

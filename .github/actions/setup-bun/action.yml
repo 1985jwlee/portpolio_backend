@@ -1,0 +1,27 @@
+# 공유 composite 액션 — Bun 설치 + 전역 설치 캐시 + frozen-lockfile 설치 (09 §1 의 setup-bun).
+# 입력이 없다: 버전의 정본은 저장소의 .bun-version 이다.
+name: setup-bun
+description: .bun-version 의 Bun 을 설치하고 bun install --frozen-lockfile 로 의존성을 만든다
+
+runs:
+  using: composite
+  steps:
+    # 버전 정본은 .bun-version 하나다(package.json packageManager 와 같은 값을 유지한다).
+    - name: Bun 설치
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version-file: .bun-version
+
+    # node_modules 가 아니라 Bun 전역 설치 캐시를 저장한다(Q2). isolated 링커의 node_modules 는 심볼릭 링크 트리라
+    # 복원본이 lock 과 어긋나도 설치를 건너뛰면 모른다. 키는 os·arch·bun.lock 해시(TD-4 H-2).
+    # restore-keys 를 두지 않는다 — 다른 lock 의 캐시가 섞이는 것을 막는다(잃는 것은 첫 실행 속도뿐).
+    - name: Bun 설치 캐시
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+
+    # 캐시가 적중해도 설치는 항상 돈다 — lock 과의 대조를 건너뛰지 않는다. composite 는 shell 이 필수다.
+    - name: 의존성 설치
+      shell: bash
+      run: bun install --frozen-lockfile

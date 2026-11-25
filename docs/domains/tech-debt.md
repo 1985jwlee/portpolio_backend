@@ -17,7 +17,7 @@
 | **TD-1** (P1) | `check-purity` 를 정규식에서 swc AST 로 교체 (사용자 결정 (A)) | **S1-5b** (가칭 — 이름 확정은 사용자 몫, `11` 에 행 추가) | **S2-1 이전** | **닫힘 2026-11-17** | Drizzle `` sql<number>`…` `` 등이 규칙을 그대로 피해 첫 제품 모듈에서 조용히 통과 |
 | TD-2 | 영향분석이 찾은 문서·주석 어긋남 D-1~D-4 | S1-5b (TD-1 과 같은 작업) | TD-1 의 재계획과 함께 | **닫힘 2026-11-17** | D-1·D-2 가 근거 없는 "실측"·"확정" 문구로 남아 다시 열 이유를 지움 |
 | TD-3 | 리뷰 r4 잔여 m-1~m-3 | S1-5b (TD-1 과 같은 작업) | m-2 는 S2-1 이전, m-3 는 Biome 올리기 전 | **닫힘 2026-11-17** (소멸) | Biome 를 올려도 깨지는 가드가 없다 |
-| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-6 | **S1-6** | S1-6 계획의 입력으로 | 열림 | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
+| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-6 | **S1-6** | S1-6 계획의 입력으로 | **배선됨 — CI 첫 실행 확인 대기** | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
 | TD-5 | `bun test` 가 `.env` 를 자동으로 읽음 | S1-3 | `.env` 값에 기대는 첫 시험 전 | **닫힘 2026-11-18** | 문서에는 없고 KB 에만 있는 사실 |
 | TD-6 | 계획이 이미 이월한 범위 (B3·B14 등) | S2-1·S1-18·첫 제품 패키지 | 각 담당 작업 | 담당이 문서에 있음 | `port-kinds.json` 형식이 실제 모듈 없이 정해져 바뀔 수 있음 |
 | **TD-7** | S1-2(kernel) 가 남긴 것 — 실구현체 미배정(7-1), 직렬화·표 한계, 문서 대조 자동화 없음 | 항목마다 다름 (S1-6·S1-11·S1-18·S2-1·CM-03·**미배정 2건**; 7-3 은 S1-3, 7-2·7-11 은 2026-11-18 에 닫힘) | 각 담당 작업 시작 전 | 열림 | `SystemClock`·`UuidV7Generator` 를 맡은 작업이 없어 S1-7 조립 루트가 주입할 실구현이 비어 있음 (7-1) |
@@ -123,7 +123,7 @@
 |---|---|
 | **왜 지금 안 했나** | Q2(A) 로 배선은 S1-6 몫이고, 넘기면서 함께 가야 할 사실이다(계획 결함 아님). |
 | **언제까지** | S1-6 계획의 입력으로. |
-| **누가** | **S1-6** (`docs/design/11-implementation-plan.md` 95행). **11 의 S1-6 행에는 아직 이 항목이 반영되지 않았다.** S1-6 계획은 이 절을 읽어야 한다. |
+| **누가** | **S1-6** (`docs/design/11-implementation-plan.md` 95행). 11 의 S1-6 행에 반영했다(S1-6, 2026-11-25). |
 
 | # | 사실(5단계 실측 — 근거는 이번 런 산출물, 저장소에 없음) | 닫는 방법 | 완료 판정 |
 |---|---|---|---|
@@ -133,6 +133,19 @@
 | H-4 | 픽스처를 고쳐서는 CI `arch` 를 빨강으로 만들 수 없다. 설정이 `^scripts/fixtures/` 를 제외하고 실저장소는 열거 7·purity 대상 0·cqrs 모듈 0 이기 때문이다. 빨강은 `bun test` 쪽에서만 난다. S1-6 완료 기준 "의도적 위반 PR 에서 빨강"(`11:95`)에 영향 | 위반 PR 이 `(apps\|modules\|packages)/<x>/src/` 아래에 파일을 하나 넣게 설계한다 | 그 PR 에서 `arch` 잡이 빨강이다 |
 | H-5 | (S1-4 가 더함) `migration immutable`(`bun run migration:immutable`)은 `merge-base(기준, HEAD)` 를 쓴다. CI 의 얕은 checkout(`fetch-depth: 1`)이면 merge-base 가 나오지 않아 검사가 던지고(종료 1), `--base` 의 기본값 `main` 은 PR 대상이 다른 브랜치일 때 틀린다 | 잡이 `--base <PR 대상 브랜치>` 를 주고, checkout 은 전체 이력(`fetch-depth: 0`)으로 한다 | 마이그레이션을 고친 PR 에서 그 잡이 빨강이고, 마이그레이션이 없는 PR 에서 `변경 0` 으로 초록이다 |
 | H-6 | (S1-4 가 더함) `test:integration` 은 환경변수 `TEST_DATABASE_URL`(슈퍼유저로 접속하는, 버려도 되는 Postgres 클러스터)이 없으면 **건너뛰지 않고 실패한다.** CI 잡이 그 값을 공급해야 한다 — 서비스 컨테이너의 `postgres` 슈퍼유저 URL 이면 된다(역할 `pf_*` 는 시험이 없을 때만 만들고 지우지 않는다) | `integration` 잡에 서비스 컨테이너 `postgres:18` 과 `TEST_DATABASE_URL` 을 둔다. 래퍼가 컨테이너를 띄우는 방식(G9)을 고르더라도 시험에는 URL 하나만 넘긴다 | CI 의 `integration` 잡이 `packages/db` 통합 시험 4개를 돌려 초록이다 |
+
+### S1-6 처리 결과 (2026-11-25 — 워크플로 배선됨, **CI 러너 실행은 아직 없다**)
+
+> 상태는 `배선됨 — CI 첫 실행 확인 대기` 다. 위 H-1~H-6 의 완료 판정이 전부 "CI 에서" 라 첫 실행 전에는 닫지 않는다. 아래 "로컬 재현" 은 같은 명령을 호스트에서 돌린 것이라 러너의 설치·캐시·서비스 컨테이너 네트워킹은 증명하지 못한다(L4 는 사람, 불가 선언 근거는 S1-6 런 산출물).
+
+| # | 무엇으로 닫았나 (`.github/workflows/ci.yml` · `.github/actions/setup-bun/action.yml`) | 로컬 재현 | 남은 확인 = 첫 CI 실행 |
+|---|---|---|---|
+| H-1 | `arch` 잡은 `bun run arch` 한 단계뿐이다. `depcruise` CLI·`bunx depcruise`·setup-node 단계가 없다 | `bun run arch` 종료 0(위반 0) | `arch` 로그에 `Your node version` 이 없다 |
+| H-2 | `setup-bun` 캐시 키 = `bun-` + `runner.os` + `runner.arch` + `hashFiles('bun.lock')`, `trustedDependencies` 등록 안 함. **캐시 대상은 `~/.bun/install/cache` 이고 `node_modules` 가 아니다**(사용자 확인 Q2 — 설치가 매번 lock 을 대조한다) | 해당 없음 | 키 문자열에 세 요소가 보이고, `unit` 잡의 T8(`scripts/arch.test.ts`)이 초록 |
+| H-3 | 규모 시험이 없다(`grep -rn LIMIT_MS scripts packages --include=*.ts` 0건). `unit` 잡에 재시도 옵션이 없다 | `bun test` 333 pass | 없음(확인만 하는 행) |
+| H-4 | 위반 재현 절차를 로컬로 갈음했다(DV-018): `packages/kernel/src/` 에 `node:fs` 임포트 파일을 두면 `bun run arch` 가 `B7-kernel` 로 종료 1, 지우면 0 | 종료 1 → 0 | (선택) 위반 PR 에서 `arch` 잡 빨강 |
+| H-5 | `migration-immutable` 잡이 `fetch-depth: 0` 으로 받고 `--base "origin/$BASE_REF"` 를 준다(`pull_request` 에서만) | `--base origin/dev`·`origin/main` 모두 `변경 0 · 위반 0` | 마이그레이션이 없는 PR 에서 `변경 0` 초록 (고친 PR 의 빨강은 `scripts/check-migration-immutable.test.ts` 가 임시 저장소로 증명하고 `unit` 잡이 돌린다) |
+| H-6 | `integration` 잡의 서비스 컨테이너 `postgres:18` + 잡 환경변수 `TEST_DATABASE_URL` | 로컬 `postgres:18.6` 컨테이너에서 `bun run test:integration` 4파일 31 pass | 러너에서 같은 4파일이 초록 |
 
 **근거**: [교육 문서 TD-4](../teaching/s1-5-boundary-rules-20261116-1724.md) · [`../design/09-ci-cd.md`](../design/09-ci-cd.md) · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md).
 
@@ -192,7 +205,7 @@ S1-2 런이 **알면서 닫지 않은 것**의 모음이다. 코드는 `98ceec8`
 | 7-4 | **`AppErrorKind` 가 18종으로 닫혀 있다**(H-3). 402(`PaymentDeclinedError`)·202(`PaymentPendingError`)·검증 계열 422(`ScanMismatchError`) 등 Phase 문서가 쓰는 상태는 kind 를 더해야 표현된다. | kind 추가는 kernel 공개 표면 변경이라 ADR-052 의 버전 경계를 올린다. 그것이 major 인지는 `errorToResponse` 의 짜임(전수 `Record<AppErrorKind, …>` 인가)에 달려 있어 **아직 추측**이다. | **CM-03**(`errorToResponse`)·Phase 2·3 계획 | CM-03 이 전수 매핑을 쓰는지 정하고 kind 추가의 버전 영향을 계획에 적는다. 202 는 오류가 아니라 응답 코드라 `Result` 성공 쪽으로 보내는 방향도 선택지다(이행 비용 미측정). |
 | 7-5 | **오류의 직렬화 경계가 문서와 다르다**(H-4·H-5). `JSON.stringify` 는 `name`·`code`·`httpStatus`·`retryable`·`details` 만 내고 `kind`·`message`·`cause` 는 안 낸다(`kind` 는 프로토타입 접근자). 계획 R-3 은 서비스 사이 판별을 `kind` 로 적었으나 실제로 실리는 것은 `name` 이다. 로그 필드 `err.kind`(`17-ops-observability.md:693`, `domain\|infra\|unexpected`)와 kernel `AppError.kind`(클래스 이름)는 **이름이 충돌**한다. | 추출 게이트(S1-18)가 사본 사이 판별을 `kind` 위에 세우면 운영에서 모든 도메인 오류가 500 으로 나간다(외부 시각 I-1). | **S1-18**(계약·추출 게이트) · **S1-11**(관측) · CM-03 | 판별 필드를 `name`·`code` 로 쓰거나 계약 DTO 에 own `kind` 를 명시한다. 로그 `err.kind` 는 `DomainError`/`InfraError` 판별로 만든다. |
 | 7-6 | **이벤트 payload 의 `Instant`(Date) 는 JSON 왕복 뒤 문자열이다**(H-6). DB `now()` 컬럼이 마이크로초라 `Date` 로 읽으면 잘릴 수 있다 — **쓰는 쿼리가 없어 추측이다.** | 역직렬화 규칙 없이 동등 비교 키로 쓰면 값이 어긋난다. | 13-events 파이프라인 · **S1-4**(`packages/db`) | payload 역직렬화에 시각 복원 규칙을 두고, 읽은 시각을 동등 비교 키로 쓰지 않는다. |
-| 7-7 | **M-1 타입 가드와 DV-009 조기 반환 가드가 `bun run check`(tsc) 에서만 판정된다**(H-8). `bun test` 만으로는 안 돈다. | 검증 매니페스트에 `check` 가 등록돼 있어 지금은 잡히지만, CI 가 `bun test` 만 돌리면 `APP_ERROR_TABLE` 의 `readonly` 가 풀려도 모른다. | **S1-6**(CI) · TD-4 와 같은 자리 | CI 에 `bun run check` 잡을 넣는다. TD-4 의 H-4(CI 에서 의도적 위반이 `arch` 를 빨갛게 만드는지)와 함께 본다. |
+| 7-7 | **M-1 타입 가드와 DV-009 조기 반환 가드가 `bun run check`(tsc) 에서만 판정된다**(H-8). `bun test` 만으로는 안 돈다. | 검증 매니페스트에 `check` 가 등록돼 있어 지금은 잡히지만, CI 가 `bun test` 만 돌리면 `APP_ERROR_TABLE` 의 `readonly` 가 풀려도 모른다. | **S1-6**(CI) · TD-4 와 같은 자리 | CI 에 `bun run check` 잡을 넣는다. TD-4 의 H-4(CI 에서 의도적 위반이 `arch` 를 빨갛게 만드는지)와 함께 본다. **(S1-6 배선됨, 첫 CI 실행 확인 대기)** `ci.yml` 의 `typecheck` 잡이 `bun run typecheck`(`tsc -b --noEmit`)를 돌린다 — `check` 는 lint·typecheck 를 묶은 것이라 CI 는 둘을 별도 잡으로 둔다. |
 | 7-8 | **`CommandHandler`·`QueryHandler` 가 빈 확장 인터페이스라 컴파일러가 구분하지 못한다**(외부 시각 I-17). 서로 대입된다. | "타입으로 분리"(00 §4.3 취지)가 구조적 타입에서 저절로 생기지 않는다. 구분을 B3(`check-cqrs`)가 대신하는지는 **교육 문서가 "단정 못함"으로 표시**했다 — 확인하지 못했다. | **S2-1** (TD-6 의 "B3 어댑터 스키마 대조" 와 함께) | 첫 usecase 에서 `check-cqrs` 가 두 인터페이스를 구분하는지 양성 시험으로 확인하고, 안 되면 브랜드 필드를 더하거나 B3 에 규칙을 넣는다. |
 | 7-9 | **`GithubUpstreamError` 의 `github_rejected` 상태(502) 가 16 §6.5 순서도와 충돌한다.** 어느 쪽이 맞는지 판정하지 않았다. | `errorToResponse` 를 만들 때 표(kernel)와 순서도(16)가 서로 다른 상태를 낸다. | **CM-03** | 둘 중 정본을 정하고 다른 쪽을 고친다(DV 행으로 기록). |
 | 7-10 | **설계 문서의 오류 이름·상태를 kernel 표와 기계로 대조하는 장치가 없다.** S1-2 에서 `11-guestbook-write.md` 가 틀린 클래스를 적고 있었는데(H-1) 영향분석의 사람 눈 대조가 찾았다. 계획의 문서 대조가 **바꾼 이름만** 찾고 표와 값이 다른 행은 찾지 않았다(KB 교훈). | 같은 종류의 어긋남(문서대로 구현하면 422 가 아니라 409 가 나가는 식)이 다른 문서에도 남아 있을 수 있다. 직접 연 문서에서는 틀린 짝이 0줄이었으나 **전수는 아니다.** | **미배정** · 오류 표를 쓰는 두 번째 작업 전 | `APP_ERROR_TABLE` 의 클래스·상태·code 를 읽어 `docs/design/` 의 오류 표 행과 대조하는 스크립트(`check:trace` 류 — S1-16 이 비슷한 일을 한다). 담당은 사용자가 정한다. |
@@ -204,7 +217,7 @@ S1-2 런이 **알면서 닫지 않은 것**의 모음이다. 코드는 `98ceec8`
 
 ### 확인하지 못한 것 (부채가 아니라 미확인)
 
-- 실제 CI 러너·Windows 에서의 isolated 링크, Node 계열 도구가 `exports` 의 `.ts` 를 런타임에 임포트하는 경우. **S1-6** 이 CI 를 세울 때 처음 잴 수 있고, TD-4 의 H-1(node 25.1.0 engines)과 같은 부류다.
+- 실제 CI 러너·Windows 에서의 isolated 링크, Node 계열 도구가 `exports` 의 `.ts` 를 런타임에 임포트하는 경우. **S1-6** 이 CI 를 배선했고(2026-11-25) 첫 CI 실행이 실측 자리다. TD-4 의 H-1(node 25.1.0 engines)과 같은 부류다.
 
 **근거**: [교육 문서 S1-2](../teaching/s1-2-kernel-20261117-1532.md) · 커밋 `98ceec8` · [`../deviation-log.md`](../deviation-log.md) DV-009~011 · [`../design/11-implementation-plan.md`](../design/11-implementation-plan.md).
 

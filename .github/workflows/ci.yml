@@ -1,0 +1,119 @@
+# PR 검사(09 §2). 잡 id 는 브랜치 보호의 필수 상태 검사 이름이 된다 — 바꾸면 저장소 설정도 함께 고친다.
+# 보안 규칙(S1-6, 정본 docs/design/09-ci-cd.md §1): 액션은 40자 SHA 고정 · 권한은 이 최상단 한 곳 ·
+# 셸 명령 안에 식을 넣지 않고 env 로 받는다 · checkout 은 자격증명을 남기지 않는다 · 비밀 컨텍스트와 대상 브랜치 컨텍스트 트리거를 쓰지 않는다.
+name: ci
+
+on:
+  # 대상 브랜치 필터를 두지 않는다 — dev·staging·main 으로 가는 PR 전부를 검사한다.
+  pull_request:
+  push:
+    branches: [main]
+
+# 이 워크플로의 어떤 잡도 쓰기 권한이 필요 없다. 잡 단위로 올리지 않는다.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # PR 은 같은 PR 의 이전 실행을 취소하고, main push 는 취소하지 않는다.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run lint
+
+  # TD-7 7-7 — tsc 에서만 판정되는 가드를 CI 가 받는 자리다.
+  typecheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run typecheck
+
+  # depcruise CLI 를 직접 부르지 않는다(TD-4 H-1) — scripts/arch.ts 가 dependency-cruiser API 를 호출한다.
+  arch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run arch
+
+  # bunfig.toml 이 통합 시험을 뺀다. 재시도하지 않는다 — 깜박이는 시험은 덮지 않고 고친다(TD-4 H-3).
+  unit:
+    needs: [lint, typecheck, arch]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun test
+
+  integration:
+    needs: [unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # 시험 DB(G9 결정: 서비스 컨테이너 postgres:18). 아래 비밀번호는 잡과 함께 사라지는 클러스터의 버려도 되는 값이다 — 비밀이 아니다.
+      TEST_DATABASE_URL: postgres://postgres:ci-throwaway@127.0.0.1:5432/postgres
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci-throwaway
+        ports:
+          - 5432:5432
+        # 러너는 이 헬스체크가 healthy 가 될 때까지 스텝을 시작하지 않는다.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run test:integration
+
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun audit --audit-level=high --prod
+
+  # push(main) 에서는 기준과 HEAD 가 같아 의미가 없다.
+  migration-immutable:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # run 문자열에 식을 넣지 않고 셸 변수로 받는다(식 주입 경로 차단).
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # merge-base 가 나오려면 전체 이력이 필요하다(TD-4 H-5).
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      # PR 체크아웃은 분리 HEAD 라 로컬 브랜치 main 이 없다 — 기준은 origin/<대상 브랜치>다(스크립트 기본값 main 은 해석되지 않는다).
+      - run: bun run migration:immutable --base "origin/$BASE_REF"
