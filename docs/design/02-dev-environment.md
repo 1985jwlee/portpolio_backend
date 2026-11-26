@@ -50,6 +50,7 @@ flowchart TD
 | `web` · `api` · `ws-gateway` · `worker` | `ghcr.io/<owner>/pf-web` · `pf-server` | 3000 · 3001 · 3002 · 3003 | — | `/readyz` (worker 는 `/healthz`) |
 | `backup` | 호스트 cron 또는 컨테이너 (ADR-023) | — | `backups` (DB 볼륨과 **다른 경로**) | 마지막 성공 시각 지표 |
 
+- **현재 구현(S1-7)**: `compose.yaml`·`compose.dev.yaml` 은 `postgres` 하나만 담는다(나머지 서비스는 그 서비스를 만드는 행이 더한다 — DV-028). 비밀번호는 `.env` 의 `PF_DEV_DB_PASSWORD` 하나이고(슈퍼유저·역할 공통, 없으면 `compose:up` 이 실패), 최초 기동 때 `infra/compose/init/01-roles.sh` 가 `packages/db/roles.json` 의 역할과 `pf_migrator`(DB `CREATE` 권한)를 만든다 — 표 권한은 `db:migrate` 가 적용한다(TD-8 8-8). `bun run compose:up` / `compose:down` 이 `--env-file .env` 를 붙여 부른다.
 - 호스트 포트 `55432`·`3030` 은 충돌 회피용 **기본 제안값**이다(로컬에 이미 PostgreSQL/다른 3000 서비스가 있을 수 있다). 바꾸면 `.env` 의 `DATABASE_URL_*` 4개도 같이 바꾼다.
 - 이미지 태그는 메이저(+마이너) 고정이고 확정 버전은 구현 시작 시 재조회한다(tech-stack.md §12).
 - 네트워크는 compose 기본 브리지 하나. **`postgres`·`prometheus`·`grafana` 는 라이브에서 호스트 포트를 열지 않는다**(proxy 를 거치거나 내부 전용).
@@ -105,6 +106,8 @@ sequenceDiagram
 | `psql`, `k3d`, `kubectl`, `k6` | **로컬에 없음** → `psql` 은 `docker compose exec postgres psql`, `k6` 는 `grafana/k6` 컨테이너, `k3d`·`kubectl` 은 §8 에서 설치 |
 | OS | **개발 PC** 는 WSL2 (M1 로컬 측정 환경). 라이브 호스트는 네이티브 Ubuntu 24.04(ADR-033 '호스트 프로필')라 성능 수치는 호스트에서 재측정한다. 파일 감시가 느리면 프로젝트를 WSL 파일시스템 안에 둔다 |
 | `@swc/core` 로드 (Windows) | Windows 호스트에서 `@swc/core` 1.16.22 의 네이티브 바인딩이 `user cache failed: … DACL grants replacement rights … set SWC_NATIVE_BINDING_CACHE to a safe absolute directory` 로 로드되지 않을 수 있다(Bun 1.4.2·Windows 11 에서 확인). `bun run arch`·`bun test`(`scripts/arch.test.ts`)가 swc 를 쓰므로 **`SWC_NATIVE_BINDING_CACHE` 를 본인 소유이고 상위 경로가 다른 사용자에게 교체 권한을 주지 않는 절대 경로**(사용자 디렉토리 아래에 직접 만든 폴더 등)로 설정한 셸에서 돌린다. 의존 버전은 바꾸지 않는다. 리눅스(CI)에서의 발생 여부는 미측정(S1-6 몫) |
+| `gitleaks` (비밀 스캔, 선택) | pre-commit 훅(`.githooks/pre-commit`)이 쓴다 — CI `secret-scan` 과 같은 8.30.1 릴리스 바이너리(<https://github.com/gitleaks/gitleaks/releases>)를 PATH 에 두면 된다. **없으면 훅이 안내만 하고 통과시킨다**(강제 아님 — 최종 방어는 CI). 훅을 켜는 것은 한 번 `git config core.hooksPath .githooks` 다. 훅 파일은 실행 권한이 필요하다(저장소에는 100755 로 커밋). 훅과 같은 설정으로 이력을 직접 보려면 `gitleaks git --config .gitleaks.toml --redact`(작업 트리 `dir` 모드는 `.claude/skills/*/references/secrets.md` 예제를 오탐하므로 쓰지 않는다) |
+| `pg_dump` (센티널 시험) | 통합 시험 `packages/infra/test/integration/field-cipher-dump.test.ts` 가 쓴다. env `PF_PG_DUMP`(명령 접두 — 공백으로 나눠 **셸 없이** 인자 배열로 실행)가 없으면 PATH 의 `pg_dump`. 실행할 수 없거나 종료 코드가 0 이 아니면 시험은 **실패**한다(건너뛰지 않는다). 로컬에 `pg_dump` 가 없으면 `psql` 과 같은 이유로 compose 를 쓴다 — `PF_PG_DUMP="docker compose -f infra/compose/compose.yaml exec -T postgres pg_dump"`(compose 는 S1-7). CI 는 서비스 컨테이너 안의 `pg_dump` 를 쓴다(09 §CI) |
 
 ## 4. 시드 데이터
 
@@ -116,7 +119,7 @@ sequenceDiagram
 | `AdminAndReports` | 관리자 계정(시드용 GitHub ID), 신고 큐 2건 |
 | `LoadMix` (선택) | 시각화 동작 확인용 지속 이벤트 생성 (속도 인자) |
 
-- `db:seed` 는 `APP_ENV=production` 이면 **즉시 종료**한다(운영 DB 보호).
+- `db:seed` 는 `APP_ENV=production` 이면 **즉시 종료**한다(운영 DB 보호). 시나리오는 usecase 가 생기는 S2 이후에 더해지고, 지금(S1-7)은 프레임(`scripts/seed.ts` 의 `SeedRunner`)만 있어 시나리오 0개로 성공한다.
 - 재실행하면 이미 있는 시드를 건너뛴다(고정 `Idempotency-Key` 사용).
 - 시드용 사용자는 실제 GitHub 계정이 아니므로 `provider_user_id` 를 `seed-` 접두의 가짜 값으로 둔다(개발 DB 에만).
 
@@ -159,7 +162,7 @@ classDiagram
 
 | 비밀 | 로컬 개발 | 라이브 | 저장소 |
 |---|---|---|---|
-| `DATABASE_URL`(비밀번호 포함, **역할별** — design/10 §5.1) | `.env` 의 `DATABASE_URL_API`·`_GATEWAY`·`_WORKER`·`_MIGRATOR`(`dev` 스크립트가 프로세스마다 `DATABASE_URL` 로 매핑) | `secrets/database_url_api`·`_gateway`·`_worker`·`_migrator`·`_backup` 파일 → 서비스별 `DATABASE_URL_FILE`(백업은 `BACKUP_DATABASE_URL_FILE`) | 없음 |
+| `DATABASE_URL`(비밀번호 포함, **역할별** — design/10 §5.1) | `.env` 의 `DATABASE_URL_API`·`_GATEWAY`·`_WORKER`·`_MIGRATOR`(`scripts/run-as.ts` 가 프로세스마다 `DATABASE_URL` 로 매핑 — `dev:api`·`dev:worker`·`worker`·`db:migrate` 가 거친다. 자식에게는 자기 역할의 주소만 가고 다른 역할의 `DATABASE_URL_*` 는 환경에서 빠진다) | `secrets/database_url_api`·`_gateway`·`_worker`·`_migrator`·`_backup` 파일 → 서비스별 `DATABASE_URL_FILE`(백업은 `BACKUP_DATABASE_URL_FILE`) | 없음 |
 | `GITHUB_CLIENT_SECRET` | `.env` (**개발용 OAuth 앱**) | `secrets/github_client_secret` (**운영용 OAuth 앱**) | 없음 |
 | `FIELD_KEYS` (필드 암호화 키링 JSON, ADR-026) | `.env` (개발용 임의 키링) | `secrets/field_keys.json` → `FIELD_KEYS_FILE` | 없음 |
 | `DISCORD_WEBHOOK_URL` (Grafana 경보 연락처, **grafana 컨테이너 전용**) | 개발에서는 미설정(경보 비활성, alerting 프로비저닝 미마운트) — **운영에서 파일이 없거나 비면 Grafana 연락처가 0개가 된다** | `secrets/discord_webhook` → `DISCORD_WEBHOOK_URL_FILE` | 없음 |
@@ -179,6 +182,9 @@ classDiagram
 APP_ENV=development
 LOG_LEVEL=debug
 PUBLIC_ORIGIN=http://localhost:8080
+PF_DEV_DB_PASSWORD=CHANGE_ME
+API_PORT=3001
+WORKER_PORT=3003
 DATABASE_URL_API=postgres://pf_api_rw:CHANGE_ME@localhost:55432/pf
 DATABASE_URL_GATEWAY=postgres://pf_gateway_ro:CHANGE_ME@localhost:55432/pf
 DATABASE_URL_WORKER=postgres://pf_worker_rw:CHANGE_ME@localhost:55432/pf

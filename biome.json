@@ -8,7 +8,8 @@
 			"scripts/**",
 			"test/**",
 			"*.json",
-			"!scripts/fixtures"
+			"!scripts/fixtures",
+			"!packages/protocol/schema"
 		]
 	}
 }

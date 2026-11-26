@@ -27,16 +27,16 @@
 | AC-015 | 동시 선점 | S3-3 | — | — | 미구현 |
 | AC-016 | 동시 수정 | S6-2 | — | — | 미구현 |
 | AC-017 | 읽기 모델 재구성과 순서 | S3-5, S6-5 | — | — | 미구현 |
-| AC-018 | 신고 메모 보호와 열람 | S1-12, S6-8 | — | — | 미구현 |
+| AC-018 | 신고 메모 보호와 열람 | S1-12, S6-8 | `packages/infra/test/integration/field-cipher-dump.test.ts` — 암호화한 열의 센티널은 없고, 덤프는 봉투와 평문 대조 센티널을 담고 있다 | `packages/infra/src/crypto/aes-gcm-field-cipher.ts` (FieldCipher — 위 시험은 pg_dump 평문 부재의 부분 근거다. outbox payload·`request_key`·로그·관리자 열람은 실제 ENC 컬럼이 생기는 S6-8 몫이라 상태는 올리지 않는다) | 미구현 |
 | AC-019 | 쓰기 잠금 | S6-4 | — | — | 미구현 |
-| AC-020 | 감사 기록의 원자성 | S1-14, S6-9 | — | — | 미구현 |
+| AC-020 | 감사 기록의 원자성 | S1-14, S6-9 | `modules/events/test/integration/audit-writer.test.ts` — `record 직후에 장애를 주입하면 둘 다 없다`<br>`modules/events/test/detail-validator.test.ts` — `DetailValidator — 금지 키` | `modules/events/src/adapter/postgres/audit-writer.ts` (PostgresAuditWriter — 위 L3 시험은 시험이 만든 표를 "행위" 로 쓴다. 실제 usecase(guestbook 숨김·`moderation_action`)의 원자성은 S6-9 몫이라 상태는 `구현` 까지만) | 구현 |
 | AC-021 | 접근 로그 프라이버시 | S8-7 | — | — | 미구현 |
 | AC-022 | 세션 일괄 폐기 | S2-6 | — | — | 미구현 |
 | AC-023 | 모든 쓰기는 트랜잭션 | S1-4 | — | — | 미구현 |
-| AC-024 | 컬럼 보호 등급 | S1-13 | — | — | 미구현 |
+| AC-024 | 컬럼 보호 등급 | S1-13 | `scripts/check-classification.test.ts` — `스키마의 컬럼이 맵에 없으면 미분류다` | `scripts/check-classification.ts` (픽스처 `scripts/fixtures/classification/`) · ENC 쓰기 경로 절반은 S1-12 몫 | 구현 |
 | AC-025 | 운영 상태 지표와 경보 | S7-5, S7-6 | — | — | 미구현 |
 | AC-026 | 보관 정지 | S6-10 | — | — | 미구현 |
-| AC-027 | 비밀 스캔 | S1-15 | — | — | 미구현 |
+| AC-027 | 비밀 스캔 | S1-15 | `scripts/secret-scan/detection.test.ts` — `합성 비밀 3종을 각각 다른 커밋에 넣으면 종료 1 이고 세 규칙이 모두 검출된다`<br>`scripts/gitleaks-config.test.ts` — `.gitleaks.toml — Discord 웹훅 규칙`<br>`scripts/pre-commit-hook.test.ts` — `gitleaks 가 있으면 스테이징 검사 인자로 부르고 그 종료 코드를 그대로 돌려준다` | `.gitleaks.toml` · `.github/workflows/ci.yml` `secret-scan` · `.githooks/pre-commit` (검출 시험은 gitleaks 바이너리가 있는 CI `secret-scan` 잡에서만 돌고 이 저장소에서 아직 실행된 적이 없어 상태는 `구현` 까지만) | 구현 |
 | AC-028 | 백업과 복구 | S8-4 | — | — | 미구현 |
 | AC-029 | 감사 조회와 보관 | S6-9 | — | — | 미구현 |
 | AC-030 | dead 재투입 | S6-7 | — | — | 미구현 |

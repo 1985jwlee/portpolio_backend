@@ -1,0 +1,35 @@
+{
+	"properties": {
+		"ch": {
+			"const": "sys",
+			"type": "string"
+		},
+		"d": {
+			"properties": {
+				"n": {
+					"minimum": 0,
+					"type": "integer"
+				}
+			},
+			"required": [
+				"n"
+			],
+			"type": "object"
+		},
+		"t": {
+			"const": "ping",
+			"type": "string"
+		},
+		"v": {
+			"const": 1,
+			"type": "number"
+		}
+	},
+	"required": [
+		"v",
+		"ch",
+		"t",
+		"d"
+	],
+	"type": "object"
+}

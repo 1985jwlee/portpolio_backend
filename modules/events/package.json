@@ -1,0 +1,17 @@
+{
+	"name": "@pf/events",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./adapter/postgres/audit-writer": "./src/adapter/postgres/audit-writer.ts"
+	},
+	"dependencies": {
+		"@pf/db": "workspace:*",
+		"@pf/kernel": "workspace:*",
+		"drizzle-orm": "0.45.4"
+	},
+	"devDependencies": {
+		"@pf/testkit": "workspace:*"
+	}
+}

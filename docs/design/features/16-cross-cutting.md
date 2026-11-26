@@ -1132,6 +1132,8 @@ flowchart TD
 `web` 은 서버 코드를 갖지 않는 Next.js 이고(`standalone`), 위 `CompositionRoot` 를 쓰지 않는다. 헬스는 Route Handler `/healthz`, 종료는 Next 서버의 신호 처리에 맡긴다. Bun 위 동작은 G3 확인 대상이다(미확인).
 
 ### 9.7 클래스
+> **구현 메모(S1-7, DV-026)**: `ReadinessGate` 는 만들지 않고 `HealthRegistry.setDraining(flag)`(F17 §2.1) 하나로 합쳤다. 기동은 draining 으로 시작해 phase 50 `ReadinessComponent` 가 풀고, `ShutdownCoordinator` 는 종료 신호에서 가장 먼저 켠다. 마이그레이션 확인(`assertUpToDate`)은 이번 구현에 없다(DV-027).
+
 §3.7. `ApiRoot`·`GatewayRoot`·`WorkerRoot`·`CliRoot` 는 `CompositionRoot` 를 상속해 `build()`(어댑터·모듈 조립)만 다르게 구현하고, 시작·종료 골격은 부모가 갖는다(템플릿 메서드).
 
 ### 9.8 오류·지표·로그
@@ -1458,7 +1460,7 @@ flowchart TD
 | `FakeRateLimiter`·`FakePresenceCounter`·`InMemoryEventTransport` | 포트 대역 |
 | `GoldenFiles` | 골든 JSON 읽기·대조 |
 | `PortContractSuite` | CM-07 어댑터 공용 계약 스위트 |
-| `ApiHarness` | api 조립 루트를 가짜 포트로 띄워 HTTP 호출(통합; 08 의 `ApiHarness`). `GatewayHarness` 는 ws-gateway 를 띄워 `FakeSocket` 으로 호출 |
+| `ApiHarness` | api 조립 루트를 가짜 포트로 띄워 HTTP 호출(통합; 08 의 `ApiHarness`). `GatewayHarness` 는 ws-gateway 를 띄워 `FakeSocket` 으로 호출. **구현 위치: `apps/api/test/support/api-harness.ts`**(testkit 은 apps 를 임포트할 수 없다 — DV-031) |
 
 ### 13.3 클래스
 
@@ -1561,7 +1563,7 @@ flowchart TD
 ```
 
 ### 13.6 코드에 요구하는 것
-- 장애 주입 지점 훅 `faults.hit('<이름>')` 를 usecase·디스패처 주요 지점에 둔다(프로덕션에서는 no-op). 호출 이름은 **`<모듈>.<usecase 또는 컴포넌트>.<지점>` 소문자 snake_case** 규칙의 상수 목록(`packages/testkit`)으로 관리한다(예: `events.outbox_writer.before_append`, `events.outbox_dispatcher.after_claim`, `events.message_runner.before_complete`, `guestbook.edit_entry.before_save`, `guestbook.idempotency.after_reserve`, `guestbook.<usecase>.after_load`). 08 §5 의 시나리오와 같은 이름이다.
+- 장애 주입 지점 훅 `faults.hit('<이름>')` 를 usecase·디스패처 주요 지점에 둔다(프로덕션에서는 no-op — 훅 인터페이스 `Faults` 는 kernel 포트, 운영 구현 `NoopFaults` 는 `packages/infra`, 시험 구현 `FaultInjector` 는 `packages/testkit` 이다. 운영 코드는 testkit 을 임포트할 수 없어 지점 이름을 문자열로 받고, 이름이 상수와 갈라지는지는 그 모듈의 시험이 대조한다). 호출 이름은 **`<모듈>.<usecase 또는 컴포넌트>.<지점>` 소문자 snake_case** 규칙의 상수 목록(`packages/testkit`)으로 관리한다(예: `events.outbox_writer.before_append`, `events.outbox_dispatcher.after_claim`, `events.audit_writer.after_record`, `events.message_runner.before_complete`, `guestbook.edit_entry.before_save`, `guestbook.idempotency.after_reserve`, `guestbook.<usecase>.after_load`). 08 §5 의 시나리오와 같은 이름이다.
 - `Clock`·`IdGenerator` 는 항상 포트로 받는다(§14). SQL 에서 `now()` 를 쓰지 않고 `tx.now` 를 바인딩한다(§8.2).
 - `testkit` 은 `packages/*` 규칙(B7)을 따르되 `modules/*` 를 임포트하지 않는다(모듈 시험은 각 모듈의 `test/` 에서 testkit 을 사용).
 

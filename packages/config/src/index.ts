@@ -5,7 +5,7 @@ export type {
 	LoadWarning,
 } from "./loader.ts";
 export { exitCodeFor, loadConfig, summarize } from "./loader.ts";
-export type { ConfigOf } from "./schema.ts";
+export type { ConfigOf, ConfigSchema, FieldSpec } from "./schema.ts";
 export { defineSchema, field, mergeSchemas } from "./schema.ts";
 export type { BaseConfig } from "./schemas/base.ts";
 export { baseSchema } from "./schemas/base.ts";

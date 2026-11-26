@@ -28,5 +28,10 @@ dist/
 .env.*
 !.env.example
 
+# 비밀·사고 증거 디렉토리 — 저장소 루트의 평문 비밀(secrets/)과 사고 대응 증거(incidents/)는 추적하지 않는다 (S1-15, design/13 §10).
+# 루트에만 건다 — 비밀·개인정보를 제거해 올리는 사후 기록 docs/incidents/ 는 추적 대상이다.
+/secrets/
+/incidents/
+
 # tsc -b 증분 정보 (S1-1)
 *.tsbuildinfo

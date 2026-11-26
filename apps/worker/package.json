@@ -1,0 +1,17 @@
+{
+	"name": "@pf/worker",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@pf/config": "workspace:*",
+		"@pf/db": "workspace:*",
+		"@pf/infra": "workspace:*",
+		"@pf/kernel": "workspace:*",
+		"@pf/observability": "workspace:*",
+		"@pf/protocol": "workspace:*"
+	},
+	"devDependencies": {
+		"@pf/testkit": "workspace:*"
+	}
+}

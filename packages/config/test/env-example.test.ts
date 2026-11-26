@@ -3,14 +3,18 @@
 import { describe, expect, test } from "bun:test";
 import { baseSchema, fields } from "@pf/config";
 
-// 개발 키 넷은 S1-7 dev 스크립트가 DATABASE_URL 로 매핑한다(docs/design/10-security.md:286).
-// 같은 목록이 S1-7 스크립트에도 생기므로 출처를 여기에 적어 둔다.
+// 개발 키 넷은 scripts/run-as.ts 가 DATABASE_URL 로 매핑한다(docs/design/10-security.md:286).
+// 같은 목록이 run-as 의 호출(package.json 스크립트)에도 있으므로 출처를 여기에 적어 둔다.
 const devDatabaseKeys = [
 	"DATABASE_URL_API",
 	"DATABASE_URL_GATEWAY",
 	"DATABASE_URL_WORKER",
 	"DATABASE_URL_MIGRATOR",
 ];
+
+// 앱 전용 키(각 앱의 config.ts 가 정의 — 이 패키지는 앱을 임포트할 수 없다)와 compose 전용 키(앱이 읽지 않는다).
+const appKeys = ["API_PORT", "WORKER_PORT"];
+const composeKeys = ["PF_DEV_DB_PASSWORD"];
 
 const repoRoot = new URL("../../../", import.meta.url);
 
@@ -30,17 +34,25 @@ const schemaNames = [
 ].filter((name) => name !== "DATABASE_URL");
 
 describe(".env.example 일치", () => {
-	test("E1 견본의 모든 키는 스키마 이름이거나 개발 매핑 키다", async () => {
-		const known = new Set([...schemaNames, ...devDatabaseKeys]);
+	test("E1 견본의 모든 키는 스키마 이름이거나 개발 매핑·앱·compose 키다", async () => {
+		const known = new Set([
+			...schemaNames,
+			...devDatabaseKeys,
+			...appKeys,
+			...composeKeys,
+		]);
 		const extra = [...(await exampleKeys())].filter((key) => !known.has(key));
 		expect(extra).toEqual([]);
 	});
 
-	test("E2 스키마 이름(DATABASE_URL 제외)과 개발 매핑 키는 모두 견본에 있다", async () => {
+	test("E2 스키마 이름(DATABASE_URL 제외)과 개발 매핑·앱·compose 키는 모두 견본에 있다", async () => {
 		const keys = await exampleKeys();
-		const absent = [...schemaNames, ...devDatabaseKeys].filter(
-			(name) => !keys.has(name),
-		);
+		const absent = [
+			...schemaNames,
+			...devDatabaseKeys,
+			...appKeys,
+			...composeKeys,
+		].filter((name) => !keys.has(name));
 		expect(absent).toEqual([]);
 	});
 });

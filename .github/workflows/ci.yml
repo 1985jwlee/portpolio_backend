@@ -51,6 +51,51 @@ jobs:
       - uses: ./.github/actions/setup-bun
       - run: bun run arch
 
+  # 커밋된 packages/protocol/schema 가 등록된 스키마와 다르면 실패한다 — 계약 변경이 리뷰에 보이게 한다(S1-9).
+  gen-schema:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run gen:schema --check
+
+  # 모든 컬럼에 보호 등급이 있는지 대조한다(S1-13, AC-024). 대상 모듈이 없으면 "검사 대상 0" 으로 통과한다.
+  classification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run check:classification
+
+  # 추적표·명세·시험 이름의 정합을 본다(S1-16, AC-032). 통과·실패 판정은 소스 문자열이라 시험을 돌리지 않는다.
+  trace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run check:trace
+
+  # 계약 패키지 버전 게이트와 모듈 격리 타입체크·번들(ADR-052 결정 3·5, S1-18). 둘 다 git 이력이 필요 없다 — 기준선은 패키지의 contract.lock.json 이다.
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - run: bun run check:contract-version
+      - run: bun run check:isolated
+
   # bunfig.toml 이 통합 시험을 뺀다. 재시도하지 않는다 — 깜박이는 시험은 덮지 않고 고친다(TD-4 H-3).
   unit:
     needs: [lint, typecheck, arch]
@@ -89,6 +134,44 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-bun
       - run: bun run test:integration
+        env:
+          # pg_dump 센티널 시험(AC-018)이 서비스 컨테이너 안의 pg_dump(서버와 같은 18)를 쓴다 — 러너에 깔린 클라이언트 버전에 기대지 않는다.
+          # job 컨텍스트는 잡 수준 env 에서 못 쓰므로 스텝 수준이다. 컨테이너 안에서 127.0.0.1:5432 는 같은 서버라 TEST_DATABASE_URL 이 그대로 통한다.
+          PF_PG_DUMP: docker exec -i ${{ job.services.postgres.id }} pg_dump
+
+  # 저장소 이력·변경분에서 비밀 패턴을 찾는다(S1-15, AC-027). gitleaks 8.30.1 CLI 를 릴리스 바이너리로 받아 체크섬을 검증한다 —
+  # gitleaks-action 은 조직 저장소에 라이선스 키를 요구해 쓰지 않는다(Q8). 설정은 .gitleaks.toml.
+  secret-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # 릴리스의 gitleaks_8.30.1_checksums.txt 와 GitHub 릴리스 자산 digest 두 곳이 같은 값이다(linux_x64). 버전을 올리면 함께 바꾼다.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      # run 문자열에 식을 넣지 않고 셸 변수로 받는다(식 주입 경로 차단).
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # PR 은 대상 브랜치 이후 커밋만, push 는 전체 이력을 본다 — 둘 다 이력이 있어야 한다.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+      - name: gitleaks 설치(체크섬 검증)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+      # 합성 비밀로 검출 동작을 먼저 확인한다 — 검출이 조용히 죽은 도구로 이력 검사를 통과하지 않게 한다.
+      - run: bun run test:secret-scan
+      - name: 이력 검사(PR — 대상 브랜치 이후 변경분)
+        if: github.event_name == 'pull_request'
+        run: gitleaks git --config .gitleaks.toml --redact --exit-code 1 --log-opts "origin/${BASE_REF}..HEAD"
+      - name: 이력 검사(push — 전체 이력)
+        if: github.event_name != 'pull_request'
+        run: gitleaks git --config .gitleaks.toml --redact --exit-code 1
 
   audit:
     runs-on: ubuntu-24.04
@@ -117,3 +200,5 @@ jobs:
       - uses: ./.github/actions/setup-bun
       # PR 체크아웃은 분리 HEAD 라 로컬 브랜치 main 이 없다 — 기준은 origin/<대상 브랜치>다(스크립트 기본값 main 은 해석되지 않는다).
       - run: bun run migration:immutable --base "origin/$BASE_REF"
+      # B14 SQL 절(S1-18) — 모듈 마이그레이션이 다른 모듈의 스키마 객체를 참조하지 않는지 본다. 이력은 안 보지만 이 잡의 PR 한정 조건을 따른다.
+      - run: bun run check:migration-isolation

@@ -21,6 +21,9 @@ const IMPL_MODULE = "^modules/(?![^/]+-contract/)[^/]+/";
 /** 모듈 공개 진입 — modules/<m>/src/index.ts */
 const PUBLIC_INDEX = "index\\.ts$";
 
+/** 조립 루트 — 앱이 모듈 어댑터·packages/infra 를 받는 유일한 자리. */
+const COMPOSE = "^apps/[^/]+/src/compose/";
+
 /** 스키마 진입 — packages/db 만 임포트할 수 있다. */
 const SCHEMA_ENTRY = "adapter/postgres/schema\\.ts$";
 
@@ -90,12 +93,27 @@ module.exports = {
 		},
 		{
 			name: "B4-deep-outside",
-			comment: "apps·packages·test·scripts 는 모듈의 index.ts 외를 임포트하지 않는다(packages/db 의 스키마 진입은 아래 규칙)",
+			comment: "apps·packages·test·scripts 는 모듈의 index.ts 외를 임포트하지 않는다(packages/db 의 스키마 진입과 조립 루트는 아래 규칙)",
 			severity: "error",
-			from: { path: "^(apps|packages|test|scripts)/", pathNot: "^packages/db/" },
+			from: {
+				path: "^(apps|packages|test|scripts)/",
+				pathNot: ["^packages/db/", COMPOSE],
+			},
 			to: {
 				path: "^modules/[^/]+/src/",
 				pathNot: `^modules/[^/]+/src/${PUBLIC_INDEX}`,
+			},
+		},
+		// 조립이 모듈의 어댑터를 받는 유일한 경로(Q2) — index 는 어댑터를 다시 내보내지 않으므로(B6) 조립만 adapter 를 직접 임포트한다.
+		// domain·usecase 같은 깊은 경로는 여기서도 막는다.
+		{
+			name: "B4-deep-compose",
+			comment: "조립(apps/*/src/compose)은 모듈의 index.ts 와 adapter/ 만 임포트한다",
+			severity: "error",
+			from: { path: COMPOSE },
+			to: {
+				path: "^modules/[^/]+/src/",
+				pathNot: [`^modules/[^/]+/src/${PUBLIC_INDEX}`, "^modules/[^/]+/src/adapter/"],
 			},
 		},
 		{

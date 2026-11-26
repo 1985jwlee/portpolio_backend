@@ -336,6 +336,16 @@ export function isProductSource(path: string): boolean {
 	return /^(apps|modules|packages)\/[^/]+\/src\//.test(path);
 }
 
+// B11-write 에서 빼는 경로 — 객체를 따지지 않는 규칙(`.update(`·`.delete(` 는 무엇이든 걸린다)의 한계를 경로로 막는다.
+// 이 경로의 실제 DB 쓰기는 규칙이 못 본다 — 그래서 DB 를 임포트하지 않는 곳만 둔다(DV-033).
+//   infra/memory·testkit/src — 메모리 구현·시험 대역의 Map.delete(Q3)
+//   infra/crypto — node:crypto 의 cipher.update(암호문을 만드는 호출이고 DB 쓰기가 아니다)
+const B11_WRITE_EXEMPT: readonly string[] = [
+	"packages/infra/src/memory/",
+	"packages/infra/src/crypto/",
+	"packages/testkit/src/",
+];
+
 const RULES: readonly PurityRule[] = [
 	{
 		// 설정 우회 — 환경 접근은 packages/config 에서만(B9). 갈래는 모두 같은 접근의 다른 표기다:
@@ -359,11 +369,14 @@ const RULES: readonly PurityRule[] = [
 	},
 	{
 		// 쓰기는 adapter/postgres 안에서만(B11, ADR-025). Map·Set 의 같은 이름 메서드도 걸린다(객체를 따지지 않는다).
+		// 제외 경로는 B11_WRITE_EXEMPT 다 — DB 를 건드리지 않는 곳의 같은 이름 메서드(Map.delete·cipher.update)를 경로로 막는다.
 		// 쓰기 execute 는 첫 인자가 문자열·템플릿 리터럴이거나 sql.raw 로 시작하는 형태만 본다 — execute 전체를 막으면 usecase 의
 		// handler.execute(cmd) 관례가 걸린다. 변수로 넘긴 SQL 은 값 추적이 없어 못 잡는다.
 		id: "B11-write",
 		applies: (path) =>
-			isProductSource(path) && !path.includes("/adapter/postgres/"),
+			isProductSource(path) &&
+			!path.includes("/adapter/postgres/") &&
+			!B11_WRITE_EXEMPT.some((prefix) => path.startsWith(prefix)),
 		detectors: [writeCall],
 	},
 	{

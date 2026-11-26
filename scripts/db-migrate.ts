@@ -132,7 +132,8 @@ async function main(args: ReadonlyArray<string>): Promise<number> {
 			return 1;
 		}
 	} finally {
-		await pool.close();
+		// 실행이 끝났으므로 기다릴 질의가 없다 — 기한은 닫기가 멈추지 않게 하는 상한이다.
+		await pool.close(5_000);
 	}
 
 	console.log(

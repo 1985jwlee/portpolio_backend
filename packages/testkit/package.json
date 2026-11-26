@@ -1,0 +1,12 @@
+{
+	"name": "@pf/testkit",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@pf/db": "workspace:*",
+		"@pf/kernel": "workspace:*"
+	}
+}

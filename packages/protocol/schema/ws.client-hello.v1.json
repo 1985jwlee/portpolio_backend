@@ -1,0 +1,47 @@
+{
+	"properties": {
+		"ch": {
+			"const": "sys",
+			"type": "string"
+		},
+		"d": {
+			"properties": {
+				"locale": {
+					"anyOf": [
+						{
+							"const": "ko",
+							"type": "string"
+						},
+						{
+							"const": "en",
+							"type": "string"
+						}
+					]
+				},
+				"resume": {
+					"minimum": 0,
+					"type": "integer"
+				}
+			},
+			"required": [
+				"locale"
+			],
+			"type": "object"
+		},
+		"t": {
+			"const": "hello",
+			"type": "string"
+		},
+		"v": {
+			"const": 1,
+			"type": "number"
+		}
+	},
+	"required": [
+		"v",
+		"ch",
+		"t",
+		"d"
+	],
+	"type": "object"
+}

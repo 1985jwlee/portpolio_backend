@@ -14,7 +14,7 @@ const validRoles = { roles: ["pf_api_rw"], tables: {} };
 const folder = "/nonexistent";
 
 afterAll(async () => {
-	await pool.close();
+	await pool.close(5_000);
 });
 
 async function failureOf(plan: Parameters<typeof runMigrations>[1]) {
@@ -92,7 +92,11 @@ describe("runMigrations 입력 검증", () => {
 	});
 
 	test("createDbPool 로 만들지 않은 풀은 거절한다", async () => {
-		const fake: DbPool = { read: pool.read, close: async () => {} };
+		const fake: DbPool = {
+			read: pool.read,
+			stats: () => ({ max: undefined, closed: false }),
+			close: async () => {},
+		};
 		const result = await runMigrations(fake, {
 			modules: [],
 			roles: validRoles,
@@ -127,7 +131,7 @@ describe("runMigrations 풀 상한", () => {
 					expect(result.error.details).toEqual(details);
 				}
 			} finally {
-				await sized.close();
+				await sized.close(5_000);
 			}
 		});
 	}
@@ -171,7 +175,11 @@ describe("PostgresUnitOfWork.run 입력 검증", () => {
 
 	test("createDbPool 로 만들지 않은 풀은 거절하고 fn 을 부르지 않는다", async () => {
 		let called = false;
-		const fake: DbPool = { read: pool.read, close: async () => {} };
+		const fake: DbPool = {
+			read: pool.read,
+			stats: () => ({ max: undefined, closed: false }),
+			close: async () => {},
+		};
 		const result = await new PostgresUnitOfWork(fake, clock).run(async () => {
 			called = true;
 			return Result.ok(1);

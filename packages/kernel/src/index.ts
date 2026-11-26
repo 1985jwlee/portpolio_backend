@@ -27,8 +27,31 @@ export {
 	VersionConflictError,
 	WriteLockedError,
 } from "./errors.ts";
+export type {
+	AuditAction,
+	AuditActorRole,
+	AuditCategory,
+	AuditEntry,
+	AuditOutcome,
+	AuditWriter,
+} from "./ports/audit-writer.ts";
 export type { Clock } from "./ports/clock.ts";
+export type {
+	EventEnvelope,
+	EventTransport,
+	Receive,
+	Subscription,
+} from "./ports/event-transport.ts";
+export type { Faults } from "./ports/faults.ts";
+export type { FieldCipher } from "./ports/field-cipher.ts";
 export type { IdGenerator } from "./ports/id-generator.ts";
+export type { KeyValueCache } from "./ports/key-value-cache.ts";
+export type { PresenceCounter } from "./ports/presence-counter.ts";
+export type {
+	RateDecision,
+	RateLimiter,
+	RateRule,
+} from "./ports/rate-limiter.ts";
 export type {
 	CommandHandler,
 	EventHandler,

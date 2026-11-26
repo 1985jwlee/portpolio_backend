@@ -1,0 +1,16 @@
+{
+	"name": "@pf/infra",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"dependencies": {
+		"@pf/db": "workspace:*",
+		"@pf/kernel": "workspace:*"
+	},
+	"devDependencies": {
+		"@pf/testkit": "workspace:*",
+		"drizzle-orm": "0.45.4"
+	}
+}

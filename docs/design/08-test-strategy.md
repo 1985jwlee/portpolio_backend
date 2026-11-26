@@ -243,7 +243,7 @@ classDiagram
 | `UnitHarness` | 인메모리 포트 구현(저장소·outbox·inbox·Clock·IdGenerator). L2 |
 | `ModuleHarness` | 실제 Postgres + 실제 어댑터로 usecase 직접 호출 |
 | `ChaosHarness` | 여러 워커 인스턴스·결함 주입·가짜 시계 |
-| `ApiHarness` | api 조립 루트를 프로세스 안에서 구동하고 `request(req)` 로 HTTP 계약·가드·오류 매핑을 시험 (F16 `AppHarness` 와 같은 것) |
+| `ApiHarness` | api 조립 루트를 프로세스 안에서 구동하고 `request(req)` 로 HTTP 계약·가드·오류 매핑을 시험 (F16 `AppHarness` 와 같은 것). **구현 위치는 `apps/api/test/support/api-harness.ts`** — testkit 이 apps 를 임포트할 수 없다(DV-031) |
 | `GatewayHarness` | ws-gateway 인스턴스 + `FakeClient`(프레임 기록·지연 수신·읽기 중단 가능) |
 
 ## 4. 시험 대상 매트릭스 (AC ↔ 시험)
@@ -273,7 +273,7 @@ classDiagram
 | AC-021 | 접근 로그 프라이버시 | `?code=SECRET&state=X`·위조 `X-Forwarded-For` 요청 후 nginx 접근 로그·앱 로그 검사, `rid` 연결 | L3 | §2.0c, `test/compose/access-log.test.ts` |
 | AC-022 | 세션 일괄 폐기 | `revoke-sessions --all` 후 기존 쿠키가 새 익명 세션으로 처리, private `4401`(캐시 30초 내), 감사 행 | L3 | §2.0e, `apps/ws-gateway/test/revoke.test.ts`, `apps/worker/test/cli/` |
 | AC-023 | 모든 쓰기는 트랜잭션 | `ReadDb` 쓰기 시도 거절(L1·L2) + 잡 쓰기가 tx 안(L3) + 배치 삭제 배치별 커밋 + `check-purity` | L1·L2·L3 | §2.0a, `packages/db/test/` |
-| AC-024 | 컬럼 보호 등급 | `check:classification` 이 등급 없는 컬럼을 검출, ENC 컬럼의 쓰기 경로가 `FieldCipher` 뿐임 | L1·L2 | §2.0b, `packages/db/test/classification.test.ts` |
+| AC-024 | 컬럼 보호 등급 | `check:classification` 이 등급 없는 컬럼을 검출, ENC 컬럼의 쓰기 경로가 `FieldCipher` 뿐임 | L1·L2 | §2.0b, `scripts/check-classification.test.ts` (DV-024 — `packages/**` 는 `modules/**` 를 임포트할 수 없다) |
 | AC-025 | 운영 상태 지표·경보 | `promtool test rules`(10건 발화·9건 불발·`OpsJobStale` 경계), `StatusFileCollector` 3상태 구분, 시험 알림 수신 | L2·L3 (실제 Discord 는 L4) | §2.0d, `infra/prometheus/test/`, `apps/worker/test/status-collector.test.ts` |
 | AC-026 | 보관 정지 | `retention:pause` 중 삭제 없음, 24시간 자동 해제(가짜 시계), 경보 | L3 | §2.0e, `modules/*/test/integration/retention-pause.test.ts` |
 | AC-027 | 비밀 스캔 | 시험용 비밀 패턴 커밋이 `secret-scan`·pre-commit 에서 실패 | L1·L3 | §2.0e, `.github/workflows` 시험 브랜치 |

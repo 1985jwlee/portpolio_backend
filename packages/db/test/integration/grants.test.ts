@@ -45,7 +45,7 @@ async function apply(roles: unknown) {
 	try {
 		return await runMigrations(pool, { modules, roles });
 	} finally {
-		await pool.close();
+		await pool.close(5_000);
 	}
 }
 

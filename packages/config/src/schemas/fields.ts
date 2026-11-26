@@ -11,4 +11,6 @@ export const fields = Object.freeze({
 	GITHUB_CLIENT_SECRET: field.string({ secret: true }),
 	OAUTH_STATE_SECRET: field.string({ secret: true, minBytes: 32 }),
 	ADMIN_GITHUB_IDS: field.csvInt(),
+	// 필드 암호화 키링(JSON `{ active, keys }`, ADR-026). 해석·검증은 infra 의 parseKeyring 이 한다.
+	FIELD_KEYS: field.string({ secret: true }),
 });

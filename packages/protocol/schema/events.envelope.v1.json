@@ -1,0 +1,79 @@
+{
+	"properties": {
+		"aggregate": {
+			"properties": {
+				"id": {
+					"format": "uuid",
+					"type": "string"
+				},
+				"type": {
+					"minLength": 1,
+					"type": "string"
+				},
+				"version": {
+					"minimum": 0,
+					"type": "integer"
+				}
+			},
+			"required": [
+				"type",
+				"id",
+				"version"
+			],
+			"type": "object"
+		},
+		"id": {
+			"format": "uuid",
+			"type": "string"
+		},
+		"occurredAt": {
+			"format": "date-time",
+			"type": "string"
+		},
+		"ownerKey": {
+			"anyOf": [
+				{
+					"pattern": "^(session|user):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+					"type": "string"
+				},
+				{
+					"type": "null"
+				}
+			]
+		},
+		"payload": {
+			"patternProperties": {
+				"^(.*)$": {}
+			},
+			"type": "object"
+		},
+		"schemaVersion": {
+			"minimum": 1,
+			"type": "integer"
+		},
+		"seq": {
+			"minimum": 0,
+			"type": "integer"
+		},
+		"traceId": {
+			"format": "uuid",
+			"type": "string"
+		},
+		"type": {
+			"pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+			"type": "string"
+		}
+	},
+	"required": [
+		"id",
+		"seq",
+		"type",
+		"schemaVersion",
+		"occurredAt",
+		"aggregate",
+		"traceId",
+		"ownerKey",
+		"payload"
+	],
+	"type": "object"
+}

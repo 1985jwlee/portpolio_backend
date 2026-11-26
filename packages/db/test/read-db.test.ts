@@ -7,7 +7,7 @@ import { createDbPool, type TxContext } from "@pf/db";
 const pool = createDbPool({ url: "postgres://u:p@127.0.0.1:1/none" });
 
 afterAll(async () => {
-	await pool.close();
+	await pool.close(5_000);
 });
 
 function takesTx(_tx: TxContext): void {}

@@ -1,0 +1,19 @@
+{
+	"name": "@pf/api",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@pf/config": "workspace:*",
+		"@pf/db": "workspace:*",
+		"@pf/events": "workspace:*",
+		"@pf/infra": "workspace:*",
+		"@pf/kernel": "workspace:*",
+		"@pf/observability": "workspace:*",
+		"@pf/protocol": "workspace:*",
+		"elysia": "1.4.30"
+	},
+	"devDependencies": {
+		"@pf/testkit": "workspace:*"
+	}
+}

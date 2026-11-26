@@ -4,6 +4,14 @@
 		{ "path": "./scripts" },
 		{ "path": "./packages/kernel" },
 		{ "path": "./packages/config" },
-		{ "path": "./packages/db" }
+		{ "path": "./packages/db" },
+		{ "path": "./packages/infra" },
+		{ "path": "./packages/protocol" },
+		{ "path": "./packages/testkit" },
+		{ "path": "./modules/events" },
+		{ "path": "./modules/events-contract" },
+		{ "path": "./modules/observability" },
+		{ "path": "./apps/api" },
+		{ "path": "./apps/worker" }
 	]
 }

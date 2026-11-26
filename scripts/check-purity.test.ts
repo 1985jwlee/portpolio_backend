@@ -355,6 +355,30 @@ describe("B11 쓰기·raw SQL", () => {
 		expect(rules("modules/m/test/r.ts", "a.insert(1);")).toEqual([]);
 	});
 
+	test("메모리 구현·시험 대역·암호 경로는 B11-write 에서 제외되고, 같은 패키지의 다른 경로는 잡는다", () => {
+		const text = "map.delete(key);";
+		// Q3 — Map.delete 는 DB 쓰기가 아니다. 암호 경로는 node:crypto 의 cipher.update 때문이다(DV-033). 제외는 이 세 경로뿐이다.
+		expect(rules("packages/infra/src/memory/cache.ts", text)).toEqual([]);
+		expect(rules("packages/testkit/src/fake-ports.ts", text)).toEqual([]);
+		expect(
+			rules("packages/infra/src/crypto/aes.ts", "cipher.update(data);"),
+		).toEqual([]);
+		// 같은 패키지의 다른 경로(Postgres 전달·system)와 다른 패키지의 memory 폴더는 그대로 걸린다.
+		expect(rules("packages/infra/src/postgres/transport.ts", text)).toEqual([
+			"B11-write:1",
+		]);
+		expect(rules("packages/infra/src/system/clock.ts", text)).toEqual([
+			"B11-write:1",
+		]);
+		expect(rules("packages/other/src/memory/cache.ts", text)).toEqual([
+			"B11-write:1",
+		]);
+		// 제외 경로에서도 raw SQL 은 여전히 막는다 — B11-raw-sql 은 범위가 다르다.
+		expect(
+			rules("packages/infra/src/memory/q.ts", "const q = sql`select 1`;"),
+		).toEqual(["B11-raw-sql:1"]);
+	});
+
 	test("adapter/postgres/raw 밖의 sql 태그를 잡고 raw 안은 허용한다", () => {
 		const text = "const q = sql`select 1`;";
 		expect(rules("modules/m/src/adapter/postgres/x.ts", text)).toEqual([

@@ -1,0 +1,6 @@
+# 개발 오버라이드(02 §2.1) — 호스트 포트를 연다. 지금은 postgres 만이다(proxy·prometheus·grafana 는 해당 행이 더한다 — DV-028).
+# 호스트 포트 55432 는 로컬의 다른 PostgreSQL 과 겹치지 않게 한 기본값이다. 바꾸면 .env 의 DATABASE_URL_* 도 같이 바꾼다.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"

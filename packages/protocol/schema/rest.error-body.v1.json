@@ -1,0 +1,30 @@
+{
+	"properties": {
+		"error": {
+			"properties": {
+				"code": {
+					"minLength": 1,
+					"type": "string"
+				},
+				"details": {},
+				"message": {
+					"type": "string"
+				},
+				"traceId": {
+					"format": "uuid",
+					"type": "string"
+				}
+			},
+			"required": [
+				"code",
+				"message",
+				"traceId"
+			],
+			"type": "object"
+		}
+	},
+	"required": [
+		"error"
+	],
+	"type": "object"
+}

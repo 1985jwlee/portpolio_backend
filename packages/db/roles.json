@@ -1,4 +1,9 @@
 {
 	"roles": ["pf_api_rw", "pf_worker_rw", "pf_gateway_ro"],
-	"tables": {}
+	"tables": {
+		"events.audit_log": {
+			"pf_api_rw": ["SELECT", "INSERT"],
+			"pf_worker_rw": ["SELECT", "INSERT", "DELETE"]
+		}
+	}
 }

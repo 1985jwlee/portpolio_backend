@@ -1,0 +1,39 @@
+# gitleaks 설정 — CI `secret-scan` 잡과 로컬 pre-commit(.githooks/pre-commit)이 같은 파일을 쓴다(S1-15, docs/design/09-ci-cd.md §2).
+# 버전은 8.30.1 로 고정한다(ci.yml 의 GITLEAKS_VERSION). 이 설정의 문법은 그 버전의 것이다.
+title = "portpolio_backend"
+
+[extend]
+# 기본 규칙(AWS·GitHub·Slack 등)을 그대로 쓰고 아래 규칙만 더한다.
+useDefault = true
+
+# 기본 규칙에는 Discord 웹훅 URL 이 없다(실측, docs/domains/tech-stack.md 도구 행). 웹훅 URL 자체가 비밀이다.
+[[rules]]
+id = "discord-webhook-url"
+description = "Discord 웹훅 URL"
+# 접두(ptb·canary·discordapp)와 API 버전 경로는 선택이다. 토큰은 영숫자·`_`·`-` 60자 이상이다.
+regex = '''https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api(?:/v[0-9]+)?/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{60,}'''
+keywords = ["discord"]
+
+# 허용 목록 — 경로와 줄 모양을 함께 만족해야 숨긴다(condition = "AND"). 경로만 허용하면 그 파일에 들어온 진짜 비밀도 숨는다.
+# 줄 모양은 알려진 자리표시자 한 줄 전체와 같아야 하므로, 같은 줄에 다른 비밀을 얹어도 숨지 않는다.
+# 개발 환경 견본의 자리표시자(실제 값은 .env 에 두고 저장소에 올리지 않는다).
+[[allowlists]]
+description = ".env.example 의 CHANGE_ME 자리표시자 줄"
+condition = "AND"
+paths = ['''^\.env\.example$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*DATABASE_URL_[A-Z]+=postgres://[a-z_]+:CHANGE_ME@localhost:55432/pf\s*$''',
+  '''^\s*FIELD_KEYS=\{"active":"k1","keys":\{"k1":"CHANGE_ME"\}\}\s*$''',
+]
+
+# CI 서비스 컨테이너 Postgres 의 버려도 되는 비밀번호 — 잡과 함께 사라지는 클러스터의 값이다(ci.yml `integration`).
+[[allowlists]]
+description = "ci.yml 의 시험 DB 접속 문자열과 서비스 컨테이너 비밀번호 줄"
+condition = "AND"
+paths = ['''^\.github/workflows/ci\.yml$''']
+regexTarget = "line"
+regexes = [
+  '''^\s*TEST_DATABASE_URL: postgres://postgres:ci-throwaway@127\.0\.0\.1:5432/postgres\s*$''',
+  '''^\s*POSTGRES_PASSWORD: ci-throwaway\s*$''',
+]

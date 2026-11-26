@@ -59,6 +59,9 @@ const EXPECTED_VIOLATING: readonly string[] = [
 	"B3-declaration modules/cq/port-kinds.json → modules/cq/src/port/bad-read.ts",
 	"B4-deep-module modules/mod-a/src/deep.ts → modules/mod-b/src/domain/secret.ts",
 	"B4-deep-outside test/t.ts → modules/mod-b/src/adapter/postgres/schema.ts",
+	// 조립만 모듈 adapter 를 임포트할 수 있다(Q2) — 조립 밖 앱 코드의 같은 임포트는 B4·B13 둘 다 띄운다.
+	"B4-deep-outside apps/api/src/routes/adapter.ts → modules/m1/src/adapter/a.ts",
+	"B4-deep-compose apps/api/src/compose/deep.ts → modules/mod-b/src/domain/secret.ts",
 	"B4-deep-db packages/db/src/d.ts → modules/mod-b/src/domain/secret.ts",
 	"B5-module-cycle packages/alpha",
 	"B7-packages-up packages/up/src/x.ts → modules/mod-b/src/index.ts",
@@ -85,6 +88,7 @@ const EXPECTED_VIOLATING: readonly string[] = [
 	"B13-impl-module modules/mod-a/src/typed.ts → modules/mod-b/src/index.ts",
 	"B13-impl-module modules/mod-a/src/deep.ts → modules/mod-b/src/domain/secret.ts",
 	"B13-impl-app apps/api/src/routes/r.ts → modules/mod-b/src/index.ts",
+	"B13-impl-app apps/api/src/routes/adapter.ts → modules/m1/src/adapter/a.ts",
 	"B13-contract modules/mod-b-contract/src/c.ts → packages/db/src/index.ts",
 	"B14-identity modules/mod-a/src/id.ts → modules/identity-contract/src/index.ts",
 	"unresolvable modules/mod-a/src/absent.ts → @fixture/absent",

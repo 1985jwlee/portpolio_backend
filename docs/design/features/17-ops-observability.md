@@ -708,7 +708,7 @@ flowchart TD
 
 ### 6.3 구성·클래스
 
-§2.1 의 `Logger` · `LogContext` · `Redactor` · `LogSink`. `LogContext` 는 `AsyncLocalStorage`(`node:async_hooks`) 기반이며 **Bun 호환은 미확인(G5)**. 대체: 인자로 `ctx` 를 명시 전달.
+§2.1 의 `Logger` · `LogContext` · `Redactor` · `LogSink`. `LogContext` 는 `AsyncLocalStorage`(`node:async_hooks`) 기반이며 **Bun 1.4.5 에서 await 경계(타이머·마이크로태스크·`Promise.all`)와 동시 흐름 격리를 시험으로 확인했다**(S1-11, `modules/observability/test/log-context.test.ts`). 대체(필요해질 때): 인자로 `ctx` 를 명시 전달.
 
 ### 6.4 시퀀스
 

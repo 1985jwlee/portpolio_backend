@@ -3,7 +3,8 @@
 # .env 가 필요한 루트 명령(S1-4 db:migrate · S1-7 dev·db:seed·worker <cmd>)은 --env-file=.env 로 명시적으로 불러온다.
 env = false
 
-# 실제 DB 가 필요한 통합 시험은 평소 `bun test` 에서 뺀다. `test:integration` 이 --path-ignore-patterns 로 이 목록을 덮어 그 시험만 돌린다.
+# 실제 DB 가 필요한 통합 시험과 gitleaks 바이너리가 필요한 비밀 검출 시험은 평소 `bun test` 에서 뺀다.
+# `test:integration`·`test:secret-scan` 이 --path-ignore-patterns 로 이 목록을 덮어 그 시험만 돌린다.
 # 주의: 이 표가 최상위 env 아래에 있어야 위 env 키가 최상위로 남는다.
 [test]
-pathIgnorePatterns = ["**/test/integration/**"]
+pathIgnorePatterns = ["**/test/integration/**", "**/scripts/secret-scan/**"]

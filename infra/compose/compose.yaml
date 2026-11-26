@@ -1,0 +1,30 @@
+# 로컬 개발·통합 확인용 공통 정의(docs/design/02-dev-environment.md §2). 지금은 postgres 하나다.
+# 사용: 저장소 루트에서 `bun run compose:up`(--env-file .env 를 붙여 부른다). 비밀번호는 .env 의 PF_DEV_DB_PASSWORD 이고 이 파일에 리터럴로 쓰지 않는다.
+name: pf
+
+services:
+  postgres:
+    # 메이저 고정. 패치 버전은 확정 시점에 공식 태그 목록에서 다시 조회해 고정한다(02 §2.1).
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: pf
+      POSTGRES_PASSWORD: ${PF_DEV_DB_PASSWORD:?PF_DEV_DB_PASSWORD 가 없다 — .env 에 채운다}
+      # init 스크립트가 역할 비밀번호로 쓴다. 비어 있으면 init 이 실패한다.
+      PF_DEV_DB_PASSWORD: ${PF_DEV_DB_PASSWORD:?PF_DEV_DB_PASSWORD 가 없다 — .env 에 채운다}
+    volumes:
+      # PG 18 이미지는 버전별 하위 디렉토리를 쓰므로 데이터 디렉토리가 아니라 그 상위를 마운트한다.
+      - pgdata:/var/lib/postgresql
+      - ./init/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+      # 역할 목록의 정본 — 앱·db:migrate 가 읽는 파일과 같은 것이라 이름이 갈라지지 않는다.
+      - ../../packages/db/roles.json:/docker-entrypoint-initdb.d/roles.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pf"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 종료 신호 뒤 체크포인트를 끝낼 시간(앱의 grace 25초보다 길게 둔다 — F16 §9.5).
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:

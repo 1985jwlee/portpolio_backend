@@ -51,7 +51,7 @@ beforeAll(async () => {
 }, TIMEOUT_MS);
 
 afterAll(async () => {
-	await pool.close();
+	await pool.close(5_000);
 	await database.drop();
 });
 

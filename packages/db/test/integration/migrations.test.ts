@@ -48,7 +48,7 @@ async function migrate(url: string, modules: ReadonlyArray<MigrationModule>) {
 	try {
 		return await runMigrations(pool, { modules, roles: NO_ROLES });
 	} finally {
-		await pool.close();
+		await pool.close(5_000);
 	}
 }
 

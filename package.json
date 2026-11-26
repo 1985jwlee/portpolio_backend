@@ -12,20 +12,38 @@
 		"format": "biome format --write",
 		"typecheck": "tsc -b --noEmit",
 		"arch": "bun scripts/arch.ts",
+		"gen:schema": "bun scripts/gen-schema.ts",
+		"check:classification": "bun scripts/check-classification.ts",
+		"check:trace": "bun scripts/check-trace.ts",
+		"check:contract-version": "bun scripts/check-contract-version.ts",
+		"check:isolated": "bun scripts/check-isolated.ts",
+		"check:migration-isolation": "bun scripts/check-migration-isolation.ts",
 		"check": "bun run lint && bun run typecheck",
-		"db:migrate": "bun --env-file=.env scripts/db-migrate.ts",
+		"db:migrate": "bun --env-file=.env scripts/run-as.ts MIGRATOR scripts/db-migrate.ts",
 		"migration:immutable": "bun scripts/check-migration-immutable.ts",
-		"test:integration": "bun test --path-ignore-patterns='**/node_modules/**' test/integration"
+		"test:integration": "bun test --path-ignore-patterns='**/node_modules/**' test/integration",
+		"test:secret-scan": "bun test --path-ignore-patterns='**/node_modules/**' scripts/secret-scan",
+		"db:seed": "bun --env-file=.env scripts/seed.ts",
+		"dev": "bun run --parallel dev:api dev:worker",
+		"dev:api": "bun --env-file=.env scripts/run-as.ts API --watch apps/api/src/main.ts",
+		"dev:worker": "bun --env-file=.env scripts/run-as.ts WORKER --watch apps/worker/src/main.ts",
+		"worker": "bun --env-file=.env scripts/run-as.ts WORKER apps/worker/src/cli/main.ts",
+		"compose:up": "docker compose --env-file .env -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d --wait postgres",
+		"compose:down": "docker compose --env-file .env -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml down"
 	},
 	"dependencies": {
 		"@pf/config": "workspace:*",
-		"@pf/db": "workspace:*"
+		"@pf/db": "workspace:*",
+		"@pf/infra": "workspace:*",
+		"@pf/kernel": "workspace:*",
+		"@pf/protocol": "workspace:*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.8",
 		"@swc/core": "1.16.22",
 		"@types/bun": "1.4.4",
 		"dependency-cruiser": "18.7.2",
+		"drizzle-orm": "0.45.4",
 		"typescript": "7.0.2"
 	}
 }
