@@ -23,6 +23,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function optionalText(value: unknown): string {
+	return value === undefined ? "" : text(value);
+}
+
+function optionalStrings(value: unknown): string[] {
+	return value === undefined ? [] : strings(value);
+}
+
 function strings(value: unknown): string[] {
 	if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
 		throw new Error("문자열 배열이어야 한다");
@@ -62,9 +70,9 @@ async function load(): Promise<{
 		})),
 		allowlists: rawAllowlists.filter(isRecord).map((a) => ({
 			description: text(a.description),
-			condition: text(a.condition),
-			regexTarget: text(a.regexTarget),
-			paths: strings(a.paths),
+			condition: optionalText(a.condition),
+			regexTarget: optionalText(a.regexTarget),
+			paths: optionalStrings(a.paths),
 			regexes: strings(a.regexes),
 		})),
 	};
@@ -74,18 +82,30 @@ async function linesOf(path: string): Promise<string[]> {
 	return (await Bun.file(new URL(path, ROOT)).text()).split("\n");
 }
 
+// 줄 허용 목록(경로 + 줄 전체 모양)과 값 허용 목록(비밀 값 리터럴)을 가른다 — 숨기는 범위의 종류가 다르다.
+const lineLists = (lists: readonly Allowlist[]) =>
+	lists.filter((l) => l.regexTarget === "line");
+const valueLists = (lists: readonly Allowlist[]) =>
+	lists.filter((l) => l.regexTarget === "secret");
+
 describe(".gitleaks.toml — 구조", () => {
+	test("허용 목록의 대상은 줄 또는 비밀 값 둘 중 하나다", async () => {
+		const { allowlists } = await load();
+		for (const list of allowlists) {
+			expect(["line", "secret"]).toContain(list.regexTarget);
+		}
+	});
+
 	test("기본 규칙을 확장한다", async () => {
 		expect((await load()).useDefault).toBe(true);
 	});
 
-	test("허용 목록은 모두 경로와 줄 전체 모양을 함께 요구한다", async () => {
-		const { allowlists } = await load();
-		expect(allowlists.length).toBeGreaterThan(0);
-		for (const list of allowlists) {
+	test("줄 허용 목록은 모두 경로와 줄 전체 모양을 함께 요구한다", async () => {
+		const lists = lineLists((await load()).allowlists);
+		expect(lists.length).toBeGreaterThan(0);
+		for (const list of lists) {
 			// AND 가 아니면 경로 또는 정규식 하나만 맞아도 숨는다.
 			expect(list.condition).toBe("AND");
-			expect(list.regexTarget).toBe("line");
 			expect(list.paths.length).toBeGreaterThan(0);
 			expect(list.regexes.length).toBeGreaterThan(0);
 			for (const path of list.paths) {
@@ -94,6 +114,19 @@ describe(".gitleaks.toml — 구조", () => {
 			// 줄 전체와 같아야 하므로 같은 줄에 다른 비밀을 얹어도 숨지 않는다.
 			for (const regex of list.regexes) {
 				expect(regex.startsWith("^") && regex.endsWith("$")).toBe(true);
+			}
+		}
+	});
+
+	test("값 허용 목록은 경로 없이 비밀 값 전체와 정확히 같은 리터럴만 숨긴다", async () => {
+		const lists = valueLists((await load()).allowlists);
+		for (const list of lists) {
+			// 경로를 허용하면 그 파일의 다른 비밀도 숨는다 — 값 전체가 리터럴로 같을 때만 허용한다.
+			expect(list.paths.length).toBe(0);
+			expect(list.regexes.length).toBeGreaterThan(0);
+			for (const regex of list.regexes) {
+				// 앵커 + 리터럴(영숫자·`+/=_-` 와 이스케이프된 `.`)만 — `.*`·`|`·문자 집합이 있으면 넓게 숨는다.
+				expect(/^\^(?:[A-Za-z0-9+/=_-]|\\.)+\$$/.test(regex)).toBe(true);
 			}
 		}
 	});
@@ -142,7 +175,7 @@ describe(".gitleaks.toml — Discord 웹훅 규칙", () => {
 
 describe(".gitleaks.toml — 허용 목록이 가리키는 줄", () => {
 	test("허용 정규식마다 대상 파일에 실제로 일치하는 줄이 있다(죽은 항목 없음)", async () => {
-		const { allowlists } = await load();
+		const allowlists = lineLists((await load()).allowlists);
 		for (const list of allowlists) {
 			const [path] = list.paths;
 			// 경로 정규식 `^\.env\.example$` 에서 이스케이프를 걷어 파일 경로로 쓴다.
@@ -158,7 +191,7 @@ describe(".gitleaks.toml — 허용 목록이 가리키는 줄", () => {
 	});
 
 	test("허용 줄에 다른 값을 얹으면 더는 허용되지 않는다", async () => {
-		const { allowlists } = await load();
+		const allowlists = lineLists((await load()).allowlists);
 		const body = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8";
 		const appended = `ghp_${body}`;
 		for (const list of allowlists) {

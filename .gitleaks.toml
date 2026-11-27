@@ -42,4 +42,5 @@ regexes = [
 # 값 자체가 정확히 같을 때만 숨긴다(regexTarget 기본값 = secret) — 경로를 허용하지 않으므로 다른 비밀은 여전히 잡힌다.
 [[allowlists]]
 description = "RFC 6455 예시 Sec-WebSocket-Key"
+regexTarget = "secret"
 regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
