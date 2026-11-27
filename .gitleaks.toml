@@ -37,3 +37,9 @@ regexes = [
   '''^\s*TEST_DATABASE_URL: postgres://postgres:ci-throwaway@127\.0\.0\.1:5432/postgres\s*$''',
   '''^\s*POSTGRES_PASSWORD: ci-throwaway\s*$''',
 ]
+
+# RFC 6455 §1.3 에 실린 공개 예시 Sec-WebSocket-Key — 비밀이 아니다(spikes/ 의 WS 업그레이드 시험 코드와 측정 기록에 이력으로 남아 있다).
+# 값 자체가 정확히 같을 때만 숨긴다(regexTarget 기본값 = secret) — 경로를 허용하지 않으므로 다른 비밀은 여전히 잡힌다.
+[[allowlists]]
+description = "RFC 6455 예시 Sec-WebSocket-Key"
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
