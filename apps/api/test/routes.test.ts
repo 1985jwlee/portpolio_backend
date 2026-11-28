@@ -24,6 +24,7 @@ function makeRoot() {
 			LOG_LEVEL: "debug",
 			DATABASE_URL: new SecretString(URL_WITH_SECRET),
 			API_PORT: 0,
+			DRAIN_DELAY_MS: 0,
 		},
 		clock: { now: () => new Date("2026-11-26T00:00:00.000Z") },
 		ids: {

@@ -205,6 +205,7 @@ describe("ShutdownCoordinator", () => {
 		events: string[],
 		components: readonly Component[],
 		graceMs: number,
+		drainDelayMs?: number,
 	) {
 		const log = recordingLog();
 		const exits: number[] = [];
@@ -215,6 +216,7 @@ describe("ShutdownCoordinator", () => {
 			log,
 			exit: (code) => exits.push(code),
 			graceMs,
+			...(drainDelayMs === undefined ? {} : { drainDelayMs }),
 		});
 		return { root, coordinator, exits, log };
 	}
@@ -232,6 +234,36 @@ describe("ShutdownCoordinator", () => {
 		expect(events).toEqual(["draining:true", "정지:http", "정지:dbPool"]);
 		expect(code).toBe(EXIT_CODES.OK);
 		expect(exits).toEqual([0]);
+	});
+
+	test("drainDelayMs 동안 draining 을 켠 채 정지를 미루고, 그 뒤 정상이면 0 으로 끝난다(readyz 503 구간)", async () => {
+		const events: string[] = [];
+		const { root, coordinator, exits } = coordinatorOver(
+			events,
+			[fake(events, "http", 10)],
+			1_000,
+			150,
+		);
+		await root.start();
+		events.length = 0;
+		const start = performance.now();
+		const pending = coordinator.trigger("SIGTERM");
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		// 지연 중에는 draining 만 켜졌고 서버는 아직 멈추지 않았다.
+		expect(events).toEqual(["draining:true"]);
+		const code = await pending;
+		expect(events).toEqual(["draining:true", "정지:http"]);
+		expect(performance.now() - start).toBeGreaterThanOrEqual(140);
+		expect(code).toBe(EXIT_CODES.OK);
+		expect(exits).toEqual([0]);
+	});
+
+	test("drainDelayMs 가 grace 보다 크면 grace 로 자르고, 기본(0)은 기다리지 않는다", async () => {
+		const events: string[] = [];
+		const { coordinator } = coordinatorOver(events, [], 80, 10_000);
+		expect(coordinator.drainDelayMs).toBe(80);
+		const { coordinator: plain } = coordinatorOver([], [], 80);
+		expect(plain.drainDelayMs).toBe(0);
 	});
 
 	test("grace 를 넘기면 정지가 끝나지 않았어도 종료 코드 1 로 끝낸다", async () => {

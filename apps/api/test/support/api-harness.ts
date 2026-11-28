@@ -30,6 +30,7 @@ export class ApiHarness extends DbHarness {
 			DATABASE_URL: new SecretString(this.db.url()),
 			// 0 이면 운영체제가 빈 포트를 고른다 — 병렬 시험과 충돌하지 않는다.
 			API_PORT: 0,
+			DRAIN_DELAY_MS: 0,
 		};
 		this.#root = new ApiRoot({
 			config,

@@ -1124,6 +1124,7 @@ flowchart TD
 
 - **Bun 실측 주의**: `await server.stop()` 은 열린 WebSocket 이 있으면 끝나지 않는다. 그래서 위 C 단계는 `stop()` 을 **await 없이** 호출하고, H 단계에서 소켓에 `bye`+`close(1001)` 를 보낸 뒤 `grace` 안에서 `stop()` 의 완료를 기다린다. 타임아웃 후 `stop(true)` 강제 종료는 미확인(G2).
 - `grace` 기본 25초(Compose `stop_grace_period` 30초, k8s `terminationGracePeriodSeconds` 30초보다 짧게). ws-gateway 는 `bye.reconnectAfterMs` 에 **지터**를 넣어 재접속 쏠림을 피한다(design/04 §7.3).
+- **drain 대기(DV-036, 2026-11-28)**: 위 순서도의 B→C 사이에 `DRAIN_DELAY_MS`(api 설정, 기본 0) 만큼 **서버를 연 채로** 기다린다. 기다리지 않으면 `readyz` 503 이 켜진 같은 틱에 listener 가 닫혀(WSL2 실측: 신호 17ms 뒤 첫 요청이 연결 거절) 프록시·로드밸런서가 503 을 볼 틈이 없다. 지연은 grace 안에서 쓰고 grace 를 넘으면 grace 로 자른다. 값은 로드밸런서의 확인 주기를 측정한 뒤 정한다(S8). worker 는 readyz 가 없어 쓰지 않는다.
 - **임대 반납(worker)**: 이 프로세스가 보유한 `processing` 행을 `claim_token` 일치 조건으로 `new`/`received` 로 되돌리고 `lease_until = now`. 반납하지 못해도 reaper 가 임대 만료 후 회수한다(ADR-021) — 반납은 지연을 줄이는 최적화다.
 - 컴포넌트는 `phase` 순으로 시작하고 **역순으로 정지**한다: `config(0) → dbPool(10) → listener(20) → modules(30) → jobs/http/ws(40) → readiness(50)`.
 - 종료 중 도착한 요청은 `503` + `Connection: close` 가 아니라 이미 `listen` 이 닫혀 있어 프록시가 다른 인스턴스로 재시도한다(단일 인스턴스에서는 짧은 단절, ADR-014).

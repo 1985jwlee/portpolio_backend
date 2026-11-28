@@ -9,14 +9,16 @@ export async function runRoot(options: {
 	readonly log: LifecycleLog;
 	readonly exit: (code: number) => void;
 	readonly graceMs?: number;
+	readonly drainDelayMs?: number;
 }): Promise<ShutdownCoordinator> {
-	const { root, draining, log, exit, graceMs } = options;
+	const { root, draining, log, exit, graceMs, drainDelayMs } = options;
 	const coordinator = new ShutdownCoordinator({
 		root,
 		draining,
 		log,
 		exit,
 		...(graceMs === undefined ? {} : { graceMs }),
+		...(drainDelayMs === undefined ? {} : { drainDelayMs }),
 	});
 	coordinator.install();
 	try {
