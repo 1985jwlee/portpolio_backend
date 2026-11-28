@@ -23,3 +23,4 @@ CREATE INDEX "audit_log_at_idx" ON "events"."audit_log" ("at");
 CREATE INDEX "audit_log_category_at_idx" ON "events"."audit_log" ("category", "at");
 --> statement-breakpoint
 CREATE INDEX "audit_log_action_at_idx" ON "events"."audit_log" ("action", "at");
+-- 검증용 변조
