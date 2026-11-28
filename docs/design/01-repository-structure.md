@@ -424,6 +424,7 @@ flowchart TD
 | `DRAIN_DELAY_MS` | int | `0` | 아니오 | 아니오 | 종료 신호 뒤 `readyz` 503 을 유지한 채 서버를 여는 시간(ms). api 만. F16 §9.5, DV-036 |
 | `GITHUB_CLIENT_ID` | string | — | **예** | 아니오 | |
 | `GITHUB_CLIENT_SECRET` | string | — | **예** | **예** | |
+| `GITHUB_REDIRECT_URI` | url | — | **예** | 아니오 | GitHub OAuth 앱에 등록한 콜백과 글자까지 같아야 한다. 개발: `http://localhost:8080/api/auth/github/callback` |
 | `FIELD_KEYS` | 키링(JSON `{active, keys{id→32바이트 base64}}`) | — | **예** | **예**(api·worker) | 필드 암호화 키링 ([ADR-026](../adr/ADR-026-data-protection.md)). `FIELD_KEYS_FILE` 로 주입, 회전은 키 추가 후 `active` 변경 + 재암호화 잡 |
 | `PF_LOG_DIR` | 경로 | `/var/log/pf` | 아니오 | **운영 스크립트 전용(앱 아님)** | 아니오 | 로그 아카이브 디렉터리. `/etc/pf/pf.env` 로 주입하고 **systemd 유닛 템플릿의 `@PF_LOG_DIR@` 로 절대 경로 치환**(유닛이 `$VAR` 를 확장하지 않음, 실측). rootless Docker 면 `~/.local/state/pf/logs` (F17 §16.1.1) |
 | `STATUS_DIR` | 경로 | `/var/lib/pf/status` | 아니오 | W(읽기 전용 마운트) + 운영 스크립트 | 아니오 | `status/<job>/last_run.json` 위치. worker 의 `StatusFileCollector` 가 읽기 전용으로 읽는다 (F17 §16.2) |
