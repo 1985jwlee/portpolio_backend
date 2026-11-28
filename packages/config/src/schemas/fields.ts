@@ -9,6 +9,7 @@ export const fields = Object.freeze({
 	COOKIE_SECURE: field.bool({ default: true }),
 	GITHUB_CLIENT_ID: field.string(),
 	GITHUB_CLIENT_SECRET: field.string({ secret: true }),
+	GITHUB_REDIRECT_URI: field.url(),
 	OAUTH_STATE_SECRET: field.string({ secret: true, minBytes: 32 }),
 	ADMIN_GITHUB_IDS: field.csvInt(),
 	// 필드 암호화 키링(JSON `{ active, keys }`, ADR-026). 해석·검증은 infra 의 parseKeyring 이 한다.
