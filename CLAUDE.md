@@ -10,7 +10,12 @@ portpolio_backend — 포트폴리오 백엔드 저장소. 상세는 `README.md`
 
 | 디렉토리 | 무엇을 하나 | 도메인 문서 |
 |---|---|---|
-| (아직 없음) | | |
+| `apps/api`, `apps/worker` | HTTP(`/healthz`·`/readyz`)·백그라운드 프로세스와 조립 루트(`src/compose/`) | `architecture.md` |
+| `packages/{kernel,config,db,infra,testkit,protocol}` | 공통 기반: 오류·포트·설정·DB·어댑터·시험 도구·계약 스키마 | `architecture.md`, `tech-stack.md` |
+| `modules/{events,events-contract,observability}` | 감사·이벤트 모듈과 그 계약, 관측(로그·지표·상태) | `database-schema.md` |
+| `scripts/` | 경계·분류·추적·계약 버전·마이그레이션 검사와 `db:*`·`worker` 도구 | `tech-debt.md` |
+| `infra/compose/` | 로컬 compose(postgres 18, 호스트 포트 55432) | `tech-stack.md` |
+| (예정) `modules/identity` | S2 — 익명 세션·GitHub 로그인 | `database-schema.md` |
 
 ## 2. 저장소 전체 도메인 문서
 

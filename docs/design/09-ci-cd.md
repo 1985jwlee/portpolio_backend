@@ -56,7 +56,7 @@ flowchart TD
     U --> INT["integration test<br/>postgres 서비스 컨테이너"]
     INT --> MIG["migration reproduce<br/>빈 DB 에 처음부터 적용 (G10)"]
     I --> AUD["dependency audit<br/>bun audit"]
-    I --> SS["secret-scan<br/>(도구 미확인)"]
+    I --> SS["secret-scan<br/>(gitleaks 8.30.1)"]
     I --> WB["web build<br/>next build standalone"]
     I --> CFG["설정 검사<br/>nginx -t · promtool · 대시보드 lint<br/>compose config · shellcheck · 매니페스트 검증"]
     MIG & WB & AUD & CFG & SS --> DB["docker build smoke<br/>push 없이 server·web 이미지 빌드"]

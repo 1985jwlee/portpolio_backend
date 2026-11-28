@@ -36,7 +36,7 @@
 | AC-024 | 컬럼 보호 등급 | S1-13 | `scripts/check-classification.test.ts` — `스키마의 컬럼이 맵에 없으면 미분류다` | `scripts/check-classification.ts` (픽스처 `scripts/fixtures/classification/`) · ENC 쓰기 경로 절반은 S1-12 몫 | 구현 |
 | AC-025 | 운영 상태 지표와 경보 | S7-5, S7-6 | — | — | 미구현 |
 | AC-026 | 보관 정지 | S6-10 | — | — | 미구현 |
-| AC-027 | 비밀 스캔 | S1-15 | `scripts/secret-scan/detection.test.ts` — `합성 비밀 3종을 각각 다른 커밋에 넣으면 종료 1 이고 세 규칙이 모두 검출된다`<br>`scripts/gitleaks-config.test.ts` — `.gitleaks.toml — Discord 웹훅 규칙`<br>`scripts/pre-commit-hook.test.ts` — `gitleaks 가 있으면 스테이징 검사 인자로 부르고 그 종료 코드를 그대로 돌려준다` | `.gitleaks.toml` · `.github/workflows/ci.yml` `secret-scan` · `.githooks/pre-commit` (검출 시험은 gitleaks 바이너리가 있는 CI `secret-scan` 잡에서만 돌고 이 저장소에서 아직 실행된 적이 없어 상태는 `구현` 까지만) | 구현 |
+| AC-027 | 비밀 스캔 | S1-15 | `scripts/secret-scan/detection.test.ts` — `합성 비밀 3종을 각각 다른 커밋에 넣으면 종료 1 이고 세 규칙이 모두 검출된다`<br>`scripts/gitleaks-config.test.ts` — `.gitleaks.toml — Discord 웹훅 규칙`<br>`scripts/pre-commit-hook.test.ts` — `gitleaks 가 있으면 스테이징 검사 인자로 부르고 그 종료 코드를 그대로 돌려준다` | `.gitleaks.toml` · `.github/workflows/ci.yml` `secret-scan` · `.githooks/pre-commit` (검출 시험은 gitleaks 바이너리가 있는 CI `secret-scan` 잡에서 돈다 — 2026-11-27 CI 통과로 `검증`. `.env`·`secrets/`·`incidents/` 미추적은 `.gitignore` 로 확인) | 검증 |
 | AC-028 | 백업과 복구 | S8-4 | — | — | 미구현 |
 | AC-029 | 감사 조회와 보관 | S6-9 | — | — | 미구현 |
 | AC-030 | dead 재투입 | S6-7 | — | — | 미구현 |

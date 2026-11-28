@@ -381,7 +381,7 @@ Contact: {contact}
 
 | 장치 | 내용 | 상태 |
 |---|---|---|
-| 비밀 스캔(CI) | PR 검사에 `secret-scan` 잡([09](09-ci-cd.md) §2). 도구 후보 `gitleaks` | **도구 선택·동작 미확인**(S1-15) |
+| 비밀 스캔(CI) | PR 검사에 `secret-scan` 잡([09](09-ci-cd.md) §2). 도구 `gitleaks` 8.30.1(CLI + sha256 고정) | **동작 확인**(S1-15, 2026-11-27 CI 통과 — 합성 비밀 3종 검출 시험 포함) |
 | pre-commit | 커밋 전 스캔 훅(`.githooks/pre-commit` + `git config core.hooksPath .githooks`) | 제안, 도구 미확인 |
 | GitHub 비밀 스캔·푸시 보호 | 공개 저장소에서 제공되는 기능 | **무료 여부·동작 미확인** |
 | `.gitignore` | `.env`, `secrets/`, `incidents/` | 필수 |

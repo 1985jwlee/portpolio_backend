@@ -237,7 +237,7 @@ sequenceDiagram
 
 - **노출됐을 때의 대응**(증거 보존, 비상 스위치, 자산별 런북, 영향 산정, 공지, 리허설)은 [13](13-incident-response.md) 이 정본이고, 위 표는 평상시 회전 정책이다.
 - 비밀은 `SecretString` 으로만 다루고(01 §7.1) 로그·오류 메시지·지표 레이블·`/metrics` 에 들어가지 않는다.
-- 저장소 비밀 유출 방지: `.env`·`secrets/` 무시 + 커밋 전 검사(시크릿 스캔은 CI 에서 `gitleaks` 류 도구 후보 — **도구 선택은 미확인**, 구현 시 비교).
+- 저장소 비밀 유출 방지: `.env`·`secrets/` 무시 + 커밋 전 검사(시크릿 스캔은 CI `secret-scan` 잡의 **gitleaks 8.30.1 CLI**(릴리스 체크섬 고정, S1-15 — 2026-11-27 CI 통과) + `.githooks/pre-commit`).
 - **로그·상태 디렉터리 권한**: `PF_LOG_DIR`(기본 `/var/log/pf`)·`STATUS_DIR` 는 `pf:pf` **0750**, 아카이브 파일은 **0640**. 외부 업로드·백업에서 제외한다(ADR-027).
 - **docker 그룹 = root 동급 (로컬 입증, 2026-11-04)**: 개발 머신에서 현재 사용자(`docker` 그룹)가 `docker run -v /:/h:ro` 로 호스트 루트를 마운트하자 컨테이너 안에서 **root 권한으로** `/h/etc/shadow`(640 root:shadow)·`/h/root`(700)의 메타데이터가 보였다(내용은 읽지 않음). 읽기 전용이 아니면 쓰기도 같은 경로로 가능하다고 판단한다(쓰기는 시험하지 않음).
 - **docker 그룹 주의**: `docker` 그룹 구성원은 사실상 root 와 동급이다. systemd 유닛 사용자 `pf` 는 쉘 로그인을 막고(`nologin`) 유닛으로만 실행하며, 호스트에서 `docker` 그룹 구성원을 최소화한다. 호스트가 rootless Docker 면 `pf` 유닛을 사용자 단위로 둔다(F17 §16.1.1).
@@ -330,7 +330,7 @@ sequenceDiagram
 - 주소를 모르는 상태(Funnel 에서 실제 IP 미확인 G14 ④, 또는 정규화 실패)에서는 nginx 제한이 모든 요청을 한 주소(Funnel 의 로컬 연결)로 묶어 **사실상 전역 한도**가 된다 → 정규화 검증(G7 ②)과 G14 ④ 가 선행 조건이다. **그 경우 `/api/me` 의 세션 발급 남용 방어가 약해지는 것이 위험이며**, 세션/계정 기준 제한을 우선하고 신규 세션 발급에 전역 토큰 버킷을 둔다. 주소 확보 시/미확보 시 nginx 설정은 둘 다 설계했다(F17 §9.2: 미확보 시 주소별 `limit_conn` 제거·전역 상한·WS 제한은 gateway 세션 기준·정적 자원 `limit_req` 제외, 제안·미검증).
 - **Funnel 에는 Cloudflare 의 기본 DDoS 방어가 없고** 대역폭 한도가 비공개이며 베타다. 한도 초과·정책 변경은 위험으로 수용하고 G14 ③ 에서 체감을 측정한다(ADR-003).
 - 제한 초과는 `pf_rate_limit_decisions_total{app,rule,decision}` 로 관측하고(레이블에 주소·세션 금지), 급증 시 쓰기 잠금 스위치(ADR-028 사다리 1단계)를 쓴다.
-- 도구 관련: 비밀 스캔(CI `secret-scan`, gitleaks 후보)은 **기본 규칙만으로는 Discord 웹훅 URL 을 못 잡고**(실측) 낮은 엔트로피·알려진 예제 키는 무시하므로 저장소 `.gitleaks.toml` 에 웹훅 규칙을 추가해야 한다(ADR-028, 13 §10).
+- 도구 관련: 비밀 스캔(CI `secret-scan`, gitleaks 8.30.1)은 **기본 규칙만으로는 Discord 웹훅 URL 을 못 잡고**(실측) 낮은 엔트로피·알려진 예제 키는 무시하므로 저장소 `.gitleaks.toml` 에 웹훅 규칙을 추가했다(ADR-028, 13 §10). 반대로 이력 전체를 보면 오탐도 나온다 — `spikes/` 의 RFC 6455 예시 `Sec-WebSocket-Key` 4건은 **값만 허용**하는 allowlist(`regexTarget = "secret"`)로 푼다(경로·줄 모양을 허용하는 목록과 구분하며 `scripts/gitleaks-config.test.ts` 가 두 종류의 모양을 강제한다).
 
 ## 8. 위협 모델 (STRIDE 요약)
 

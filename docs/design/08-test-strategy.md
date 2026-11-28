@@ -75,7 +75,7 @@ flowchart TB
 | 폐기 트랜잭션 롤백 | 감사 행 `admin.sessions_revoked` 도 없음 | L3 |
 | `retention:pause` 중 정리 | 모든 `RetentionRule`·`PurgeExpiredSessions`·`archive-logs.sh` 삭제가 건너뛰어짐, `pf_retention_skipped_total{reason="paused"}` 증가 | L3 |
 | 정지 TTL(24시간) 경과(가짜 시계) | 자동 해제, 감사 `auto_released`, 정지 중 `retention:run` 은 거부 | L2·L3 |
-| `secret-scan` | 시험용 비밀 패턴 파일을 검출하고 PR 이 실패(도구 미확인, S1-15) | L3 |
+| `secret-scan` | 시험용 비밀 패턴 파일을 검출하고 PR 이 실패(gitleaks 8.30.1 CLI + sha256 고정, S1-15 — 2026-11-27 CI 통과) | L3 |
 | 회전 리허설 체크리스트(13 §10) | 9개 비밀·스위치 각각 구 비밀 거부 + 새 비밀 동작, 소요 시간 기록 | L4(리허설, 분기 1회) |
 
 ### 2.0d 운영 실측 회귀 시험 (ADR-027, 로컬 실측 반영)
