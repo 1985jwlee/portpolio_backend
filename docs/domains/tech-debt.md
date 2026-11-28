@@ -17,7 +17,7 @@
 | **TD-1** (P1) | `check-purity` 를 정규식에서 swc AST 로 교체 (사용자 결정 (A)) | **S1-5b** (가칭 — 이름 확정은 사용자 몫, `11` 에 행 추가) | **S2-1 이전** | **닫힘 2026-11-17** | Drizzle `` sql<number>`…` `` 등이 규칙을 그대로 피해 첫 제품 모듈에서 조용히 통과 |
 | TD-2 | 영향분석이 찾은 문서·주석 어긋남 D-1~D-4 | S1-5b (TD-1 과 같은 작업) | TD-1 의 재계획과 함께 | **닫힘 2026-11-17** | D-1·D-2 가 근거 없는 "실측"·"확정" 문구로 남아 다시 열 이유를 지움 |
 | TD-3 | 리뷰 r4 잔여 m-1~m-3 | S1-5b (TD-1 과 같은 작업) | m-2 는 S2-1 이전, m-3 는 Biome 올리기 전 | **닫힘 2026-11-17** (소멸) | Biome 를 올려도 깨지는 가드가 없다 |
-| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-6 | **S1-6** | S1-6 계획의 입력으로 | **배선됨 — CI 첫 실행 확인 대기** | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
+| TD-4 | S1-6 이 넘겨받는 CI 사실 H-1~H-6 | **S1-6** | S1-6 계획의 입력으로 | **닫힘 2026-11-28 — CI 실증(PR #2·#3)** | CI 에서 의도적 위반 PR 이 `arch` 를 빨강으로 만들지 못함 (H-4) |
 | TD-5 | `bun test` 가 `.env` 를 자동으로 읽음 | S1-3 | `.env` 값에 기대는 첫 시험 전 | **닫힘 2026-11-18** | 문서에는 없고 KB 에만 있는 사실 |
 | TD-6 | 계획이 이미 이월한 범위 (B3·B14 등) | S2-1·S1-18·첫 제품 패키지 | 각 담당 작업 | 담당이 문서에 있음 | `port-kinds.json` 형식이 실제 모듈 없이 정해져 바뀔 수 있음 |
 | **TD-7** | S1-2(kernel) 가 남긴 것 — 실구현체 미배정(7-1), 직렬화·표 한계, 문서 대조 자동화 없음 | 항목마다 다름 (S1-6·S1-18·S2-1·CM-03·**미배정 1건**; 7-3 은 S1-3, 7-2·7-11 은 2026-11-18, 7-1 과 7-5 의 S1-11 몫은 2026-11-26 에 닫힘) | 각 담당 작업 시작 전 | 열림 | 추출 게이트(S1-18)가 판별을 `kind` 위에 세우면 운영에서 모든 도메인 오류가 500 으로 나감 (7-5 의 계약 DTO 몫) |
@@ -137,7 +137,7 @@
 
 ### S1-6 처리 결과 (2026-11-25 — 워크플로 배선됨, **CI 러너 실행은 아직 없다**)
 
-> 상태는 `배선됨 — CI 첫 실행 확인 대기` 다. 위 H-1~H-6 의 완료 판정이 전부 "CI 에서" 라 첫 실행 전에는 닫지 않는다. 아래 "로컬 재현" 은 같은 명령을 호스트에서 돌린 것이라 러너의 설치·캐시·서비스 컨테이너 네트워킹은 증명하지 못한다(L4 는 사람, 불가 선언 근거는 S1-6 런 산출물).
+> **닫힘 (2026-11-28)** — CI 가 12잡 통과(PR #1)했고, 의도적 위반 PR #2 에서 `arch` 가 `B4-deep-module`·`B13-impl-module` 로 빨강, 변조 PR #3 에서 `migration-immutable` 이 빨강이 됨을 확인했다(H-4 실증). 아래 표의 "남은 확인 = 첫 CI 실행" 칸은 닫기 전 기록이며 지우지 않는다. 아래 "로컬 재현" 은 같은 명령을 호스트에서 돌린 것이라 러너의 설치·캐시·서비스 컨테이너 네트워킹은 증명하지 못한다(L4 는 사람, 불가 선언 근거는 S1-6 런 산출물).
 
 | # | 무엇으로 닫았나 (`.github/workflows/ci.yml` · `.github/actions/setup-bun/action.yml`) | 로컬 재현 | 남은 확인 = 첫 CI 실행 |
 |---|---|---|---|
@@ -273,3 +273,4 @@ S1-4 는 완료 기준과 후속이 코드로 기대는 계약까지만 구현�
 | TD-8 8-3 | `DbPool.stats()`·`close(deadlineMs: number)`(필수 인자, 호출부 전수 갱신)·`ping(pool, timeoutMs)` — 시험 `packages/db/test/pool-lifecycle.test.ts`·`packages/infra/test/lifecycle/` | 닫힘 | 2026-11-26 | 커밋(해시는 커밋 후 기입) |
 | TD-8 8-9 | `scripts/run-as.ts` 가 역할별 주소를 `DATABASE_URL` 로 매핑(다른 역할 주소는 자식 환경에서 제거) — 시험 `scripts/run-as.test.ts` | 닫힘 | 2026-11-26 | 커밋(해시는 커밋 후 기입) |
 | TD-8 8-8 | `infra/compose/init/01-roles.sh` 가 `roles.json` 의 역할과 `pf_migrator` 를 만든다 — 완료 판정(빈 compose → init → `db:migrate` 종료 0)을 WSL2·Docker(postgres:18-alpine)에서 실측: postgres healthy, init 로그 `역할 생성 완료(pf_api_rw pf_worker_rw pf_gateway_ro pf_migrator)`, `db:migrate` 종료 0(재실행도 0). 같은 환경에서 `bun run dev` → api readyz·healthz 200, worker healthz 200(readyz 는 설계대로 404), postgres 정지 시 api readyz 503·healthz 200, SIGTERM → `shutdown start`(grace 25 s) → readiness·http·modules·dbPool·config 역순 정지 → 종료 0, `bun run test:integration` 64 pass | 닫힘 | 2026-11-27 | 확인 대상 커밋 `0146a99` (문서 갱신은 후속 커밋) |
+| TD-4 H-1~H-6 | S1-6 이 넘겨받은 CI 사실. CI 첫 실행 통과(PR #1, 12잡) + 의도적 위반 PR #2(`arch` 빨강: `B4-deep-module`·`B13-impl-module`)·변조 PR #3(`migration-immutable` 빨강) 로 실증. 위반 PR 은 병합하지 않고 닫았다 | 닫힘 | 2026-11-28 | 문서 PR(`docs/close-td4-ci-proof`) |
