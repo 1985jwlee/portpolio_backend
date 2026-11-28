@@ -35,5 +35,6 @@ export async function runApi(): Promise<void> {
 		draining: root.health,
 		log: root.log,
 		exit: (code) => process.exit(code),
+		drainDelayMs: loaded.value.config.DRAIN_DELAY_MS,
 	});
 }

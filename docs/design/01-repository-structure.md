@@ -421,6 +421,7 @@ flowchart TD
 | 이름 | 타입 | 기본값 | 필수 | 비밀 | 비고 |
 |---|---|---|---|---|---|
 | `API_PORT` | int | `3001` | 아니오 | 아니오 | |
+| `DRAIN_DELAY_MS` | int | `0` | 아니오 | 아니오 | 종료 신호 뒤 `readyz` 503 을 유지한 채 서버를 여는 시간(ms). api 만. F16 §9.5, DV-036 |
 | `GITHUB_CLIENT_ID` | string | — | **예** | 아니오 | |
 | `GITHUB_CLIENT_SECRET` | string | — | **예** | **예** | |
 | `FIELD_KEYS` | 키링(JSON `{active, keys{id→32바이트 base64}}`) | — | **예** | **예**(api·worker) | 필드 암호화 키링 ([ADR-026](../adr/ADR-026-data-protection.md)). `FIELD_KEYS_FILE` 로 주입, 회전은 키 추가 후 `active` 변경 + 재암호화 잡 |

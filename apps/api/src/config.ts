@@ -14,6 +14,8 @@ export const apiSchema = mergeSchemas(
 	defineSchema({
 		DATABASE_URL: fields.DATABASE_URL,
 		API_PORT: field.int({ default: 3001 }),
+		// 종료 신호 뒤 readyz 503 으로 새 트래픽이 빠지길 기다리는 시간(ms). 0 이면 기다리지 않는다 — 로드밸런서 확인 주기를 측정한 뒤 정한다(DV-036).
+		DRAIN_DELAY_MS: field.int({ default: 0 }),
 	}),
 );
 

@@ -85,7 +85,7 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 
 ### S1 — 기반 골격
 
-> **상태(2026-11-28): S1-1~S1-18 전 행 구현·CI 12잡 통과.** 마지막 11행(S1-7~16·18)은 한 런(`s1-batch`)에서 5웨이브로 처리했다. 로컬 실환경 확인(WSL2·Docker, compose init → 마이그레이션 → api/worker 기동 → SIGTERM)은 [TD-8 8-8](../domains/tech-debt.md) 로 닫았다. **CI 실증(2026-11-28)**: 의도적 위반 PR(#2)에서 `arch` 가 `B4-deep-module`·`B13-impl-module` 로, 변조 PR(#3)에서 `migration-immutable` 이 빨강이 됐고 정상 PR(#1)은 12잡 통과했다(TD-4 닫힘). **아직 확인하지 않은 것**: SIGTERM 중 `/readyz` 503 구간의 관찰.
+> **상태(2026-11-28): S1-1~S1-18 전 행 구현·CI 12잡 통과.** 마지막 11행(S1-7~16·18)은 한 런(`s1-batch`)에서 5웨이브로 처리했다. 로컬 실환경 확인(WSL2·Docker, compose init → 마이그레이션 → api/worker 기동 → SIGTERM)은 [TD-8 8-8](../domains/tech-debt.md) 로 닫았다. **CI 실증(2026-11-28)**: 의도적 위반 PR(#2)에서 `arch` 가 `B4-deep-module`·`B13-impl-module` 로, 변조 PR(#3)에서 `migration-immutable` 이 빨강이 됐고 정상 PR(#1)은 12잡 통과했다(TD-4 닫힘). SIGTERM 중 `/readyz` 503 구간은 2026-11-28 WSL2 에서 관찰했고 구간이 없음을 발견해 `DRAIN_DELAY_MS` 로 고쳤다([DV-036](../deviation-log.md)).
 
 | ID | 내용 | 의존 | 완료 기준 |
 |---|---|---|---|
