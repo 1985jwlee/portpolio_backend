@@ -50,7 +50,7 @@ flowchart TD
 | **ID-11 `RevokeSessions`** | `worker admin revoke-sessions --all | --user <id> | --session <id>`. 대상 세션의 `expires_at = now`(ID-10 정리 잡이 이후 익명화·삭제). 감사 `admin.sessions_revoked` 기록(대상 수). 같은 트랜잭션. WS private 연결은 캐시 만료(≤30초) 후 `4401` |
 | 감사 action 추가 | `admin.sessions_revoked`, `system.retention_paused` |
 | `worker retention:pause|resume` | 증거 보존 중 보관 정리를 멈춘다(상태는 `status/` 파일, 재개 잊음 방지로 24시간 자동 해제 + 경보) |
-| 비밀 스캔 | CI `secret-scan` 잡 + pre-commit(도구 미확인: gitleaks 후보), GitHub 공개 저장소의 비밀 스캔·푸시 보호(무료 여부 **미확인**) |
+| 비밀 스캔 | CI `secret-scan` 잡 + pre-commit(도구: gitleaks 8.30.1 로 확정 — S1-15, 2026-11-27), GitHub 공개 저장소의 비밀 스캔·푸시 보호(무료 여부 **미확인**) |
 
 ### 자산별 요약 (상세는 design/13)
 | 자산 | 유출 시 영향 | 핵심 조치 |

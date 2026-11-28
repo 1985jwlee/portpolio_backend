@@ -84,6 +84,9 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 각 작업: **ID · 내용 · 의존 · 완료 기준 · 연결 요구**. 검증 등급은 [08](08-test-strategy.md) 표기(L1~L3).
 
 ### S1 — 기반 골격
+
+> **상태(2026-11-28): S1-1~S1-18 전 행 구현·CI 12잡 통과.** 마지막 11행(S1-7~16·18)은 한 런(`s1-batch`)에서 5웨이브로 처리했다. 로컬 실환경 확인(WSL2·Docker, compose init → 마이그레이션 → api/worker 기동 → SIGTERM)은 [TD-8 8-8](../domains/tech-debt.md) 로 닫았다. **아직 사람이 확인하지 않은 것**: 의도적 위반 PR 에서 `arch` 가 빨강이 되는 것(TD-4, S1-6 완료 기준의 CI 실증 — 첫 PR 에서), `migration-immutable` 잡의 첫 PR 실행(PR 전용이라 push 에서는 건너뛴다), SIGTERM 중 `/readyz` 503 구간의 관찰.
+
 | ID | 내용 | 의존 | 완료 기준 |
 |---|---|---|---|
 | S1-1 | 저장소 골격(01 §1), Bun 워크스페이스, `tsconfig`, Biome, `.env.example` | S0 | `bun install && bun run check`(현재 구성 lint·typecheck) 통과, AC-032(`bun test` — `check` 밖) |
@@ -95,7 +98,7 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 | S1-6 | CI 골격: PR 검사(린트·타입·경계·단위·통합·`bun audit --audit-level=high --prod`·migration immutable — 잡 7개 `.github/workflows/ci.yml` + 공유 액션 `setup-bun`) + **G9 결정**(CI 시험 DB 는 서비스 컨테이너 `postgres:18` + `TEST_DATABASE_URL` 로 확정, CI 러너에서 Testcontainers 는 미확인·미채택) + [TD-4](../domains/tech-debt.md) H-1~H-6 반영(H-1 `depcruise` CLI 없음 · H-2 캐시 키 os·arch·`bun.lock` 해시 · H-3 재시도 없음 · H-4 위반은 `(apps\|modules\|packages)/<x>/src/` 아래 · H-5 `fetch-depth: 0` + `--base origin/<대상>` · H-6 서비스 컨테이너 URL) | S1-5 | PR 에서 초록, 의도적 위반 PR 에서 빨강(**로컬 재현 — `bun run arch` 종료 1 — 으로 갈음하고 CI 실증은 사람이 첫 PR 에서 한다, [DV-018](../deviation-log.md)**), 시험 DB 방식 결정 기록 |
 | S1-18 | **계약 패키지·버전·추출 게이트** (ADR-052): 모듈별 `@pf/<m>-contract` 골격, `@pf/protocol` 에서 모듈별 이벤트·DTO 분리(지금은 옮길 실물이 없어 대상 정의와 01 §5 B13 칸 문구로만 실현 — DV-032), 골든 JSON 변경 시 `package.json` 버전 상승 검사(`bun run check:contract-version`), 모듈별 **격리 타입체크(필수)**·번들 검사 — 번들만으로는 `import type` 의존 누락을 못 본다(G11 기준 4). **B14 SQL 절 — 모듈 마이그레이션 SQL 이 다른 모듈의 스키마 객체를 참조하는지 검사(S1-5 에서 이관, DV-005)** | S1-5 | 버전 안 올린 계약 변경이 CI 에서 실패, 모듈 하나가 선언한 계약·kernel 복사본만으로 타입체크·번들 통과, **다른 모듈 표를 참조하는 마이그레이션이 CI 에서 실패** |
 | S1-14 | `AuditWriter` 포트(kernel)·`PostgresAuditWriter`·`DetailValidator`·`events.audit_log` 마이그레이션(추가 전용, 인덱스 3종)·`classification.ts` 등급 등록 | S1-4, S1-8 | 행위 롤백 시 감사 행도 사라지는 통합 시험, 금지 키 거부 시험 (근거: ADR-027, EV-14, AC-020, FR-090) |
-| S1-15 | 비밀 스캔: CI `secret-scan` 잡(도구 선택·검출 시험, 후보 gitleaks 는 미확인) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
+| S1-15 | 비밀 스캔: CI `secret-scan` 잡(gitleaks 8.30.1 CLI 로 확정·검출 시험) + `.githooks/pre-commit` 안내, `.gitignore`(`.env`·`secrets/`·`incidents/`) 점검 | S1-6 | 시험용 비밀 패턴이 CI 에서 검출되어 PR 실패, 정상 PR 은 통과 (근거: ADR-028, AC-027, FR-110) |
 | S1-16 | **추적표 점검**: `docs/traceability.md` 와 명세·시험 이름의 정합 검사(`bun run check:trace`) — 추적표의 AC 가 명세에 존재하는지, `검증` 상태인 AC 에 시험 이름이 있고 시험 파일에 그 이름이 존재하는지, 시험 이름이 존재하지 않는 AC 를 가리키지 않는지 | S1-1 | 없는 AC 를 가리키는 시험·시험 없는 `검증` 행을 CI 가 실패시키는 시험, 추적표 AC 집합과 명세 AC 집합이 일치(현재 40개 — DV-025) (요구: AC-032) |
 | S1-17 | **편차 로그·PR 틀**: `docs/deviation-log.md` 운영 규칙, PR 템플릿에 '설계와 달랐나? → 편차 로그 ID' 체크 항목, 첫 PR 에서 로그 형식 시험 | S1-1 | PR 템플릿에 체크 항목 존재, 로그 표 열 수 점검(링크·표 검사 잡)이 CI 에서 통과 (요구: ADR-050) |
 | S1-13 | 컬럼 보호 등급 맵(`classification.ts`)과 `check:classification` — 테이블 추가 때마다 갱신 | S1-4, S1-5 | 분류 없는 컬럼을 추가하면 CI 실패, ENC 컬럼은 FieldCipher 경로만 (근거: ADR-026, AC-024, FR-100) |
@@ -111,10 +114,40 @@ S0 의 측정·결정은 아래를 뺀 전부 끝났다(G2~G5·G7 ①②·G10·G
 |---|---|---|---|---|
 | S2-1 | `identity` 도메인·포트·어댑터: 세션 발급/조회/폐기, 토큰 해시. **B3 어댑터 스키마 객체 대조(S1-5 에서 이관 — 01 §5, DV-005)** | S1 | 토큰 원문이 DB 에 없음(시험), 만료·`last_seen_at` 1시간 갱신 | FR-010 |
 | S2-2 | `GET /api/me` (익명 세션 발급), 쿠키 속성 | S2-1 | 쿠키 없음→발급, 있음→유지, 속성 일치 시험 | FR-010 |
-| S2-3 | GitHub OAuth(PKCE+state), 콜백 검증, 세션 회전 | S2-2 | 콜백 검증 순서도(06 §3.2)의 모든 분기 시험, `returnTo` 오픈 리다이렉트 차단 | FR-011 |
+| S2-3 | GitHub OAuth(PKCE+state), 콜백 검증, 세션 회전 + **로그아웃(ID-07, `POST /api/auth/logout`)·표시 이름 변경(ID-08, `PUT /api/me/profile`)** (2026-11-28 사용자 확정 — 계획 공백이던 두 기능을 이 행에 포함) | S2-2 | 콜백 검증 순서도(06 §3.2)의 모든 분기 시험, `returnTo` 오픈 리다이렉트 차단, 로그아웃 후 기존 쿠키가 새 익명 세션으로 처리(재호출 멱등), 표시 이름 2~20자·`Idempotency-Key` | FR-011 |
 | S2-4 | 관리자 허용목록 판정, `RequireAdmin` | S2-3 | 숫자 ID 허용목록 시험 | FR-012 |
 | S2-5 | 가드 체인(Origin·Session·RateLimit·Schema·Authorization) | S2-2 | 03 §7.1 순서도 분기별 시험 | FR-024 일부 |
 | S2-6 | `RevokeSessions` usecase + `worker admin revoke-sessions`(`--all`\|`--user`\|`--session`, `--dry-run`, `--yes`), 감사 `admin.sessions_revoked` | S2-1, S1-14 | 폐기 후 기존 쿠키가 새 익명 세션으로 처리, private `4401`, 롤백 시 감사 행 없음, 멱등 | ADR-028, ID-11, AC-022, FR-013 |
+
+#### S2 착수 정리 (2026-11-28)
+
+**S1 이 이미 닫은 것(S2 가 그대로 쓴다):** kernel(`Result`·`AppError`·`Clock`·`IdGenerator`·`UnitOfWork`·`ActorContext`·`AuditWriter`), config 로더·`_FILE`, db 풀·UoW·모듈별 마이그레이션 실행기, `events` 모듈(감사 기록), `FieldCipher`, 구조화 로그·`/healthz`·`/readyz`, 경계 검사 일체(`arch`·CQRS·purity·classification·계약 버전), testkit(`FakeClock`·`TestDb`·`FaultInjector`), CI 12잡.
+**S2 에서 처음 생기는 것:** 첫 제품 모듈(`modules/identity`), 첫 HTTP 라우트(Elysia `1.4.30` 은 의존에만 있고 라우트는 아직 없다), 첫 쿠키, 첫 외부 호출(GitHub), 첫 `identity` 마이그레이션.
+
+**착수 전 준비(작업 행이 아니라 입력):**
+
+| # | 준비 | 담당 | 근거 |
+|---|---|---|---|
+| P1 | **GitHub OAuth 앱 등록(개발용)** — callback `http://localhost:8080/api/auth/github/callback`, `GITHUB_CLIENT_ID/SECRET` 을 `.env` 에 둔다(운영용 앱은 S8 에서 별도). S2-3 시작 전까지 | 사용자 | 02 §6, 명세 체크리스트 |
+| P2 | **설정 키 추가** — 지금 api 스키마는 `DATABASE_URL`·`API_PORT` 뿐이다. `PUBLIC_ORIGIN`·`SESSION_COOKIE_NAME`·`SESSION_TTL_DAYS`·`GITHUB_CLIENT_ID/SECRET`·`GITHUB_REDIRECT_URI`·`OAUTH_STATE_SECRET`(32B 이상, 비밀)·`ADMIN_GITHUB_IDS`(숫자 ID) | S2-1·S2-3·S2-4 가 각자 | 01 §8 |
+| P3 | **TD-6 이월분** — B3 어댑터 스키마 객체 대조, `port-kinds.json`·`cqrs-exceptions.json` 형식 확정(실제 모듈이 처음 쓴다), B6 조립 경로 모호점 | S2-1 | [tech-debt TD-6](../domains/tech-debt.md), DV-005 |
+| P4 | **분류 맵 등록** — `identity.session`·`user_account`·`request_key` 의 컬럼 등급을 `classification.ts` 에 먼저 올린다(없으면 `check:classification` 이 실패) | S2-1 | S1-13, ADR-026 |
+| P5 | **PR 흐름 시작** — S2 부터는 `feat/…` 브랜치 → PR → squash. 첫 PR 에서 `migration-immutable`(PR 전용)이 처음 돈다 | 사용자 | 09 §4, TD-4 |
+
+**작업별 산출물** (설계 정본: [F10 identity](features/10-identity.md), [06 인증](06-auth.md), [03 API](03-api-contract.md)):
+
+| ID | 만들 것 | 핵심 설계 결정(이미 확정) | 시험으로 보일 것 |
+|---|---|---|---|
+| S2-1 | `modules/identity`: domain(`Session`·`UserAccount`·`TokenHash`·`ActorKey`…)·service(`SessionPolicy`·`DisplayNamePolicy`…)·port(`SessionRepository`·`SessionLookup`·`TokenGenerator`·`TokenHasher`)·`PgSessionRepository`·`Sha256TokenHasher`·usecase `IssueAnonymousSession`·`ResolveSession`·`TouchSession`, `identity` 마이그레이션(`session`·`user_account`·`request_key`) | 토큰 32B CSPRNG base64url, DB 는 SHA-256 해시만(`bytea` 유일). 만료 = `last_seen_at`+7일 슬라이딩, 갱신은 1시간에 한 번. 폐기 = 행 삭제가 아니라 `expires_at = now` | 토큰 원문이 DB·덤프에 없음, 만료 경계, 1시간 미만엔 `last_seen_at` 불변, B3 스키마 대조 통과 |
+| S2-2 | `GET /api/me`(`GetMe`) — 쿠키 없음→익명 세션 발급, 있음→유지. 쿠키 이름 운영 `__Host-sid`·개발 `sid`, `HttpOnly`·`Secure`(운영)·`SameSite=Lax`·`Path=/`·`Max-Age=7d` | 인증 조회는 읽기 포트로 쓰기 표를 읽는 "인증 조회 예외"(F10 §2.3). 첫 `apps/api` 라우트라 라우트 조립·오류→HTTP 매핑이 처음 실사용된다 | 발급·유지·속성 일치, 만료 쿠키는 새 익명 세션 |
+| S2-5 | 가드 체인 — Origin(쓰기만, 세션 조회 전)→Session→RateLimit(세션)→Schema→Authorization 순서 | 03 §7.1 순서도. `RateLimiter` 포트는 S1-8 의 메모리·Postgres 어댑터를 쓴다. 속도 제한 수치 확정은 S6-4 | 분기마다 시험: `403 origin_mismatch`·`401`·`429`·`400`·`403` |
+| S2-3 | GitHub 로그인: `BeginGithubLogin`(state+PKCE S256, 서명된 임시 쿠키 10분)·`CompleteGithubLogin`(콜백 검증·세션 회전)·`HmacOAuthStateCodec`·`HttpGithubClient` + `Logout`(즉시 만료·쿠키 만료, `Idempotency-Key` 면제)·`UpdateProfile`(`DisplayNamePolicy`, `request_key` 멱등) | 외부 호출은 트랜잭션 밖. 로그인 시 새 세션 발급 + 이전 익명 세션 즉시 만료(세션 고정 방지), 익명 글 귀속은 하지 않는다. `github_id` UNIQUE 로 동시 첫 로그인 한 건. IP·이메일·GitHub 토큰 미저장 | 06 §3.2 콜백 분기 전부(GitHub 은 대역), 동시 첫 로그인, `returnTo` 오픈 리다이렉트 차단, `timingSafeEqual`(길이 다르면 예외라 먼저 해시) |
+| S2-4 | `AdminPolicy`·`RequireAdmin` | 관리자 여부는 DB 에 저장하지 않고 `ADMIN_GITHUB_IDS`(숫자 ID)를 요청마다 판정 | 허용목록에 있으면 통과·없으면 403, 로그인 이름이 같아도 ID 가 다르면 거절 |
+| S2-6 (C층·후순위) | `RevokeSessions` + `worker admin revoke-sessions`(`--all`\|`--user`\|`--session`, `--dry-run`, `--yes`), 감사 `admin.sessions_revoked` | S1-14 의 `AuditWriter` 를 처음 실제 usecase 에 연결(AC-020 의 "시험이 만든 표" 한계가 여기서 풀린다). private WS `4401` 은 ws-gateway 가 생기는 S4 에서 완결 | 폐기 후 기존 쿠키는 새 익명 세션, 롤백 시 감사 행 없음, 멱등 |
+
+**결정(2026-11-28, 사용자 확정):** F10 의 **ID-07 로그아웃**(`POST /api/auth/logout`)과 **ID-08 표시 이름 변경**(`PUT /api/me/profile`, 로그인 전용·`Idempotency-Key`)은 배정된 행이 없던 계획 공백이었고, **S2-3 행에 포함**한다. 둘 다 `session`·`user_account`·`request_key` 만 만지고, 로그인만 있고 로그아웃이 없는 상태는 공개할 수 없으므로 A층에 속한다. ID-10(만료 세션 정리·익명화)은 S6-6 이 맡는다.
+
+**순서와 완료 판정:** S2-1 → S2-2 → S2-5 → S2-3(로그아웃·프로필 포함) → S2-4 → (S2-6). 의존상 S2-5 가 S2-3 보다 먼저인 것은 로그인 콜백도 가드 체인을 지나기 때문이다. S2 완료 = 위 시험 통과 + `identity` 관련 AC 행(AC-022 는 S2-6 까지) 추적표 갱신 + 새 편차 로그 기록 + CI 12잡 통과. 방문자가 볼 수 있는 결과는 아직 없다(첫 화면 연결은 S5) — 눈에 보이는 첫 지점은 S3(글 작성 → outbox → 읽기 모델).
 
 ### S3 — 첫 수직 조각 (가장 중요)
 | ID | 내용 | 의존 | 완료 기준 | 요구 |
